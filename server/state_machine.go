@@ -23,7 +23,7 @@ func Change(stm stateMachine) {
 			stm.handle(req, resp)
 		default:
 			logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
-			break
+			return
 		}
 	}
 
