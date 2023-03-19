@@ -1,0 +1,12 @@
+package server
+
+const (
+	STATE_INIT = iota
+	IN_CACHE
+	CHECK_RESP
+	IN_GLUE
+	IN_GLUE_CACHE
+	ITER
+	RET_RESP
+	MAX_STATE
+)
