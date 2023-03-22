@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"net"
 
 	"github.com/miekg/dns"
 )
@@ -17,8 +18,18 @@ func NewServer(listen string) *server {
 }
 
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	w.WriteMsg(r)
-	return
+	reply := &dns.Msg{}
+	reply.SetReply(r)
+	reply.Answer = append(reply.Answer, &dns.A{
+		Hdr: dns.RR_Header{
+			Name:     "www.baidu.com.",
+			Rrtype:   dns.TypeA,
+			Class:    dns.ClassINET,
+			Ttl:      60,
+			Rdlength: 4,
+		}, A: net.ParseIP("1.1.1.1"),
+	})
+	w.WriteMsg(reply)
 }
 
 func (s *server) Run() {
