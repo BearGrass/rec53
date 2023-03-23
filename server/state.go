@@ -10,3 +10,14 @@ const (
 	RET_RESP
 	MAX_STATE
 )
+
+const (
+	STATE_INIT_COMMEN_ERROR = -1
+	STATE_INIT_NO_ERROR     = 0
+)
+
+const (
+	IN_CACHE_COMMEN_ERROR = -1
+	IN_CACHE_HIT_CACHE    = 0
+	IN_CACHE_MISS_CACHE   = 1
+)
