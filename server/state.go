@@ -21,3 +21,10 @@ const (
 	IN_CACHE_HIT_CACHE    = 0
 	IN_CACHE_MISS_CACHE   = 1
 )
+
+const (
+	CHECK_RESP_COMMEN_ERROR = -1
+	CHECK_RESP_GET_ANS      = 0
+	CHECK_RESP_GET_CNAME    = 1
+	CHECK_RESP_GET_NS       = 2
+)
