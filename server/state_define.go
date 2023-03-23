@@ -79,3 +79,38 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 	}
 	return IN_CACHE_MISS_CACHE, nil
 }
+
+type checkRespState struct {
+	request  *dns.Msg
+	response *dns.Msg
+}
+
+func newCheckRespState(req, resp *dns.Msg) *checkRespState {
+	return &checkRespState{
+		request:  req,
+		response: resp,
+	}
+}
+
+//implement stateMachine interface
+func (s *checkRespState) getCurrentState() int {
+	return CHECK_RESP
+}
+
+func (s *checkRespState) getRequest() *dns.Msg {
+	return nil
+}
+
+func (s *checkRespState) getResponse() *dns.Msg {
+	return nil
+}
+
+func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+	if request == nil || response == nil {
+		return CHECK_RESP_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+	}
+	if response.Rcode == dns.RcodeSuccess {
+		return CHECK_RESP_GET_ANS, nil
+	}
+	return CHECK_RESP_GET_NS, nil
+}
