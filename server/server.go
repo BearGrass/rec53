@@ -4,6 +4,8 @@ import (
 	"log"
 	"net"
 
+	"rec53/logger"
+
 	"github.com/miekg/dns"
 )
 
@@ -19,7 +21,10 @@ func NewServer(listen string) *server {
 
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	reply := &dns.Msg{}
-	reply.SetReply(r)
+	stm := newStateInitState(r, reply)
+	if _, err := Change(stm); err != nil {
+		logger.Rec53Log.Sugar().Errorf("Change state error: %s", err.Error())
+	}
 	reply.Answer = append(reply.Answer, &dns.A{
 		Hdr: dns.RR_Header{
 			Name:     "www.baidu.com.",
