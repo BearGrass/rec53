@@ -28,3 +28,25 @@ const (
 	CHECK_RESP_GET_CNAME    = 1
 	CHECK_RESP_GET_NS       = 2
 )
+
+const (
+	IN_GLUE_COMMEN_ERROR = -1
+	IN_GLUE_EXIST        = 0
+	IN_GLUE_NOT_EXIST    = 1
+)
+
+const (
+	IN_GLUE_CACHE_COMMEN_ERROR = -1
+	IN_GLUE_CACHE_HIT_CACHE    = 0
+	IN_GLUE_CACHE_MISS_CACHE   = 1
+)
+
+const (
+	ITER_COMMEN_ERROR = -1
+	ITER_NO_ERROR     = 0
+)
+
+const (
+	RET_RESP_COMMEN_ERROR = -1
+	RET_RESP_NO_ERROR     = 0
+)

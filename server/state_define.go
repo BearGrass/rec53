@@ -109,8 +109,44 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	if request == nil || response == nil {
 		return CHECK_RESP_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	if response.Rcode == dns.RcodeSuccess {
-		return CHECK_RESP_GET_ANS, nil
+	if len(response.Answer) != 0 {
+		if response.Answer[len(response.Answer)-1].Header().Rrtype == request.Question[0].Qtype {
+			return CHECK_RESP_GET_ANS, nil
+		}
+		//TODO: another type
+		return CHECK_RESP_GET_CNAME, nil
 	}
 	return CHECK_RESP_GET_NS, nil
+}
+
+type inGlueState struct {
+	request  *dns.Msg
+	response *dns.Msg
+}
+
+func newInGlueState(req, resp *dns.Msg) *inGlueState {
+	return &inGlueState{
+		request:  req,
+		response: resp,
+	}
+}
+
+//implement stateMachine interface
+func (s *inGlueState) getCurrentState() int {
+	return IN_GLUE
+}
+
+func (s *inGlueState) getRequest() *dns.Msg {
+	return nil
+}
+
+func (s *inGlueState) getResponse() *dns.Msg {
+	return nil
+}
+
+func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+	if request == nil || response == nil {
+		return IN_GLUE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+	}
+	return IN_GLUE_EXIST, nil
 }

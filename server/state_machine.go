@@ -36,14 +36,54 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			}
 			switch ret {
 			case IN_CACHE_HIT_CACHE:
-				//TODO: new a state to handle cache hit
+				checkResp := newCheckRespState(stm.getRequest(), stm.getResponse())
+				stm = checkResp
 			case IN_CACHE_MISS_CACHE:
 				//TODO: new a state to handle cache miss
 			default:
 				logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
 				return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
 			}
-
+		case CHECK_RESP:
+			var (
+				ret int
+				err error
+			)
+			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
+				logger.Rec53Log.Sugar().Errorf("Handle state error %d", stm.getCurrentState())
+				return nil, fmt.Errorf("handle state error %d", stm.getCurrentState())
+			}
+			switch ret {
+			case CHECK_RESP_COMMEN_ERROR:
+				return stm.getResponse(), nil
+			case CHECK_RESP_GET_ANS:
+				//TODO: new a state to handle get answer
+			case CHECK_RESP_GET_CNAME:
+				//TODO: new a state to handle get cname
+			case CHECK_RESP_GET_NS:
+				//TODO: new a state to handle get ns
+			default:
+				logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
+				return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
+			}
+		case IN_GLUE:
+			var (
+				ret int
+				err error
+			)
+			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
+				logger.Rec53Log.Sugar().Errorf("Handle state error %d", stm.getCurrentState())
+				return nil, fmt.Errorf("handle state error %d", stm.getCurrentState())
+			}
+			switch ret {
+			case IN_GLUE_EXIST:
+				//TODO: new a state to handle exist glue
+			case IN_GLUE_NOT_EXIST:
+				//TODO: new a state to handle not exist glue
+			default:
+				logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
+				return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
+			}
 		default:
 			logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
 			return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
