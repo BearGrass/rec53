@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 
+	"rec53/utils"
+
 	"github.com/miekg/dns"
 )
 
@@ -122,12 +124,14 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 type inGlueState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	zoneList []string
 }
 
 func newInGlueState(req, resp *dns.Msg) *inGlueState {
 	return &inGlueState{
 		request:  req,
 		response: resp,
+		zoneList: []string{},
 	}
 }
 
@@ -148,5 +152,11 @@ func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
 		return IN_GLUE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	return IN_GLUE_EXIST, nil
+	if len(response.Ns) != 0 && len(response.Extra) != 0 {
+		//We got glue from cache or iterater
+		//get zone list
+		return IN_GLUE_EXIST, nil
+	}
+	s.zoneList = utils.GetZoneList(request.Question[0].Name)
+	return IN_GLUE_NOT_EXIST, nil
 }
