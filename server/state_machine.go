@@ -39,7 +39,8 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				checkResp := newCheckRespState(stm.getRequest(), stm.getResponse())
 				stm = checkResp
 			case IN_CACHE_MISS_CACHE:
-				//TODO: new a state to handle cache miss
+				inGlue := newInGlueState(stm.getRequest(), stm.getResponse())
+				stm = inGlue
 			default:
 				logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
 				return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
