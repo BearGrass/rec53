@@ -72,13 +72,11 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 	if request == nil || response == nil {
 		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	requestCache := GetCache()
-	if requestCache == nil {
-		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("requestCache is nil")
-	}
-	if _, ok := requestCache[request.Question[0].String()]; ok {
-		s.response.Answer = append(s.response.Answer, requestCache[request.Question[0].String()].Answer...)
-		return IN_CACHE_HIT_CACHE, nil
+	if msgInCache, ok := getCache(request.Question[0].String()); ok {
+		if len(msgInCache.Answer) != 0 {
+			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
+			return IN_CACHE_HIT_CACHE, nil
+		}
 	}
 	return IN_CACHE_MISS_CACHE, nil
 }
@@ -262,6 +260,12 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if newResponse.Question[0].Name != request.Question[0].Name {
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
+	if len(newResponse.Answer) != 0 {
+		setCache(newResponse.Question[0].Name, newResponse, newResponse.Answer[0].Header().Ttl)
+	}
+	if len(newResponse.Ns) != 0 && len(newResponse.Extra) != 0 {
+		setCache(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
+	}
 	s.response.Answer = append(s.response.Answer, newResponse.Answer...)
 	s.response.Ns = newResponse.Ns
 	s.response.Extra = newResponse.Extra
@@ -297,16 +301,14 @@ func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, err
 	if request == nil || response == nil {
 		return IN_GLUE_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	glueCache := GetCache()
-	if glueCache == nil {
-		return IN_GLUE_CACHE_COMMEN_ERROR, fmt.Errorf("glueCache is nil")
-	}
 	zoneList := utils.GetZoneList(request.Question[0].Name)
 	for _, zone := range zoneList {
-		if _, ok := glueCache[zone]; ok {
-			s.response.Ns = append(s.response.Ns, glueCache[zone].Ns...)
-			s.response.Extra = append(s.response.Extra, glueCache[zone].Extra...)
-			return IN_GLUE_CACHE_HIT_CACHE, nil
+		if msgInCache, ok := getCache(zone); ok {
+			if len(msgInCache.Ns) != 0 && len(msgInCache.Extra) != 0 {
+				s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
+				s.response.Extra = append(s.response.Extra, msgInCache.Extra...)
+				return IN_GLUE_CACHE_HIT_CACHE, nil
+			}
 		}
 	}
 	rootGlue := utils.GetRootGlue()
