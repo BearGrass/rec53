@@ -72,7 +72,9 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 	if request == nil || response == nil {
 		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	if msgInCache, ok := getCache(request.Question[0].String()); ok {
+	//fmt.Println("try to get cache", request.Question[0].Name)
+	if msgInCache, ok := getCache(request.Question[0].Name); ok {
+		//fmt.Println("get cache", request.Question[0].Name)
 		if len(msgInCache.Answer) != 0 {
 			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
 			return IN_CACHE_HIT_CACHE, nil
@@ -254,6 +256,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	}
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
+		//TODO: return servfail
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Rcode is not success")
 	}
 	//check the response is the same as the request
@@ -262,9 +265,11 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	}
 	if len(newResponse.Answer) != 0 {
 		setCache(newResponse.Question[0].Name, newResponse, newResponse.Answer[0].Header().Ttl)
+		// fmt.Println("set cache: ", newResponse.Question[0].Name, newResponse.Answer[0].Header().Ttl)
 	}
 	if len(newResponse.Ns) != 0 && len(newResponse.Extra) != 0 {
 		setCache(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
+		// fmt.Println("set cache: ", newResponse.Ns[0].Header().Name, newResponse.Ns[0].Header().Ttl)
 	}
 	s.response.Answer = append(s.response.Answer, newResponse.Answer...)
 	s.response.Ns = newResponse.Ns
@@ -304,6 +309,7 @@ func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, err
 	zoneList := utils.GetZoneList(request.Question[0].Name)
 	for _, zone := range zoneList {
 		if msgInCache, ok := getCache(zone); ok {
+			fmt.Println("get cache: ", zone, " in inGlueCacheState")
 			if len(msgInCache.Ns) != 0 && len(msgInCache.Extra) != 0 {
 				s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
 				s.response.Extra = append(s.response.Extra, msgInCache.Extra...)
