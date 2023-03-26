@@ -100,8 +100,8 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case IN_GLUE_CACHE_HIT_CACHE:
-			case IN_GLUE_CACHE_MISS_CACHE:
+			case IN_GLUE_CACHE_HIT_CACHE,
+				IN_GLUE_CACHE_MISS_CACHE:
 				stm = newIterState(stm.getRequest(), stm.getResponse())
 			default:
 				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)

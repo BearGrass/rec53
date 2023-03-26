@@ -1,83 +1,44 @@
 package server
 
-import "github.com/miekg/dns"
+import (
+	"time"
 
-//imlement dns cache
-type Cache interface {
-	//get dns cache
-	GetCache() map[string]*dns.Msg
-	//set dns cache
-	SetCache(key string, value *dns.Msg)
-	//delete dns cache
-	DeleteCache(key string)
-	//get dns cache size
-	GetCacheSize() int
-	//set dns cache size
-	SetCacheSize(size int)
+	"github.com/miekg/dns"
+	"github.com/patrickmn/go-cache"
+)
+
+var globalDnsCache = newCache()
+
+//imlement dns cache with go-cache library
+func newCache() *cache.Cache {
+	return cache.New(5*time.Minute, 10*time.Minute)
 }
 
-//dns cache
-type cache struct {
-	cacheSize int
-	cache     map[string]*dns.Msg
-}
-
-//get dns cache
-func (c *cache) GetCache() map[string]*dns.Msg {
-	return c.cache
-}
-
-//set dns cache
-func (c *cache) SetCache(key string, value *dns.Msg) {
-	c.cache[key] = value
-}
-
-//delete dns cache
-func (c *cache) DeleteCache(key string) {
-	delete(c.cache, key)
-}
-
-//get dns cache size
-func (c *cache) GetCacheSize() int {
-	return c.cacheSize
-}
-
-//set dns cache size
-func (c *cache) SetCacheSize(size int) {
-	c.cacheSize = size
-}
-
-//new dns cache
-func NewCache() Cache {
-	return &cache{
-		cache: make(map[string]*dns.Msg),
+func getCache(key string) (*dns.Msg, bool) {
+	value, found := globalDnsCache.Get(key)
+	if !found {
+		return nil, false
 	}
+	return value.(*dns.Msg), true
 }
 
-//get dns cache
-func GetCache() map[string]*dns.Msg {
-	return cacheInstance.GetCache()
+func setCache(key string, value interface{}, expire uint32) {
+	expireTime := time.Duration(expire) * time.Second
+	globalDnsCache.Set(key, value, expireTime)
 }
 
-//set dns cache
-func SetCache(key string, value *dns.Msg) {
-	cacheInstance.SetCache(key, value)
+func deleteCache(key string) {
+	globalDnsCache.Delete(key)
 }
 
-//delete dns cache
-func DeleteCache(key string) {
-	cacheInstance.DeleteCache(key)
+func deleteExpiredCache() {
+	globalDnsCache.DeleteExpired()
 }
 
-//get dns cache size
-func GetCacheSize() int {
-	return cacheInstance.GetCacheSize()
+func deleteAllCache() {
+	globalDnsCache.Flush()
 }
 
-//set dns cache size
-func SetCacheSize(size int) {
-	cacheInstance.SetCacheSize(size)
+func getCacheSize() int {
+	return globalDnsCache.ItemCount()
 }
-
-//dns cache instance
-var cacheInstance = NewCache()
