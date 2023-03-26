@@ -18,8 +18,8 @@ type stateMachine interface {
 func Change(stm stateMachine) (*dns.Msg, error) {
 	for {
 		st := stm.getCurrentState()
-		fmt.Println("===================debug\n", stm.getRequest(), stm.getResponse())
-		fmt.Println("===================debug")
+		//fmt.Println("===================debug\n", stm.getRequest(), stm.getResponse())
+		//fmt.Println("===================debug")
 		switch st {
 		case STATE_INIT:
 			if _, err := stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
@@ -63,7 +63,8 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CHECK_RESP_GET_ANS:
 				stm = newRetRespState(stm.getRequest(), stm.getResponse())
 			case CHECK_RESP_GET_CNAME:
-				stm.getRequest().Question[0].Name = stm.getResponse().Answer[0].(*dns.CNAME).Target
+				lastCname := stm.getResponse().Answer[len(stm.getResponse().Answer)-1]
+				stm.getRequest().Question[0].Name = lastCname.(*dns.CNAME).Target
 				stm = newInCacheState(stm.getRequest(), stm.getResponse())
 			case CHECK_RESP_GET_NS:
 				stm = newInGlueState(stm.getRequest(), stm.getResponse())

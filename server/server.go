@@ -2,7 +2,6 @@ package server
 
 import (
 	"log"
-	"net"
 
 	"rec53/logger"
 
@@ -25,15 +24,6 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if _, err := Change(stm); err != nil {
 		logger.Rec53Log.Sugar().Errorf("Change state error: %s", err.Error())
 	}
-	reply.Answer = append(reply.Answer, &dns.A{
-		Hdr: dns.RR_Header{
-			Name:     "www.baidu.com.",
-			Rrtype:   dns.TypeA,
-			Class:    dns.ClassINET,
-			Ttl:      60,
-			Rdlength: 4,
-		}, A: net.ParseIP("1.1.1.1"),
-	})
 	w.WriteMsg(reply)
 }
 
