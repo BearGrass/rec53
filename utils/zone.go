@@ -1,12 +1,14 @@
 package utils
 
-import "strings"
+import (
+	"strings"
+)
 
 func GetZoneList(domain string) []string {
 	zoneList := make([]string, 0)
 	zoneList = append(zoneList, domain)
 	for {
-		if domain == "." {
+		if len(domain) == 0 {
 			break
 		}
 		domain = domain[strings.Index(domain, ".")+1:]
