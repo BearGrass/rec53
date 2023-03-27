@@ -7,13 +7,17 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap"
+
 	"rec53/logger"
 	"rec53/server"
 )
 
 func main() {
 	flag.Parse()
-	logger.Init()
+	logger.InitLogger()
+	defer logger.Rec53Log.Sync()
+	logger.SetLogLevel(zap.DebugLevel)
 
 	rec53 := server.NewServer("127.0.0.1:5353")
 	rec53.Run()

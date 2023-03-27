@@ -23,7 +23,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 		switch st {
 		case STATE_INIT:
 			if _, err := stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			inCache := newInCacheState(stm.getRequest(), stm.getResponse())
@@ -34,7 +34,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
@@ -45,7 +45,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				inGlue := newInGlueState(stm.getRequest(), stm.getResponse())
 				stm = inGlue
 			default:
-				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case CHECK_RESP:
@@ -54,7 +54,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
@@ -69,7 +69,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CHECK_RESP_GET_NS:
 				stm = newInGlueState(stm.getRequest(), stm.getResponse())
 			default:
-				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case IN_GLUE:
@@ -78,7 +78,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
@@ -87,7 +87,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case IN_GLUE_NOT_EXIST:
 				stm = newInGlueCacheState(stm.getRequest(), stm.getResponse())
 			default:
-				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case IN_GLUE_CACHE:
@@ -96,7 +96,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
@@ -104,7 +104,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				IN_GLUE_CACHE_MISS_CACHE:
 				stm = newIterState(stm.getRequest(), stm.getResponse())
 			default:
-				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case ITER:
@@ -113,7 +113,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if ret, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
@@ -125,7 +125,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case ITER_NO_ERROR:
 				stm = newCheckRespState(stm.getRequest(), stm.getResponse())
 			default:
-				logger.Rec53Log.Sugar().Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case RET_RESP:
@@ -133,12 +133,12 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				err error
 			)
 			if _, err = stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
-				logger.Rec53Log.Sugar().Errorf("Handle state error %d %v", stm.getCurrentState(), err)
+				logger.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			return stm.getResponse(), nil
 		default:
-			logger.Rec53Log.Sugar().Errorf("Wrong state %d", stm.getCurrentState())
+			logger.Rec53Log.Errorf("Wrong state %d", stm.getCurrentState())
 			return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
 		}
 	}
