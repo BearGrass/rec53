@@ -22,7 +22,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	reply := &dns.Msg{}
 	stm := newStateInitState(r, reply)
 	if _, err := Change(stm); err != nil {
-		logger.Rec53Log.Sugar().Errorf("Change state error: %s", err.Error())
+		logger.Rec53Log.Errorf("Change state error: %s", err.Error())
 	}
 	w.WriteMsg(reply)
 }
