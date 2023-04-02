@@ -9,15 +9,17 @@ import (
 
 	"go.uber.org/zap"
 
-	"rec53/logger"
+	"rec53/monitor"
 	"rec53/server"
 )
 
 func main() {
 	flag.Parse()
-	logger.InitLogger()
-	defer logger.Rec53Log.Sync()
-	logger.SetLogLevel(zap.DebugLevel)
+	monitor.InitLogger()
+	defer monitor.Rec53Log.Sync()
+	monitor.SetLogLevel(zap.DebugLevel)
+
+	monitor.InitMetric()
 
 	rec53 := server.NewServer("127.0.0.1:5353")
 	rec53.Run()

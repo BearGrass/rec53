@@ -1,4 +1,4 @@
-package logger
+package monitor
 
 import (
 	"flag"
@@ -16,8 +16,8 @@ func InitLogger() {
 	writeSyncer := getLogWriter()
 	encoder := getEncoder()
 	core := zapcore.NewCore(encoder, writeSyncer, zapcore.DebugLevel)
-	logger := zap.New(core, zap.AddCaller())
-	Rec53Log = logger.Sugar()
+	monitor := zap.New(core, zap.AddCaller())
+	Rec53Log = monitor.Sugar()
 }
 
 func getEncoder() zapcore.Encoder {
@@ -28,14 +28,14 @@ func getEncoder() zapcore.Encoder {
 }
 
 func getLogWriter() zapcore.WriteSyncer {
-	lumberJackLogger := &lumberjack.Logger{
+	lumberJackmonitor := &lumberjack.Logger{
 		Filename:   *logFile,
 		MaxSize:    1,
 		MaxBackups: 5,
 		MaxAge:     30,
 		Compress:   false,
 	}
-	return zapcore.AddSync(lumberJackLogger)
+	return zapcore.AddSync(lumberJackmonitor)
 }
 
 func SetLogLevel(level zapcore.Level) {
