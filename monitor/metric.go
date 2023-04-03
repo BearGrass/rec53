@@ -36,5 +36,5 @@ func InitMetric() {
 	Rec53Metric.Register()
 
 	http.Handle("/metric", promhttp.Handler())
-	go http.ListenAndServe(":9999", nil)
+	go http.ListenAndServe(":9100", nil)
 }
