@@ -251,10 +251,12 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	dnsClient.SingleInflight = true
 
 	//send query to the best ip
+	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
 	newResponse, _, err := dnsClient.Exchange(newQuery, bestAddr+":53")
 	if err != nil {
 		return ITER_COMMEN_ERROR, err
 	}
+	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
 		//TODO: return servfail
