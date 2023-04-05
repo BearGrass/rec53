@@ -21,7 +21,7 @@ func main() {
 
 	monitor.InitMetric()
 
-	rec53 := server.NewServer("127.0.0.1:5353")
+	rec53 := server.NewServer(":5353")
 	rec53.Run()
 
 	sig := make(chan os.Signal, 1)

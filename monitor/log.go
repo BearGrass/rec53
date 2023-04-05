@@ -8,7 +8,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var logFile = flag.String("rec53.log", "/home/long/log/rec53.log", "Log file path")
+var logFile = flag.String("rec53.log", "./log/rec53.log", "Log file path")
 
 var Rec53Log *zap.SugaredLogger
 

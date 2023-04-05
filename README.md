@@ -18,6 +18,6 @@ docker run -d -p 9090:9090 \
 prom/prometheus --config.file=/etc/prometheus/prometheus.yml
 
 * view prometheus : http://127.0.0.1:9090/graph
-* view client: http://127.0.0.1:9090/metric
+* view client: http://127.0.0.1:9999/metric
 * docker visit vm: https://cloud.tencent.com/developer/article/2240955
 * prometheus config: https://www.prometheus.wang/configuration/demo.html
