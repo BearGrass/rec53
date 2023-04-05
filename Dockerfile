@@ -1,15 +1,18 @@
-# write a docker file for prometheus
-# Path: Dockerfile
-FROM prom/prometheus
-ADD etc/prometheus.yml /etc/prometheus/prometheus.yml
-EXPOSE 9090
-VOLUME ["/etc/prometheus"]
-ENTRYPOINT ["/bin/prometheus"]
-CMD ["--config.file=/etc/prometheus/prometheus.yml"]
+FROM golang:alpine
+# 为我们的镜像设置必要的环境变量
+ENV GO111MODULE=on \
+    CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64 \
+    GOPROXY="https://proxy.golang.com.cn,direct"
+# 移动到工作目录：/build
+WORKDIR /build
+COPY . .
+RUN go build cmd/rec53.go
 
+WORKDIR /dist
+RUN cp /build/rec53 .
 
+EXPOSE 5353 9999
 
-# docker run -d -p 9090:9090 --name prometheus \
-# --add-host="host.docker.internal:host-gateway" \
-# -v /home/long/goapp/src/rec53/etc/prometheus.yml:/etc/prometheus/prometheus.yml  \
-# prom/prometheus --config.file=/etc/prometheus/prometheus.yml
+ENTRYPOINT ["/dist/rec53"]
