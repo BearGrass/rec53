@@ -19,14 +19,15 @@ func (m *Metric) OutCounterAdd(stage string, name string, qtype string, code str
 	OutCounter.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype, "code": code}).Inc()
 }
 
-func (m *Metric) SetQpsGauge(action string, value float64) {
-	QpsGauge.With(prometheus.Labels{"action": action}).Set(value)
+func (m *Metric) LatencyHistogramObserve(stage string, name string, qtype string, code string, latency float64) {
+	LatencyHistogramObserver.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype, "code": code}).Observe(latency)
 }
 
 //register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
 	m.reg.MustRegister(OutCounter)
+	m.reg.MustRegister(LatencyHistogramObserver)
 }
 
 func InitMetric() {

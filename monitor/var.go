@@ -17,12 +17,14 @@ var (
 		},
 		[]string{"stage", "name", "type", "code"},
 	)
-	QpsGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "rec53_qps",
-			Help: "rec53 qps",
+
+	LatencyHistogramObserver = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "rec53_latency",
+			Help:    "rec53 latency",
+			Buckets: []float64{10, 50, 200, 1000, 3000}, // ms
 		},
-		[]string{"action"},
+		[]string{"stage", "name", "type", "code"},
 	)
 
 	Rec53Metric *Metric
