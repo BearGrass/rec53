@@ -244,6 +244,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	}
 	//update the ip quality
 	globalIPPool.updateIPQuality(theBestIP, int32(rtt/time.Millisecond))
+	monitor.Rec53Metric.IPQualityGaugeSet(theBestIP, float64(rtt/time.Millisecond))
 
 	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 	//check the response
