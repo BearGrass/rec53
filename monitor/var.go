@@ -26,6 +26,13 @@ var (
 		},
 		[]string{"stage", "name", "type", "code"},
 	)
+	IPQuality = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "rec53_ip_quality",
+			Help: "rec53 ip quality",
+		},
+		[]string{"ip"},
+	)
 
 	Rec53Metric *Metric
 )
