@@ -185,51 +185,22 @@ func (s *iterState) getResponse() *dns.Msg {
 	return s.response
 }
 
-type ipSeed struct {
-	ip  string
-	ttl int
-}
-
-func getBestAddress(response *dns.Msg) (string, error) {
-	if response == nil {
-		return "", fmt.Errorf("response is nil")
-	}
-	if len(response.Extra) == 0 {
-		return "", fmt.Errorf("response.Extra is nil")
-	}
-	var bestAddr string
-	var bestTTL int = utils.MAX_TIMEOUT
-	// Concurrent func to get the best address
-	ttlChan := make(chan ipSeed, len(response.Extra))
-	cnt := 0
+func getIPListFromResponse(response *dns.Msg) []string {
+	var ipList []string
 	for _, extra := range response.Extra {
 		if extra.Header().Rrtype == dns.TypeA {
-			addr := extra.(*dns.A).A.String()
-			cnt++
-			if bestAddr == "" {
-				bestAddr = addr
-			}
-			//try to ping the addr
-			go func(addr string) {
-				ttl, err := utils.Hc(addr)
-				if err != nil {
-					ttlChan <- ipSeed{ip: addr, ttl: utils.MAX_TIMEOUT}
-				}
-				ttlChan <- ipSeed{ip: addr, ttl: ttl}
-			}(addr)
+			ipList = append(ipList, extra.(*dns.A).A.String())
 		}
 	}
-	for i := 0; i < cnt; i++ {
-		ttl := <-ttlChan
-		if ttl.ttl < bestTTL {
-			bestTTL = ttl.ttl
-			bestAddr = ttl.ip
-		}
+	return ipList
+}
+
+func getBestAddress(ipList []string) (string, string, error) {
+	if len(ipList) == 0 {
+		return "", "", fmt.Errorf("no ip in extra")
 	}
-	if bestAddr == "" {
-		return "", fmt.Errorf("bestAddr is nil")
-	}
-	return bestAddr, nil
+	bestIP, oldBestIP := globalIPPool.getBestIPs(ipList)
+	return bestIP, oldBestIP, nil
 }
 
 func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
@@ -241,7 +212,8 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	newQuery.RecursionDesired = false
 	newQuery.Id = dns.Id()
 	//check the best ip in the extra in response
-	bestAddr, err := getBestAddress(response)
+	ipList := getIPListFromResponse(response)
+	bestAddr, secondAddr, err := getBestAddress(ipList)
 	if err != nil {
 		return ITER_COMMEN_ERROR, err
 	}
@@ -251,11 +223,28 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	dnsClient.SingleInflight = true
 
 	//send query to the best ip
+	theBestIP := bestAddr
 	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
-	newResponse, _, err := dnsClient.Exchange(newQuery, bestAddr+":53")
+	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":53")
 	if err != nil {
-		return ITER_COMMEN_ERROR, err
+		ipq := globalIPPool.GetIPQuality(bestAddr)
+		ipq.SetLatency(MAX_IP_LATENCY)
+		//try to use the second ip
+		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":53")
+		if err != nil {
+			ipq := globalIPPool.GetIPQuality(secondAddr)
+			ipq.SetLatency(MAX_IP_LATENCY)
+			return ITER_COMMEN_ERROR, err
+		}
+		theBestIP = secondAddr
 	}
+
+	if !globalIPPool.isTheIPInit(theBestIP) {
+		globalIPPool.UpIPsQuality(ipList)
+	}
+	//update the ip quality
+	globalIPPool.updateIPQuality(theBestIP, int32(rtt/time.Millisecond))
+
 	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
