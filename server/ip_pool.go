@@ -15,6 +15,13 @@ type IPQuality struct {
 	latency int32
 }
 
+func NewIPQuality() *IPQuality {
+	return &IPQuality{
+		isInit:  true,
+		latency: INIT_IP_LATENCY,
+	}
+}
+
 func (ipq *IPQuality) Init() {
 	ipq.isInit = true
 	ipq.latency = INIT_IP_LATENCY
@@ -125,4 +132,14 @@ func (ipp *IPPool) getBestIPs(ips []string) (string, string) {
 		}
 	}
 	return bestIP, bestIPWithoutInit
+}
+
+func (ipp *IPPool) GetPrefetchIPs(bestIP string) []string {
+	var prefetchIPs []string
+	for ip, ipq := range ipp.pool {
+		if ipq.latency < ipp.pool[bestIP].latency && ip != bestIP {
+			prefetchIPs = append(prefetchIPs, ip)
+		}
+	}
+	return prefetchIPs
 }

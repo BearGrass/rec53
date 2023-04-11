@@ -195,11 +195,28 @@ func getIPListFromResponse(response *dns.Msg) []string {
 	return ipList
 }
 
-func getBestAddress(ipList []string) (string, string, error) {
+func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 	if len(ipList) == 0 {
 		return "", "", fmt.Errorf("no ip in extra")
 	}
 	bestIP, oldBestIP := globalIPPool.getBestIPs(ipList)
+	if bestIP != "" {
+		IPs := globalIPPool.GetPrefetchIPs(bestIP)
+		for _, ip := range IPs {
+			go func(ip string) {
+				dnsClient := &dns.Client{}
+				dnsClient.Net = "udp"
+				dnsClient.Timeout = 3 * time.Second
+				_, rtt, err := dnsClient.Exchange(&dns.Msg{}, ip+":53")
+				if err != nil {
+					monitor.Rec53Log.Errorf("prefetch ip %s error %s", ip, err.Error())
+				}
+				readyToUpdataIPQuality := NewIPQuality()
+				readyToUpdataIPQuality.SetLatencyAndState(int32(rtt / time.Millisecond))
+				globalIPPool.SetIPQuality(ip, readyToUpdataIPQuality)
+			}(ip)
+		}
+	}
 	return bestIP, oldBestIP, nil
 }
 
@@ -213,7 +230,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	newQuery.Id = dns.Id()
 	//check the best ip in the extra in response
 	ipList := getIPListFromResponse(response)
-	bestAddr, secondAddr, err := getBestAddress(ipList)
+	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
 	if err != nil {
 		return ITER_COMMEN_ERROR, err
 	}
