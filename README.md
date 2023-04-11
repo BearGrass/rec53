@@ -9,7 +9,7 @@ hello world!
 * use start_image.sh to start a prometheus docker with specified yml and port
 
 ## bug
-* query www.baidu.com txt will crash
+* query www.huawei.com has bug
 
 ## start prometheus
 docker run -d -p 9090:9090 \
