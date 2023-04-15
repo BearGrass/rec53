@@ -3,6 +3,8 @@ package server
 import (
 	"sync"
 	"sync/atomic"
+
+	"rec53/monitor"
 )
 
 const (
@@ -130,14 +132,16 @@ func (ipp *IPPool) getBestIPs(ips []string) (string, string) {
 			bestIPWithoutInit = ip
 			bestLatencyWithoutInit = currentLatency
 		}
+		monitor.Rec53Log.Debug(ip, ",", ipq.GetLatency())
 	}
 	return bestIP, bestIPWithoutInit
 }
 
 func (ipp *IPPool) GetPrefetchIPs(bestIP string) []string {
 	var prefetchIPs []string
+	theBestLatency := ipp.pool[bestIP].latency
 	for ip, ipq := range ipp.pool {
-		if ipq.latency < ipp.pool[bestIP].latency && ip != bestIP {
+		if ipq.latency < theBestLatency && int32(float32(ipq.latency)/0.9) > theBestLatency && ip != bestIP {
 			prefetchIPs = append(prefetchIPs, ip)
 		}
 	}
