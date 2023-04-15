@@ -231,7 +231,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	//check the best ip in the extra in response
 	ipList := getIPListFromResponse(response)
 	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
-	if err != nil {
+	if bestAddr == "" || err != nil {
 		return ITER_COMMEN_ERROR, err
 	}
 	dnsClient := &dns.Client{}
@@ -247,6 +247,9 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		ipq := globalIPPool.GetIPQuality(bestAddr)
 		ipq.SetLatency(MAX_IP_LATENCY)
 		//try to use the second ip
+		if secondAddr == "" {
+			return ITER_COMMEN_ERROR, err
+		}
 		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":53")
 		if err != nil {
 			ipq := globalIPPool.GetIPQuality(secondAddr)
@@ -267,6 +270,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
 		//TODO: return servfail
+		s.response.Rcode = newResponse.Rcode
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Rcode is not success")
 	}
 	//check the response is the same as the request
