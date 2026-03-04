@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,12 +36,34 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(IPQuality)
 }
 
+// MetricServer holds the HTTP server for metrics
+var MetricServer *http.Server
+
+// InitMetric initializes metrics with default address ":9999"
 func InitMetric() {
+	InitMetricWithAddr(":9999")
+}
+
+// InitMetricWithAddr initializes metrics with a custom address
+func InitMetricWithAddr(addr string) {
 	Rec53Metric = &Metric{
 		reg: prometheus.DefaultRegisterer,
 	}
 	Rec53Metric.Register()
 
 	http.Handle("/metric", promhttp.Handler())
-	go http.ListenAndServe(":9999", nil)
+	MetricServer = &http.Server{Addr: addr}
+	go func() {
+		if err := MetricServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			Rec53Log.Errorf("Metrics server error: %s", err.Error())
+		}
+	}()
+}
+
+// ShutdownMetric gracefully shuts down the metrics server
+func ShutdownMetric(ctx context.Context) error {
+	if MetricServer != nil {
+		return MetricServer.Shutdown(ctx)
+	}
+	return nil
 }
