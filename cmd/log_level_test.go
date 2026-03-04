@@ -16,7 +16,7 @@ func TestParseLogLevel(t *testing.T) {
 		{"warn", zap.NewAtomicLevelAt(zap.WarnLevel)},
 		{"error", zap.NewAtomicLevelAt(zap.ErrorLevel)},
 		{"unknown", zap.NewAtomicLevelAt(zap.InfoLevel)}, // default case
-		{"", zap.NewAtomicLevelAt(zap.InfoLevel)},         // empty string
+		{"", zap.NewAtomicLevelAt(zap.InfoLevel)},        // empty string
 		// Case-insensitive tests
 		{"DEBUG", zap.NewAtomicLevelAt(zap.DebugLevel)},
 		{"INFO", zap.NewAtomicLevelAt(zap.InfoLevel)},

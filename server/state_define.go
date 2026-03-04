@@ -22,7 +22,7 @@ func newStateInitState(req, resp *dns.Msg) *stateInitState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *stateInitState) getCurrentState() int {
 	return STATE_INIT
 }
@@ -56,7 +56,7 @@ func newInCacheState(req, resp *dns.Msg) *inCacheState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *inCacheState) getCurrentState() int {
 	return IN_CACHE
 }
@@ -96,7 +96,7 @@ func newCheckRespState(req, resp *dns.Msg) *checkRespState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *checkRespState) getCurrentState() int {
 	return CHECK_RESP
 }
@@ -135,7 +135,7 @@ func newInGlueState(req, resp *dns.Msg) *inGlueState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *inGlueState) getCurrentState() int {
 	return IN_GLUE
 }
@@ -172,7 +172,7 @@ func newIterState(req, resp *dns.Msg) *iterState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *iterState) getCurrentState() int {
 	return ITER
 }
@@ -303,7 +303,7 @@ func newInGlueCacheState(req, resp *dns.Msg) *inGlueCacheState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *inGlueCacheState) getCurrentState() int {
 	return IN_GLUE_CACHE
 }
@@ -349,7 +349,7 @@ func newRetRespState(req, resp *dns.Msg) *retRespState {
 	}
 }
 
-//implement stateMachine interface
+// implement stateMachine interface
 func (s *retRespState) getCurrentState() int {
 	return RET_RESP
 }
