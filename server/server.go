@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,10 +12,11 @@ import (
 )
 
 type server struct {
-	listen string
-	udpSrv *dns.Server
-	tcpSrv *dns.Server
-	wg     sync.WaitGroup
+	listen  string
+	udpSrv  *dns.Server
+	tcpSrv  *dns.Server
+	wg      sync.WaitGroup
+	errChan chan error
 }
 
 func NewServer(listen string) *server {
@@ -37,24 +38,38 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(reply)
 }
 
-func (s *server) Run() {
+// Run starts the DNS server listeners and returns an error channel.
+// Errors during startup or runtime are sent to the returned channel.
+// The channel is closed when both UDP and TCP servers have stopped.
+func (s *server) Run() <-chan error {
+	// Create servers before starting goroutines to avoid race with Shutdown()
+	s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
+	s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
+
+	s.errChan = make(chan error, 2)
 	s.wg.Add(2)
 
 	go func() {
 		defer s.wg.Done()
-		s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
 		if err := s.udpSrv.ListenAndServe(); err != nil {
-			log.Fatalf("Failed to set udp listener %s\n", err.Error())
+			s.errChan <- fmt.Errorf("udp listener: %w", err)
 		}
 	}()
 
 	go func() {
 		defer s.wg.Done()
-		s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
 		if err := s.tcpSrv.ListenAndServe(); err != nil {
-			log.Fatalf("Failed to set tcp listener %s\n", err.Error())
+			s.errChan <- fmt.Errorf("tcp listener: %w", err)
 		}
 	}()
+
+	// Close errChan when both servers have stopped
+	go func() {
+		s.wg.Wait()
+		close(s.errChan)
+	}()
+
+	return s.errChan
 }
 
 // Shutdown gracefully shuts down the DNS server
