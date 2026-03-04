@@ -89,6 +89,11 @@ func (s *server) Shutdown(ctx context.Context) error {
 
 	s.wg.Wait()
 
+	// Shutdown IP pool prefetch goroutines
+	if err := globalIPPool.Shutdown(ctx); err != nil {
+		errs = append(errs, err)
+	}
+
 	if len(errs) > 0 {
 		return errs[0]
 	}
