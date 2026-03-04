@@ -202,20 +202,7 @@ func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 	bestIP, oldBestIP := globalIPPool.getBestIPs(ipList)
 	if bestIP != "" {
 		IPs := globalIPPool.GetPrefetchIPs(bestIP)
-		for _, ip := range IPs {
-			go func(ip string) {
-				dnsClient := &dns.Client{}
-				dnsClient.Net = "udp"
-				dnsClient.Timeout = 3 * time.Second
-				_, rtt, err := dnsClient.Exchange(&dns.Msg{}, ip+":53")
-				if err != nil {
-					monitor.Rec53Log.Errorf("prefetch ip %s error %s", ip, err.Error())
-				}
-				readyToUpdataIPQuality := NewIPQuality()
-				readyToUpdataIPQuality.SetLatencyAndState(int32(rtt / time.Millisecond))
-				globalIPPool.SetIPQuality(ip, readyToUpdataIPQuality)
-			}(ip)
-		}
+		globalIPPool.PrefetchIPs(IPs)
 	}
 	return bestIP, oldBestIP, nil
 }
