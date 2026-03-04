@@ -44,15 +44,22 @@ func main() {
 
 	// Start DNS server
 	rec53 := server.NewServer(*listenAddr)
-	rec53.Run()
+	errChan := rec53.Run()
 
 	monitor.Rec53Log.Infof("rec53 started, listening on %s, metrics on %s", *listenAddr, *metricAddr)
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal or server error
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	s := <-sig
-	monitor.Rec53Log.Infof("Signal (%v) received, shutting down gracefully", s)
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			monitor.Rec53Log.Errorf("Server error: %s", err.Error())
+		}
+	case s := <-sig:
+		monitor.Rec53Log.Infof("Signal (%v) received, shutting down gracefully", s)
+	}
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

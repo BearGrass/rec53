@@ -9,7 +9,7 @@ import (
 
 var globalDnsCache = newCache()
 
-//imlement dns cache with go-cache library
+// imlement dns cache with go-cache library
 func newCache() *cache.Cache {
 	return cache.New(5*time.Minute, 10*time.Minute)
 }
