@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"log"
+	"sync"
 	"time"
 
 	"rec53/monitor"
@@ -11,6 +13,9 @@ import (
 
 type server struct {
 	listen string
+	udpSrv *dns.Server
+	tcpSrv *dns.Server
+	wg     sync.WaitGroup
 }
 
 func NewServer(listen string) *server {
@@ -33,17 +38,44 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func (s *server) Run() {
+	s.wg.Add(2)
+
 	go func() {
-		srv := &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
-		if err := srv.ListenAndServe(); err != nil {
+		defer s.wg.Done()
+		s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
+		if err := s.udpSrv.ListenAndServe(); err != nil {
 			log.Fatalf("Failed to set udp listener %s\n", err.Error())
 		}
 	}()
 
 	go func() {
-		srv := &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
-		if err := srv.ListenAndServe(); err != nil {
+		defer s.wg.Done()
+		s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
+		if err := s.tcpSrv.ListenAndServe(); err != nil {
 			log.Fatalf("Failed to set tcp listener %s\n", err.Error())
 		}
 	}()
+}
+
+// Shutdown gracefully shuts down the DNS server
+func (s *server) Shutdown(ctx context.Context) error {
+	var errs []error
+
+	if s.udpSrv != nil {
+		if err := s.udpSrv.ShutdownContext(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.tcpSrv != nil {
+		if err := s.tcpSrv.ShutdownContext(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	s.wg.Wait()
+
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
