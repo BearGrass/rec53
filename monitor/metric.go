@@ -28,7 +28,7 @@ func (m *Metric) IPQualityGaugeSet(ip string, quality float64) {
 	IPQuality.With(prometheus.Labels{"ip": ip}).Set(quality)
 }
 
-//register metric
+// register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
 	m.reg.MustRegister(OutCounter)
