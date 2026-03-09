@@ -63,8 +63,17 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CHECK_RESP_GET_ANS:
 				stm = newRetRespState(stm.getRequest(), stm.getResponse())
 			case CHECK_RESP_GET_CNAME:
-				lastCname := stm.getResponse().Answer[len(stm.getResponse().Answer)-1]
-				stm.getRequest().Question[0].Name = lastCname.(*dns.CNAME).Target
+				// Find the CNAME record in the answer
+				var cnameTarget string
+				for _, rr := range stm.getResponse().Answer {
+					if cname, ok := rr.(*dns.CNAME); ok {
+						cnameTarget = cname.Target
+						break
+					}
+				}
+				if cnameTarget != "" {
+					stm.getRequest().Question[0].Name = cnameTarget
+				}
 				stm = newInCacheState(stm.getRequest(), stm.getResponse())
 			case CHECK_RESP_GET_NS:
 				stm = newInGlueState(stm.getRequest(), stm.getResponse())

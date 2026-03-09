@@ -99,3 +99,21 @@ func (s *server) Shutdown(ctx context.Context) error {
 	}
 	return nil
 }
+
+// UDPAddr returns the UDP server's listening address.
+// Returns empty string if server is not running.
+func (s *server) UDPAddr() string {
+	if s.udpSrv != nil && s.udpSrv.PacketConn != nil {
+		return s.udpSrv.PacketConn.LocalAddr().String()
+	}
+	return ""
+}
+
+// TCPAddr returns the TCP server's listening address.
+// Returns empty string if server is not running.
+func (s *server) TCPAddr() string {
+	if s.tcpSrv != nil && s.tcpSrv.Listener != nil {
+		return s.tcpSrv.Listener.Addr().String()
+	}
+	return ""
+}
