@@ -22,9 +22,26 @@ func getCache(key string) (*dns.Msg, bool) {
 	return value.(*dns.Msg), true
 }
 
+// getCacheCopy returns a deep copy of the cached message to prevent
+// concurrent modification issues.
+func getCacheCopy(key string) (*dns.Msg, bool) {
+	msg, found := getCache(key)
+	if !found {
+		return nil, false
+	}
+	// Create a copy of the message
+	return msg.Copy(), true
+}
+
 func setCache(key string, value interface{}, expire uint32) {
 	expireTime := time.Duration(expire) * time.Second
 	globalDnsCache.Set(key, value, expireTime)
+}
+
+// setCacheCopy stores a copy of the message to prevent
+// the cached message from being modified later.
+func setCacheCopy(key string, value *dns.Msg, expire uint32) {
+	setCache(key, value.Copy(), expire)
 }
 
 func deleteCache(key string) {
