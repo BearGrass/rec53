@@ -74,7 +74,8 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	monitor.Rec53Log.Debugf("try to get cache %s", request.Question[0].Name)
-	if msgInCache, ok := getCache(request.Question[0].Name); ok {
+	// Use getCacheCopy to avoid modifying cached message
+	if msgInCache, ok := getCacheCopy(request.Question[0].Name); ok {
 		monitor.Rec53Log.Debugf("get cache %s", request.Question[0].Name)
 		if len(msgInCache.Answer) != 0 {
 			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
@@ -215,16 +216,21 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	newQuery.SetQuestion(request.Question[0].Name, request.Question[0].Qtype)
 	newQuery.RecursionDesired = false
 	newQuery.Id = dns.Id()
+	// Set EDNS0 with larger buffer size to handle larger responses
+	newQuery.SetEdns0(4096, false)
+
 	//check the best ip in the extra in response
 	ipList := getIPListFromResponse(response)
 	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
 	if bestAddr == "" || err != nil {
 		return ITER_COMMEN_ERROR, err
 	}
-	dnsClient := &dns.Client{}
-	dnsClient.Net = "udp"
-	dnsClient.Timeout = 5 * time.Second
-	dnsClient.SingleInflight = true
+	dnsClient := &dns.Client{
+		Net:            "udp",
+		Timeout:        5 * time.Second,
+		SingleInflight: true,
+		UDPSize:        4096, // Set larger UDP buffer size for EDNS
+	}
 
 	//send query to the best ip
 	theBestIP := bestAddr
@@ -261,15 +267,20 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Rcode is not success")
 	}
 	//check the response is the same as the request
+	if len(newResponse.Question) == 0 {
+		return ITER_COMMEN_ERROR, fmt.Errorf("response has no question")
+	}
 	if newResponse.Question[0].Name != request.Question[0].Name {
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
 	if len(newResponse.Answer) != 0 {
-		setCache(newResponse.Question[0].Name, newResponse, newResponse.Answer[0].Header().Ttl)
+		// Use setCacheCopy to store a copy of the message
+		setCacheCopy(newResponse.Question[0].Name, newResponse, newResponse.Answer[0].Header().Ttl)
 		monitor.Rec53Log.Debug("set cache: ", newResponse.Question[0].Name, newResponse.Answer[0].Header().Ttl)
 	}
 	if len(newResponse.Ns) != 0 && len(newResponse.Extra) != 0 {
-		setCache(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
+		// Use setCacheCopy to store a copy of the message
+		setCacheCopy(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
 		monitor.Rec53Log.Debug("set cache: ", newResponse.Ns[0].Header().Name, newResponse.Ns[0].Header().Ttl)
 	}
 	s.response.Answer = append(s.response.Answer, newResponse.Answer...)
@@ -309,7 +320,8 @@ func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, err
 	}
 	zoneList := utils.GetZoneList(request.Question[0].Name)
 	for _, zone := range zoneList {
-		if msgInCache, ok := getCache(zone); ok {
+		// Use getCacheCopy to avoid modifying cached message
+		if msgInCache, ok := getCacheCopy(zone); ok {
 			monitor.Rec53Log.Debug("get cache: ", zone, " in inGlueCacheState")
 			if len(msgInCache.Ns) != 0 && len(msgInCache.Extra) != 0 {
 				s.response.Ns = append(s.response.Ns, msgInCache.Ns...)

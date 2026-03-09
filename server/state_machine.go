@@ -8,6 +8,11 @@ import (
 	"github.com/miekg/dns"
 )
 
+const (
+	// MaxIterations limits the number of state machine iterations to prevent infinite loops
+	MaxIterations = 50
+)
+
 type stateMachine interface {
 	getCurrentState() int
 	getRequest() *dns.Msg
@@ -15,11 +20,21 @@ type stateMachine interface {
 	handle(request *dns.Msg, response *dns.Msg) (int, error)
 }
 
+// Change executes the state machine until a final state is reached.
+// It includes protection against infinite loops via iteration count and CNAME cycle detection.
 func Change(stm stateMachine) (*dns.Msg, error) {
+	// Track visited domains for CNAME cycle detection
+	visitedDomains := make(map[string]bool)
+	iterations := 0
+
 	for {
+		iterations++
+		if iterations > MaxIterations {
+			monitor.Rec53Log.Errorf("Max iterations (%d) exceeded, possible CNAME loop", MaxIterations)
+			return nil, fmt.Errorf("max iterations exceeded, possible CNAME loop")
+		}
+
 		st := stm.getCurrentState()
-		//fmt.Println("===================debug\n", stm.getRequest(), stm.getResponse())
-		//fmt.Println("===================debug")
 		switch st {
 		case STATE_INIT:
 			if _, err := stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
@@ -72,6 +87,12 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 					}
 				}
 				if cnameTarget != "" {
+					// Check for CNAME cycle
+					if visitedDomains[cnameTarget] {
+						monitor.Rec53Log.Errorf("CNAME cycle detected: %s", cnameTarget)
+						return nil, fmt.Errorf("CNAME cycle detected: %s", cnameTarget)
+					}
+					visitedDomains[cnameTarget] = true
 					stm.getRequest().Question[0].Name = cnameTarget
 				}
 				stm = newInCacheState(stm.getRequest(), stm.getResponse())
