@@ -76,7 +76,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case CHECK_RESP_COMMEN_ERROR:
+			case CHECK_RESP_COMMON_ERROR:
 				return stm.getResponse(), nil
 			case CHECK_RESP_GET_ANS:
 				stm = newRetRespState(stm.getRequest(), stm.getResponse())
@@ -150,7 +150,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case ITER_COMMEN_ERROR:
+			case ITER_COMMON_ERROR:
 				//return servfail response
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
