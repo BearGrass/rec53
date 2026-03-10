@@ -1,11 +1,20 @@
 package server
 
 import (
+	"net"
 	"reflect"
 	"testing"
 
+	"rec53/monitor"
+
 	"github.com/miekg/dns"
+	"go.uber.org/zap"
 )
+
+func init() {
+	// Initialize no-op logger for tests
+	monitor.Rec53Log = zap.NewNop().Sugar()
+}
 
 func TestChange(t *testing.T) {
 	type args struct {
@@ -262,4 +271,347 @@ func TestInCacheStateHandle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStateInitState tests the stateInitState
+func TestStateInitState(t *testing.T) {
+	t.Run("successful initialization", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+
+		state := newStateInitState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if ret != STATE_INIT_NO_ERROR {
+			t.Errorf("expected %d, got %d", STATE_INIT_NO_ERROR, ret)
+		}
+		if state.getCurrentState() != STATE_INIT {
+			t.Errorf("expected state %d, got %d", STATE_INIT, state.getCurrentState())
+		}
+	})
+
+	t.Run("nil request error", func(t *testing.T) {
+		resp := new(dns.Msg)
+		state := newStateInitState(nil, resp)
+		_, err := state.handle(nil, resp)
+
+		if err == nil {
+			t.Error("expected error for nil request")
+		}
+	})
+
+	t.Run("nil response error", func(t *testing.T) {
+		req := new(dns.Msg)
+		state := newStateInitState(req, nil)
+		_, err := state.handle(req, nil)
+
+		if err == nil {
+			t.Error("expected error for nil response")
+		}
+	})
+}
+
+// TestInGlueState tests the inGlueState
+func TestInGlueState(t *testing.T) {
+	t.Run("glue exists", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+		resp.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+				Ns:  "ns1.example.com.",
+			},
+		}
+		resp.Extra = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.1"),
+			},
+		}
+
+		state := newInGlueState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if ret != IN_GLUE_EXIST {
+			t.Errorf("expected %d, got %d", IN_GLUE_EXIST, ret)
+		}
+	})
+
+	t.Run("glue does not exist", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+
+		state := newInGlueState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if ret != IN_GLUE_NOT_EXIST {
+			t.Errorf("expected %d, got %d", IN_GLUE_NOT_EXIST, ret)
+		}
+	})
+
+	t.Run("nil request error", func(t *testing.T) {
+		resp := new(dns.Msg)
+		state := newInGlueState(nil, resp)
+		_, err := state.handle(nil, resp)
+
+		if err == nil {
+			t.Error("expected error for nil request")
+		}
+	})
+}
+
+// TestRetRespState tests the retRespState
+func TestRetRespState(t *testing.T) {
+	t.Run("successful return", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+		resp.Answer = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.1"),
+			},
+		}
+
+		state := newRetRespState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if ret != RET_RESP_NO_ERROR {
+			t.Errorf("expected %d, got %d", RET_RESP_NO_ERROR, ret)
+		}
+		if state.getCurrentState() != RET_RESP {
+			t.Errorf("expected state %d, got %d", RET_RESP, state.getCurrentState())
+		}
+	})
+
+	t.Run("nil request error", func(t *testing.T) {
+		resp := new(dns.Msg)
+		state := newRetRespState(nil, resp)
+		_, err := state.handle(nil, resp)
+
+		if err == nil {
+			t.Error("expected error for nil request")
+		}
+	})
+}
+
+// TestInGlueCacheState tests the inGlueCacheState
+func TestInGlueCacheState(t *testing.T) {
+	deleteAllCache()
+
+	t.Run("cache hit for zone", func(t *testing.T) {
+		deleteAllCache()
+
+		// Cache glue for a zone
+		zone := "example.com."
+		cachedMsg := new(dns.Msg)
+		cachedMsg.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+				Ns:  "ns1.example.com.",
+			},
+		}
+		cachedMsg.Extra = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.1"),
+			},
+		}
+		setCacheCopy(zone, cachedMsg, 300)
+
+		req := new(dns.Msg)
+		req.SetQuestion("www.example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+
+		state := newInGlueCacheState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if ret != IN_GLUE_CACHE_HIT_CACHE {
+			t.Errorf("expected %d, got %d", IN_GLUE_CACHE_HIT_CACHE, ret)
+		}
+	})
+
+	t.Run("cache miss - use root glue", func(t *testing.T) {
+		deleteAllCache()
+
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+
+		state := newInGlueCacheState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Should return IN_CACHE_MISS_CACHE and use root glue
+		if ret != IN_CACHE_MISS_CACHE {
+			t.Errorf("expected %d, got %d", IN_CACHE_MISS_CACHE, ret)
+		}
+		// Verify root glue was added
+		if len(resp.Ns) == 0 {
+			t.Error("expected root NS records to be added")
+		}
+	})
+
+	t.Run("nil request error", func(t *testing.T) {
+		resp := new(dns.Msg)
+		state := newInGlueCacheState(nil, resp)
+		_, err := state.handle(nil, resp)
+
+		if err == nil {
+			t.Error("expected error for nil request")
+		}
+	})
+}
+
+// TestGetIPListFromResponse tests extracting IP addresses from response
+func TestGetIPListFromResponse(t *testing.T) {
+	t.Run("extract IPs from extra section", func(t *testing.T) {
+		resp := new(dns.Msg)
+		resp.Extra = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.1"),
+			},
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "ns2.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.2"),
+			},
+		}
+
+		ips := getIPListFromResponse(resp)
+
+		if len(ips) != 2 {
+			t.Errorf("expected 2 IPs, got %d", len(ips))
+		}
+	})
+
+	t.Run("empty extra section", func(t *testing.T) {
+		resp := new(dns.Msg)
+		ips := getIPListFromResponse(resp)
+
+		if len(ips) != 0 {
+			t.Errorf("expected 0 IPs, got %d", len(ips))
+		}
+	})
+
+	t.Run("skip non-A records", func(t *testing.T) {
+		resp := new(dns.Msg)
+		resp.Extra = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   parseTestIP("192.0.2.1"),
+			},
+			&dns.AAAA{
+				Hdr:  dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 300},
+				AAAA: parseTestIP("2001:db8::1"),
+			},
+		}
+
+		ips := getIPListFromResponse(resp)
+
+		if len(ips) != 1 {
+			t.Errorf("expected 1 IP (A record only), got %d", len(ips))
+		}
+	})
+}
+
+// TestGetBestAddressAndPrefetchIPs tests IP selection
+func TestGetBestAddressAndPrefetchIPs(t *testing.T) {
+	t.Run("empty IP list returns error", func(t *testing.T) {
+		_, _, err := getBestAddressAndPrefetchIPs([]string{})
+		if err == nil {
+			t.Error("expected error for empty IP list")
+		}
+	})
+
+	t.Run("single IP returns that IP", func(t *testing.T) {
+		bestIP, secondIP, err := getBestAddressAndPrefetchIPs([]string{"192.0.2.1"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if bestIP != "192.0.2.1" {
+			t.Errorf("expected bestIP 192.0.2.1, got %s", bestIP)
+		}
+		if secondIP != "" {
+			t.Errorf("expected empty secondIP, got %s", secondIP)
+		}
+	})
+}
+
+// TestChangeMaxIterations tests that Change stops after MaxIterations
+// Note: This test is complex because Change creates its own state transitions.
+// We skip this test as it would require mocking internal state creation.
+func TestChangeMaxIterations(t *testing.T) {
+	t.Skip("Skipping - Change function creates internal states that cannot be easily mocked")
+}
+
+// TestIterState tests the iterState error handling
+func TestIterState(t *testing.T) {
+	t.Run("nil request error", func(t *testing.T) {
+		resp := new(dns.Msg)
+		state := newIterState(nil, resp)
+		_, err := state.handle(nil, resp)
+
+		if err == nil {
+			t.Error("expected error for nil request")
+		}
+	})
+
+	t.Run("nil response error", func(t *testing.T) {
+		req := new(dns.Msg)
+		state := newIterState(req, nil)
+		_, err := state.handle(req, nil)
+
+		if err == nil {
+			t.Error("expected error for nil response")
+		}
+	})
+
+	t.Run("empty extra section error", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		resp := new(dns.Msg)
+
+		state := newIterState(req, resp)
+		ret, err := state.handle(req, resp)
+
+		if err == nil {
+			t.Error("expected error for empty extra section")
+		}
+		if ret != ITER_COMMON_ERROR {
+			t.Errorf("expected %d, got %d", ITER_COMMON_ERROR, ret)
+		}
+	})
+}
+
+// parseTestIP helper function
+func parseTestIP(s string) net.IP {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return nil
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4
+	}
+	return ip
 }

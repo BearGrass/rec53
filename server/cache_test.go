@@ -2,12 +2,21 @@ package server
 
 import (
 	"net"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 )
 
 func TestCache(t *testing.T) {
+	// Basic smoke test for cache operations
+	deleteAllCache()
+
+	// Verify cache is empty
+	if getCacheSize() != 0 {
+		t.Errorf("expected empty cache, got %d items", getCacheSize())
+	}
 }
 
 // TestGetCacheKey tests the cache key generation with query type
@@ -162,5 +171,227 @@ func TestCacheIsolation(t *testing.T) {
 	}
 	if !originalIP.Equal(net.ParseIP("192.0.2.1")) {
 		t.Errorf("Expected original IP 192.0.2.1, got %v", originalIP)
+	}
+}
+
+// TestSetAndGetCache tests basic cache set and get operations
+func TestSetAndGetCache(t *testing.T) {
+	deleteAllCache()
+
+	key := "test.example.com.:1"
+	msg := new(dns.Msg)
+	msg.SetReply(&dns.Msg{})
+	msg.Answer = append(msg.Answer, &dns.A{
+		Hdr: dns.RR_Header{
+			Name:   "test.example.com.",
+			Rrtype: dns.TypeA,
+			Class:  dns.ClassINET,
+			Ttl:    300,
+		},
+		A: net.ParseIP("192.0.2.1"),
+	})
+
+	// Test set and get
+	setCacheCopy(key, msg, 300)
+	retrieved, found := getCacheCopy(key)
+	if !found {
+		t.Fatal("expected to find cached message")
+	}
+	if len(retrieved.Answer) != 1 {
+		t.Errorf("expected 1 answer, got %d", len(retrieved.Answer))
+	}
+
+	// Test non-existent key
+	_, found = getCacheCopy("nonexistent.:1")
+	if found {
+		t.Error("expected not to find non-existent key")
+	}
+
+	// Test cache size
+	if getCacheSize() != 1 {
+		t.Errorf("expected cache size 1, got %d", getCacheSize())
+	}
+}
+
+// TestCacheExpiration tests that cache entries expire correctly
+func TestCacheExpiration(t *testing.T) {
+	deleteAllCache()
+
+	domain := "expire-test.example.com."
+	msg := new(dns.Msg)
+	msg.SetReply(&dns.Msg{})
+	msg.Answer = append(msg.Answer, &dns.A{
+		Hdr: dns.RR_Header{
+			Name:   domain,
+			Rrtype: dns.TypeA,
+			Class:  dns.ClassINET,
+			Ttl:    1, // 1 second TTL
+		},
+		A: net.ParseIP("192.0.2.1"),
+	})
+
+	// Set with very short expiration (1 second)
+	setCacheCopyByType(domain, dns.TypeA, msg, 1)
+
+	// Should be found immediately
+	_, found := getCacheCopyByType(domain, dns.TypeA)
+	if !found {
+		t.Fatal("expected to find cached message immediately after set")
+	}
+
+	// Wait for expiration
+	time.Sleep(2 * time.Second)
+
+	// Force delete expired items
+	deleteExpiredCache()
+
+	// Should not be found after expiration
+	_, found = getCacheCopyByType(domain, dns.TypeA)
+	if found {
+		t.Error("expected cache entry to be expired")
+	}
+}
+
+// TestCacheConcurrentAccess tests concurrent read/write operations
+func TestCacheConcurrentAccess(t *testing.T) {
+	deleteAllCache()
+
+	const goroutines = 50
+	const iterations = 100
+
+	var wg sync.WaitGroup
+
+	// Concurrent writes
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			domain := "concurrent.example.com."
+			for j := 0; j < iterations; j++ {
+				msg := new(dns.Msg)
+				msg.SetReply(&dns.Msg{})
+				msg.Answer = append(msg.Answer, &dns.A{
+					Hdr: dns.RR_Header{
+						Name:   domain,
+						Rrtype: dns.TypeA,
+						Class:  dns.ClassINET,
+						Ttl:    300,
+					},
+					A: net.ParseIP("192.0.2.1"),
+				})
+				setCacheCopyByType(domain, dns.TypeA, msg, 300)
+			}
+		}(i)
+	}
+
+	// Concurrent reads
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_, _ = getCacheCopyByType("concurrent.example.com.", dns.TypeA)
+			}
+		}()
+	}
+
+	// Concurrent flush operations
+	for i := 0; i < goroutines/10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations/10; j++ {
+				deleteExpiredCache()
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// TestCacheFlush tests the deleteAllCache function
+func TestCacheFlush(t *testing.T) {
+	deleteAllCache()
+
+	// Add multiple entries
+	for i := 0; i < 10; i++ {
+		domain := "flush-test.example.com."
+		msg := new(dns.Msg)
+		msg.SetReply(&dns.Msg{})
+		msg.Answer = append(msg.Answer, &dns.A{
+			Hdr: dns.RR_Header{
+				Name:   domain,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+				Ttl:    300,
+			},
+			A: net.ParseIP("192.0.2.1"),
+		})
+		setCacheCopyByType(domain, dns.TypeA, msg, 300)
+	}
+
+	// Verify cache has entries
+	if getCacheSize() == 0 {
+		t.Fatal("expected cache to have entries before flush")
+	}
+
+	// Flush cache
+	deleteAllCache()
+
+	// Verify cache is empty
+	if getCacheSize() != 0 {
+		t.Errorf("expected empty cache after flush, got %d items", getCacheSize())
+	}
+}
+
+// TestCacheMultipleTypesSameDomain tests caching multiple record types for the same domain
+func TestCacheMultipleTypesSameDomain(t *testing.T) {
+	deleteAllCache()
+
+	domain := "multi.example.com."
+
+	// Cache A record
+	aMsg := new(dns.Msg)
+	aMsg.Answer = append(aMsg.Answer, &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A: net.ParseIP("192.0.2.1"),
+	})
+	setCacheCopyByType(domain, dns.TypeA, aMsg, 300)
+
+	// Cache AAAA record
+	aaaaMsg := new(dns.Msg)
+	aaaaMsg.Answer = append(aaaaMsg.Answer, &dns.AAAA{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 300},
+		AAAA: net.ParseIP("2001:db8::1"),
+	})
+	setCacheCopyByType(domain, dns.TypeAAAA, aaaaMsg, 300)
+
+	// Cache MX record
+	mxMsg := new(dns.Msg)
+	mxMsg.Answer = append(mxMsg.Answer, &dns.MX{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: 300},
+		Mx: "mail.example.com.",
+		Preference: 10,
+	})
+	setCacheCopyByType(domain, dns.TypeMX, mxMsg, 300)
+
+	// Verify all types are cached separately
+	if getCacheSize() != 3 {
+		t.Errorf("expected cache size 3, got %d", getCacheSize())
+	}
+
+	// Verify each type can be retrieved
+	for _, tc := range []struct {
+		qtype    uint16
+		typeName string
+	}{
+		{dns.TypeA, "A"},
+		{dns.TypeAAAA, "AAAA"},
+		{dns.TypeMX, "MX"},
+	} {
+		_, found := getCacheCopyByType(domain, tc.qtype)
+		if !found {
+			t.Errorf("expected to find %s record", tc.typeName)
+		}
 	}
 }
