@@ -226,14 +226,22 @@ go vet ./...
 ## Known Issues
 
 - `www.huawei.com` resolution may have issues with certain CNAME chains
+- Some domains with complex CNAME chains may return SERVFAIL when the final A/AAAA resolution fails
 
 ## Roadmap
 
-See [`.rec53/requirements/ROADMAP.md`](.rec53/requirements/ROADMAP.md) for planned features:
+See [`.rec53/roadmap/ROADMAP.md`](.rec53/roadmap/ROADMAP.md) for planned features:
 - DNSSEC validation
 - DoT/DoH support
 - Concurrent queries
 - Query rate limiting
+
+## Documentation
+
+- [`.rec53/README.md`](.rec53/README.md) - Project documentation index
+- [`.rec53/roadmap/`](.rec53/roadmap/) - Roadmap and requirements
+- [`.rec53/progress/`](.rec53/progress/) - Development progress
+- [`.rec53/quality/`](.rec53/quality/) - Code quality analysis
 
 ## References
 

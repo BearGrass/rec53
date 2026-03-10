@@ -18,16 +18,6 @@ func init() {
 
 // TestMalformedQueries tests handling of malformed DNS queries.
 func TestMalformedQueries(t *testing.T) {
-	s := server.NewServer("127.0.0.1:0")
-	errChan := s.Run()
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.Shutdown(ctx)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-
 	tests := []struct {
 		name    string
 		msg     *dns.Msg
@@ -38,7 +28,8 @@ func TestMalformedQueries(t *testing.T) {
 			msg:  &dns.Msg{},
 		},
 		{
-			name: "no question",
+			name:    "no question",
+			wantErr: true, // Server should handle this as malformed
 			msg: func() *dns.Msg {
 				m := new(dns.Msg)
 				m.Response = true
@@ -57,9 +48,21 @@ func TestMalformedQueries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a new server for each test case to avoid state issues
+			s := server.NewServer("127.0.0.1:0")
+			errChan := s.Run()
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				s.Shutdown(ctx)
+			}()
+
+			time.Sleep(100 * time.Millisecond)
+
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 5 * time.Second,
+				Net:      "udp",
+				Timeout:  5 * time.Second,
+				UDPSize:  4096,
 			}
 
 			resp, _, err := client.Exchange(tt.msg, s.UDPAddr())
@@ -72,14 +75,14 @@ func TestMalformedQueries(t *testing.T) {
 			}
 
 			t.Logf("Response: rcode=%s", dns.RcodeToString[resp.Rcode])
+
+			// Drain error channel
+			go func() {
+				for range errChan {
+				}
+			}()
 		})
 	}
-
-	// Drain error channel
-	go func() {
-		for range errChan {
-		}
-	}()
 }
 
 // TestNXDomainHandling tests NXDOMAIN response handling.
@@ -107,12 +110,14 @@ func TestNXDomainHandling(t *testing.T) {
 	for _, domain := range nxdomains {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeA)
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -161,12 +166,14 @@ func TestTimeoutHandling(t *testing.T) {
 	for _, timeout := range timeouts {
 		t.Run(timeout.String(), func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: timeout,
+				Net:      "udp",
+				Timeout:  timeout,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion("example.com.", dns.TypeA)
+			msg.SetEdns0(4096, false)
 
 			start := time.Now()
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
@@ -223,12 +230,14 @@ func TestUnsupportedRecordTypes(t *testing.T) {
 	for _, tt := range recordTypes {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion("google.com.", tt.qtype)
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -309,6 +318,7 @@ func TestMultipleQuestions(t *testing.T) {
 	// Create query with multiple questions
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
+	msg.SetEdns0(4096, false)
 	msg.Question = append(msg.Question, dns.Question{
 		Name:  "google.com.",
 		Qtype: dns.TypeA,
@@ -316,8 +326,9 @@ func TestMultipleQuestions(t *testing.T) {
 	})
 
 	client := &dns.Client{
-		Net:     "udp",
-		Timeout: 10 * time.Second,
+		Net:      "udp",
+		Timeout:  10 * time.Second,
+		UDPSize:  4096,
 	}
 
 	resp, _, err := client.Exchange(msg, s.UDPAddr())
@@ -354,11 +365,13 @@ func TestTruncatedResponse(t *testing.T) {
 	// Query that might return large response
 	msg := new(dns.Msg)
 	msg.SetQuestion("google.com.", dns.TypeANY)
+	msg.SetEdns0(4096, false)
 
 	// UDP query - might be truncated
 	udpClient := &dns.Client{
-		Net:     "udp",
-		Timeout: 10 * time.Second,
+		Net:      "udp",
+		Timeout:  10 * time.Second,
+		UDPSize:  4096,
 	}
 
 	udpResp, _, err := udpClient.Exchange(msg, s.UDPAddr())
@@ -416,8 +429,9 @@ func TestReverseLookup(t *testing.T) {
 	for _, ip := range ips {
 		t.Run(ip, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			// Create reverse lookup query
@@ -428,6 +442,7 @@ func TestReverseLookup(t *testing.T) {
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(reverseAddr, dns.TypePTR)
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -478,12 +493,14 @@ func TestLocalhostQueries(t *testing.T) {
 	for _, tt := range queries {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 5 * time.Second,
+				Net:      "udp",
+				Timeout:  5 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(tt.domain, tt.qtype)
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -534,8 +551,9 @@ func BenchmarkIntegrationQuery(b *testing.B) {
 	}()
 
 	client := &dns.Client{
-		Net:     "udp",
-		Timeout: 10 * time.Second,
+		Net:      "udp",
+		Timeout:  10 * time.Second,
+		UDPSize:  4096,
 	}
 
 	b.ResetTimer()
@@ -543,6 +561,7 @@ func BenchmarkIntegrationQuery(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		msg := new(dns.Msg)
 		msg.SetQuestion("example.com.", dns.TypeA)
+		msg.SetEdns0(4096, false)
 		client.Exchange(msg, s.UDPAddr())
 	}
 }

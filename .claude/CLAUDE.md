@@ -22,12 +22,6 @@ docker build -t rec53 .
 
 # Run with Docker Compose (includes Prometheus, node-exporter)
 cd single_machine && docker-compose up -d
-
-# Test
-go test ./...
-
-# Test specific package
-go test -v ./server/...
 ```
 
 ### CLI Flags
@@ -36,22 +30,48 @@ go test -v ./server/...
 - `-log-level` - Log level: debug, info, warn, error (default: `info`)
 - `-version` - Show version information
 
+## Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Run specific package tests
+go test -v ./server/...
+
+# Run specific test
+go test -v -run TestCacheHit ./server/
+
+# Run E2E tests (require network access)
+go test -v ./e2e/...
+
+# Format code before commit
+gofmt -w .
+
+# Run linter
+go vet ./...
+```
+
 ## Architecture
 
 **Recursive DNS resolver** implemented as a state machine with caching and IP quality tracking.
 
-### Directory Structure
+### Package Structure
 - `cmd/` - Entry point, flag parsing, signal handling, graceful shutdown
-- `server/` - Core DNS logic: state machine (`state_machine.go`, `state_define.go`, `state.go`), cache, IP pool
-- `monitor/` - Prometheus metrics and zap logger
+- `server/` - Core DNS logic: state machine, cache, IP pool, UDP/TCP server
+- `monitor/` - Prometheus metrics (`metric.go`) and zap logger (`log.go`)
 - `utils/` - Zone resolution (`GetZoneList`), root servers
+- `e2e/` - End-to-end integration tests with mock DNS servers
 - `single_machine/` - Docker Compose setup for local deployment
 
 ### State Machine (`server/state_machine.go`, `server/state_define.go`)
 
-The DNS resolution flow is a state machine where each state returns a result code that determines the next state.
+The DNS resolution flow is a state machine where each state implements the `stateMachine` interface and returns a result code that determines the next state.
 
-**State Flow:**
+**States and Transitions:**
 ```
 STATE_INIT → IN_CACHE
                 ├─ HIT_CACHE → CHECK_RESP
@@ -63,7 +83,7 @@ STATE_INIT → IN_CACHE
 
 CHECK_RESP:
   ├─ GET_ANS → RET_RESP (done)
-  ├─ GET_CNAME → IN_CACHE (follow CNAME chain)
+  ├─ GET_CNAME → IN_CACHE (follow CNAME chain, tracked for cycles)
   └─ GET_NS → IN_GLUE
 
 ITER:
@@ -71,19 +91,68 @@ ITER:
   └─ ERROR → return SERVFAIL
 ```
 
-**Key States:**
-- `IN_CACHE` - Check cache for direct answer
-- `IN_GLUE` - Check if NS/glue records available
-- `IN_GLUE_CACHE` - Walk zone hierarchy to find cached glue
-- `ITER` - Send query to upstream nameserver
+**Key Implementation Details:**
+- `MaxIterations = 50` prevents infinite loops (state_machine.go:13)
+- CNAME cycle detection via `visitedDomains` map (state_machine.go:27)
+- Original question is preserved and restored in response (state_machine.go:31, :174)
+- ITER state handles EDNS0 with 4096 buffer size (state_define.go:249)
 
 ### Key Components
-- **Cache** (`server/cache.go`): go-cache library with 5min TTL, stores `*dns.Msg` by domain name
-- **IP Pool** (`server/ip_pool.go`): Tracks upstream nameserver quality
-  - Latency-based scoring (lower = better)
-  - Prefetch mechanism for proactive quality checks
-  - Concurrency-limited prefetch (max 10 concurrent)
-- **Metrics** (`monitor/metric.go`): Prometheus on `:9999/metric`
+
+**Cache (`server/cache.go`):**
+- Uses `patrickmn/go-cache` library with 5min default TTL, 10min cleanup interval
+- Cache key format: `domain:qtype` (e.g., `google.com.:1` for A record)
+- `getCacheCopy()` returns deep copy to prevent concurrent modification
+- Global instance: `globalDnsCache`
+
+**IP Pool (`server/ip_pool.go`):**
+- Tracks upstream nameserver quality via latency scoring
+- Initial latency: 1000ms, max penalty: 10000ms
+- Prefetch mechanism with max 10 concurrent checks (`MAX_PREFETCH_CONCUR`)
+- Global instance: `globalIPPool`
+- Must call `Shutdown()` for graceful termination
+
+**Server (`server/server.go`):**
+- Single `ServeDNS` handler for both UDP and TCP
+- UDP truncation handling with TC flag (server.go:88-120)
+- Graceful shutdown via context with 5-second timeout
+
+**Metrics (`monitor/metric.go`):**
+- `rec53_in_total` - Incoming queries (stage, name, type)
+- `rec53_out_total` - Outgoing responses (stage, name, type, code)
+- `rec53_latency_ms` - Query latency histogram
+- `rec53_ip_quality` - Nameserver latency gauge
+
+## Dependencies
+
+- `github.com/miekg/dns` - DNS library for server and message handling
+- `github.com/patrickmn/go-cache` - In-memory cache with TTL
+- `go.uber.org/zap` - Structured logging
+- `github.com/prometheus/client_golang` - Metrics exposition
+
+## E2E Testing Pattern
+
+The `e2e/` package provides integration testing utilities:
+
+```go
+// Create mock authority server
+zone := &Zone{
+    Origin: "example.com.",
+    Records: map[uint16][]dns.RR{
+        dns.TypeA: {A("example.com.", "192.0.2.1", 300)},
+    },
+}
+mock := NewMockAuthorityServer(t, zone)
+defer mock.Stop()
+
+// Create test resolver
+handler := server.NewServer("127.0.0.1:0")
+tr, _ := NewTestResolver(handler)
+defer tr.Stop()
+
+// Query
+resp, err := tr.Query("example.com.", dns.TypeA)
+```
 
 ## Coding Conventions
 
@@ -117,11 +186,16 @@ gofmt -w .
 
 ## Known Issues
 
-- `www.huawei.com` resolution bug (see README.md)
+- `www.huawei.com` resolution may have issues with certain CNAME chains
+- Some domains with complex CNAME chains may return SERVFAIL when the final A/AAAA resolution fails
 
 ## Documentation
 
-Detailed docs in `.rec53/`:
-- `requirements/REQUIREMENTS.md` - Feature requirements
-- `requirements/ROADMAP.md` - Version roadmap
-- `requirements/PROGRESS.md` - Development progress
+Project documentation in `.rec53/`:
+- [`.rec53/README.md`](../.rec53/README.md) - Documentation index
+- `.rec53/roadmap/ROADMAP.md` - Version roadmap
+- `.rec53/roadmap/REQUIREMENTS.md` - Feature requirements
+- `.rec53/progress/PROGRESS.md` - Development progress
+- `.rec53/quality/CODE_QUALITY.md` - Code quality analysis and optimization plan
+- `.rec53/bugs/` - Bug tracking records
+- `.rec53/decisions/` - Architecture Decision Records (ADR)
