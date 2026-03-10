@@ -164,7 +164,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				m := new(dns.Msg)
 				return m
 			}(),
-			expectedRet: CHECK_RESP_COMMEN_ERROR,
+			expectedRet: CHECK_RESP_COMMON_ERROR,
 			expectError: true,
 		},
 		{
@@ -174,7 +174,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				return m
 			}(),
 			response:    nil,
-			expectedRet: CHECK_RESP_COMMEN_ERROR,
+			expectedRet: CHECK_RESP_COMMON_ERROR,
 			expectError: true,
 		},
 	}

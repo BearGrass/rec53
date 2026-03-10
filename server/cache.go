@@ -63,10 +63,6 @@ func setCacheCopy(key string, value *dns.Msg, expire uint32) {
 	setCache(key, value.Copy(), expire)
 }
 
-func deleteCache(key string) {
-	globalDnsCache.Delete(key)
-}
-
 func deleteExpiredCache() {
 	globalDnsCache.DeleteExpired()
 }

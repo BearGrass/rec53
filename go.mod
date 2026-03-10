@@ -1,6 +1,6 @@
 module rec53
 
-go 1.18
+go 1.21
 
 require (
 	github.com/miekg/dns v1.1.52

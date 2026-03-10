@@ -12,10 +12,12 @@ var logFile = flag.String("rec53.log", "./log/rec53.log", "Log file path")
 
 var Rec53Log *zap.SugaredLogger
 
+var atomicLevel = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+
 func InitLogger() {
 	writeSyncer := getLogWriter()
 	encoder := getEncoder()
-	core := zapcore.NewCore(encoder, writeSyncer, zapcore.DebugLevel)
+	core := zapcore.NewCore(encoder, writeSyncer, atomicLevel)
 	monitor := zap.New(core, zap.AddCaller())
 	Rec53Log = monitor.Sugar()
 }
@@ -39,5 +41,5 @@ func getLogWriter() zapcore.WriteSyncer {
 }
 
 func SetLogLevel(level zapcore.Level) {
-	Rec53Log.Desugar().Core().Enabled(level)
+	atomicLevel.SetLevel(level)
 }

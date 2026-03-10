@@ -63,7 +63,9 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	monitor.Rec53Metric.OutCounterAdd("response", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode])
 	monitor.Rec53Metric.LatencyHistogramObserve("latency", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode], float64(time.Since(startTime).Milliseconds()))
-	w.WriteMsg(reply)
+	if err := w.WriteMsg(reply); err != nil {
+		monitor.Rec53Log.Errorf("Failed to write response: %v", err)
+	}
 }
 
 // isUDP checks if the connection is UDP

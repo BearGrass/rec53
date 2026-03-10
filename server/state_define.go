@@ -37,7 +37,7 @@ func (s *stateInitState) getResponse() *dns.Msg {
 
 func (s *stateInitState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return STATE_INIT_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return STATE_INIT_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	response.SetReply(request)
 	s.request = request
@@ -71,7 +71,7 @@ func (s *inCacheState) getResponse() *dns.Msg {
 
 func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return IN_CACHE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	q := request.Question[0]
 	monitor.Rec53Log.Debugf("try to get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
@@ -113,7 +113,7 @@ func (s *checkRespState) getResponse() *dns.Msg {
 
 func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return CHECK_RESP_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return CHECK_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 
 	qtype := request.Question[0].Qtype
@@ -180,7 +180,7 @@ func (s *inGlueState) getResponse() *dns.Msg {
 
 func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_GLUE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return IN_GLUE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	if len(response.Ns) != 0 && len(response.Extra) != 0 {
 		//We got glue from cache or iterater
@@ -239,7 +239,7 @@ func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 
 func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return ITER_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return ITER_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	newQuery := new(dns.Msg)
 	newQuery.SetQuestion(request.Question[0].Name, request.Question[0].Qtype)
@@ -252,7 +252,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	ipList := getIPListFromResponse(response)
 	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
 	if bestAddr == "" || err != nil {
-		return ITER_COMMEN_ERROR, err
+		return ITER_COMMON_ERROR, err
 	}
 	dnsClient := &dns.Client{
 		Net:            "udp",
@@ -270,13 +270,13 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		ipq.SetLatency(MAX_IP_LATENCY)
 		//try to use the second ip
 		if secondAddr == "" {
-			return ITER_COMMEN_ERROR, err
+			return ITER_COMMON_ERROR, err
 		}
 		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":53")
 		if err != nil {
 			ipq := globalIPPool.GetIPQuality(secondAddr)
 			ipq.SetLatency(MAX_IP_LATENCY)
-			return ITER_COMMEN_ERROR, err
+			return ITER_COMMON_ERROR, err
 		}
 		theBestIP = secondAddr
 	}
@@ -304,16 +304,16 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			return ITER_NO_ERROR, nil
 		default:
 			// Other errors (REFUSED, SERVFAIL, etc.) - return as error
-			return ITER_COMMEN_ERROR, fmt.Errorf("response rcode: %s",
+			return ITER_COMMON_ERROR, fmt.Errorf("response rcode: %s",
 				dns.RcodeToString[newResponse.Rcode])
 		}
 	}
 	//check the response is the same as the request
 	if len(newResponse.Question) == 0 {
-		return ITER_COMMEN_ERROR, fmt.Errorf("response has no question")
+		return ITER_COMMON_ERROR, fmt.Errorf("response has no question")
 	}
 	if newResponse.Question[0].Name != request.Question[0].Name {
-		return ITER_COMMEN_ERROR, fmt.Errorf("response.Question is not the same as request")
+		return ITER_COMMON_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
 	if len(newResponse.Answer) != 0 {
 		// Use setCacheCopyByType to store with query type in key
@@ -359,7 +359,7 @@ func (s *inGlueCacheState) getResponse() *dns.Msg {
 
 func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_GLUE_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return IN_GLUE_CACHE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	zoneList := utils.GetZoneList(request.Question[0].Name)
 	for _, zone := range zoneList {
@@ -406,7 +406,7 @@ func (s *retRespState) getResponse() *dns.Msg {
 
 func (s *retRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return RET_RESP_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
+		return RET_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	return RET_RESP_NO_ERROR, nil
 }

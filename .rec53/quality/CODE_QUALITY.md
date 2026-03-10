@@ -292,11 +292,12 @@ P3      安全加固                                                待开始
 立即可做的小改动:
 
 - [x] Cache key 包含查询类型
-- [ ] 修正 `COMMEN` → `COMMON` 拼写错误 (`state.go`)
-- [ ] 删除未使用的 `MAX_TIMEOUT` 常量 (`utils/net.go`)
-- [ ] 修复 `SetLogLevel` 实现 (`monitor/log.go`)
-- [ ] 升级 Go 版本至 1.21+
-- [ ] 运行 `golangci-lint` 并修复所有警告
+- [x] 修正 `COMMEN` → `COMMON` 拼写错误 (`state.go`)
+- [x] ~~删除未使用的 `MAX_TIMEOUT` 常量~~ (实际在使用中，保留)
+- [x] 修复 `SetLogLevel` 实现 (`monitor/log.go`)
+- [x] 升级 Go 版本至 1.21+
+- [x] 运行 `golangci-lint` 并修复核心代码警告
+- [x] 删除未使用的 `deleteCache` 函数 (`cache.go`)
 
 ---
 
@@ -304,6 +305,7 @@ P3      安全加固                                                待开始
 
 | 日期 | 变更 |
 |------|------|
+| 2026-03-10 | 完成快速修复清单：拼写修正、SetLogLevel修复、Go版本升级、linter警告修复 |
 | 2026-03-10 | 合并 CODE_REVIEW.md 内容，重新组织文档结构 |
 | 2026-03-04 | Phase 1 全部完成 |
 | 2026-03-04 | 初始分析报告创建 |
