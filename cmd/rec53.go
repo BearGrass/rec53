@@ -26,6 +26,36 @@ var (
 	buildTime = "unknown"
 )
 
+// shutdownFunc is a function that can be shut down with a context
+type shutdownFunc func(ctx context.Context) error
+
+// gracefulShutdown shuts down multiple components with a timeout context.
+// It logs errors but does not return them, making it suitable for defer or cleanup.
+func gracefulShutdown(ctx context.Context, shutdowns ...shutdownFunc) {
+	for _, shutdown := range shutdowns {
+		if shutdown != nil {
+			if err := shutdown(ctx); err != nil {
+				monitor.Rec53Log.Errorf("Shutdown error: %s", err.Error())
+			}
+		}
+	}
+}
+
+// waitForSignal blocks until a signal is received or the server errors.
+// It returns the signal that was received, or nil if the server errored.
+func waitForSignal(sigChan chan os.Signal, errChan <-chan error) os.Signal {
+	select {
+	case err := <-errChan:
+		if err != nil {
+			monitor.Rec53Log.Errorf("Server error: %s", err.Error())
+		}
+		return nil
+	case s := <-sigChan:
+		monitor.Rec53Log.Infof("Signal (%v) received, shutting down gracefully", s)
+		return s
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -52,28 +82,13 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
-	select {
-	case err := <-errChan:
-		if err != nil {
-			monitor.Rec53Log.Errorf("Server error: %s", err.Error())
-		}
-	case s := <-sig:
-		monitor.Rec53Log.Infof("Signal (%v) received, shutting down gracefully", s)
-	}
+	waitForSignal(sig, errChan)
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Shutdown DNS server
-	if err := rec53.Shutdown(ctx); err != nil {
-		monitor.Rec53Log.Errorf("DNS server shutdown error: %s", err.Error())
-	}
-
-	// Shutdown metrics server
-	if err := monitor.ShutdownMetric(ctx); err != nil {
-		monitor.Rec53Log.Errorf("Metrics server shutdown error: %s", err.Error())
-	}
+	gracefulShutdown(ctx, rec53.Shutdown, monitor.ShutdownMetric)
 
 	monitor.Rec53Log.Info("rec53 stopped")
 }

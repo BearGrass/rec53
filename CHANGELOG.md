@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Test plan documentation (TEST_PLAN.md)
 - Task management documentation (TODO.md)
 
+### Changed
+- Test coverage improved from ~1% to ~60%
+  - monitor: 3.2% → 58.1% (metric_test.go)
+  - server: 75.2% → 76.8% (state_machine_test.go, state_define_test.go)
+- Add iterState unit tests with IP quality and cache operations
+
 ## [0.1.0] - 2026-03-04
 
 ### Added
