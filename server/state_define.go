@@ -73,10 +73,11 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 	if request == nil || response == nil {
 		return IN_CACHE_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	monitor.Rec53Log.Debugf("try to get cache %s", request.Question[0].Name)
-	// Use getCacheCopy to avoid modifying cached message
-	if msgInCache, ok := getCacheCopy(request.Question[0].Name); ok {
-		monitor.Rec53Log.Debugf("get cache %s", request.Question[0].Name)
+	q := request.Question[0]
+	monitor.Rec53Log.Debugf("try to get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
+	// Use getCacheCopyByType to ensure we get the correct record type
+	if msgInCache, ok := getCacheCopyByType(q.Name, q.Qtype); ok {
+		monitor.Rec53Log.Debugf("get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
 		if len(msgInCache.Answer) != 0 {
 			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
 			return IN_CACHE_HIT_CACHE, nil
@@ -114,13 +115,41 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	if request == nil || response == nil {
 		return CHECK_RESP_COMMEN_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	if len(response.Answer) != 0 {
-		if response.Answer[len(response.Answer)-1].Header().Rrtype == request.Question[0].Qtype {
+
+	qtype := request.Question[0].Qtype
+
+	// Check if we have any answers
+	if len(response.Answer) == 0 {
+		// No answers, need to continue iteration
+		return CHECK_RESP_GET_NS, nil
+	}
+
+	// Check if we have a matching record type in the answers
+	for _, rr := range response.Answer {
+		if rr.Header().Rrtype == qtype {
+			// Found a matching record type, return the answer
 			return CHECK_RESP_GET_ANS, nil
 		}
-		//TODO: another type
-		return CHECK_RESP_GET_CNAME, nil
 	}
+
+	// Check if we have a CNAME record that needs to be followed
+	// A CNAME can only exist when querying for A, AAAA, or other types that CNAME points to
+	if qtype != dns.TypeCNAME {
+		for _, rr := range response.Answer {
+			if cname, ok := rr.(*dns.CNAME); ok {
+				// Found a CNAME record, need to follow it
+				monitor.Rec53Log.Debugf("found CNAME: %s -> %s", rr.Header().Name, cname.Target)
+				return CHECK_RESP_GET_CNAME, nil
+			}
+		}
+	}
+
+	// We have answers but none match the requested type and no CNAME found
+	// This could happen when:
+	// - Querying for a type that doesn't exist (but other types do)
+	// - The server returned a partial answer
+	// Continue iteration to get the correct type
+	monitor.Rec53Log.Debugf("no matching type %s in answers, continuing iteration", dns.TypeToString[qtype])
 	return CHECK_RESP_GET_NS, nil
 }
 
@@ -262,9 +291,22 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
-		//TODO: return servfail
+		// Copy response code and authority section
 		s.response.Rcode = newResponse.Rcode
-		return ITER_COMMEN_ERROR, fmt.Errorf("response.Rcode is not success")
+		s.response.Ns = newResponse.Ns
+
+		// Handle different response codes appropriately
+		switch newResponse.Rcode {
+		case dns.RcodeNameError: // NXDOMAIN - domain does not exist
+			// Return normally with NXDOMAIN code preserved
+			return ITER_NO_ERROR, nil
+		case dns.RcodeSuccess:
+			return ITER_NO_ERROR, nil
+		default:
+			// Other errors (REFUSED, SERVFAIL, etc.) - return as error
+			return ITER_COMMEN_ERROR, fmt.Errorf("response rcode: %s",
+				dns.RcodeToString[newResponse.Rcode])
+		}
 	}
 	//check the response is the same as the request
 	if len(newResponse.Question) == 0 {
@@ -274,9 +316,10 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		return ITER_COMMEN_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
 	if len(newResponse.Answer) != 0 {
-		// Use setCacheCopy to store a copy of the message
-		setCacheCopy(newResponse.Question[0].Name, newResponse, newResponse.Answer[0].Header().Ttl)
-		monitor.Rec53Log.Debug("set cache: ", newResponse.Question[0].Name, newResponse.Answer[0].Header().Ttl)
+		// Use setCacheCopyByType to store with query type in key
+		q := newResponse.Question[0]
+		setCacheCopyByType(q.Name, q.Qtype, newResponse, newResponse.Answer[0].Header().Ttl)
+		monitor.Rec53Log.Debug("set cache: ", q.Name, " type:", dns.TypeToString[q.Qtype], " ttl:", newResponse.Answer[0].Header().Ttl)
 	}
 	if len(newResponse.Ns) != 0 && len(newResponse.Extra) != 0 {
 		// Use setCacheCopy to store a copy of the message

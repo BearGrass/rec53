@@ -27,6 +27,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 	visitedDomains := make(map[string]bool)
 	iterations := 0
 
+	// Save original question for response
+	originalQuestion := stm.getRequest().Question[0]
+
 	for {
 		iterations++
 		if iterations > MaxIterations {
@@ -166,7 +169,10 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				monitor.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
-			return stm.getResponse(), nil
+			// Restore original question before returning response
+			resp := stm.getResponse()
+			resp.Question[0] = originalQuestion
+			return resp, nil
 		default:
 			monitor.Rec53Log.Errorf("Wrong state %d", stm.getCurrentState())
 			return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())

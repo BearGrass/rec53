@@ -37,8 +37,9 @@ func TestCacheBehavior(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	client := &dns.Client{
-		Net:     "udp",
-		Timeout: 10 * time.Second,
+		Net:      "udp",
+		Timeout:  10 * time.Second,
+		UDPSize:  4096,
 	}
 
 	domain := "cache-test.example.com."
@@ -47,6 +48,7 @@ func TestCacheBehavior(t *testing.T) {
 	msg1 := new(dns.Msg)
 	msg1.SetQuestion(domain, dns.TypeA)
 	msg1.RecursionDesired = true
+	msg1.SetEdns0(4096, false)
 
 	start1 := time.Now()
 	resp1, _, err := client.Exchange(msg1, s.UDPAddr())
@@ -62,6 +64,7 @@ func TestCacheBehavior(t *testing.T) {
 	msg2 := new(dns.Msg)
 	msg2.SetQuestion(domain, dns.TypeA)
 	msg2.RecursionDesired = true
+	msg2.SetEdns0(4096, false)
 
 	start2 := time.Now()
 	resp2, _, err := client.Exchange(msg2, s.UDPAddr())
@@ -115,13 +118,15 @@ func TestCacheConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			for i := 0; i < numQueries; i++ {
 				msg := new(dns.Msg)
 				msg.SetQuestion(domain, dns.TypeA)
+				msg.SetEdns0(4096, false)
 
 				start := time.Now()
 				_, _, err := client.Exchange(msg, s.UDPAddr())
@@ -194,13 +199,15 @@ func TestCacheDifferentTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			// First query
 			msg1 := new(dns.Msg)
 			msg1.SetQuestion(tt.domain, tt.qtype)
+			msg1.SetEdns0(4096, false)
 
 			start1 := time.Now()
 			_, _, err := client.Exchange(msg1, s.UDPAddr())
@@ -213,6 +220,7 @@ func TestCacheDifferentTypes(t *testing.T) {
 			// Second query (should be cached)
 			msg2 := new(dns.Msg)
 			msg2.SetQuestion(tt.domain, tt.qtype)
+			msg2.SetEdns0(4096, false)
 
 			start2 := time.Now()
 			_, _, err = client.Exchange(msg2, s.UDPAddr())
@@ -256,8 +264,9 @@ func TestCacheHitRate(t *testing.T) {
 	}
 
 	client := &dns.Client{
-		Net:     "udp",
-		Timeout: 10 * time.Second,
+		Net:      "udp",
+		Timeout:  10 * time.Second,
+		UDPSize:  4096,
 	}
 
 	// Query each domain twice
@@ -267,6 +276,7 @@ func TestCacheHitRate(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeA)
+			msg.SetEdns0(4096, false)
 
 			start := time.Now()
 			_, _, err := client.Exchange(msg, s.UDPAddr())

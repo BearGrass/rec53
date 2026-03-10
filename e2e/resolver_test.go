@@ -80,13 +80,15 @@ func TestResolverIntegration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096, // Enable EDNS for large responses
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(tt.domain, tt.qtype)
 			msg.RecursionDesired = true
+			msg.SetEdns0(4096, false) // Enable EDNS0
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -154,13 +156,15 @@ func TestCNAMEResolution(t *testing.T) {
 	for _, domain := range cnameDomains {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeA)
 			msg.RecursionDesired = true
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -210,13 +214,15 @@ func TestNonExistentDomain(t *testing.T) {
 	for _, domain := range nonExistent {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeA)
 			msg.RecursionDesired = true
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 
@@ -271,13 +277,15 @@ func TestMultipleRecordTypes(t *testing.T) {
 
 	for _, qtype := range recordTypes {
 		client := &dns.Client{
-			Net:     "udp",
-			Timeout: 10 * time.Second,
+			Net:      "udp",
+			Timeout:  10 * time.Second,
+			UDPSize:  4096,
 		}
 
 		msg := new(dns.Msg)
 		msg.SetQuestion(domain, qtype)
 		msg.RecursionDesired = true
+		msg.SetEdns0(4096, false)
 
 		resp, _, err := client.Exchange(msg, s.UDPAddr())
 		if err != nil {
@@ -333,14 +341,16 @@ func TestLargeResponse(t *testing.T) {
 
 	for _, domain := range largeDomains {
 		t.Run(domain, func(t *testing.T) {
-			// Test UDP
+			// Test UDP with EDNS
 			udpClient := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeANY)
+			msg.SetEdns0(4096, false)
 
 			udpResp, _, err := udpClient.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -438,12 +448,14 @@ func TestIDNResolution(t *testing.T) {
 	for _, domain := range idnDomains {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 5 * time.Second,
+				Net:      "udp",
+				Timeout:  5 * time.Second,
+				UDPSize:  4096,
 			}
 
 			msg := new(dns.Msg)
 			msg.SetQuestion(domain, dns.TypeA)
+			msg.SetEdns0(4096, false)
 
 			resp, _, err := client.Exchange(msg, s.UDPAddr())
 			if err != nil {
@@ -490,12 +502,14 @@ func TestReverseDNS(t *testing.T) {
 	for _, tt := range ptrQueries {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:     "udp",
-				Timeout: 10 * time.Second,
+				Net:      "udp",
+				Timeout:  10 * time.Second,
+				UDPSize:  4096,
 			}
 
 			// Create PTR query
 			msg := new(dns.Msg)
+			msg.SetEdns0(4096, false)
 			ptrName, _ := net.LookupAddr(tt.ip)
 			if len(ptrName) > 0 {
 				// Use the reverse name

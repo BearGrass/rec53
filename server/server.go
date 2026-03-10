@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -28,6 +29,13 @@ func NewServer(listen string) *server {
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	startTime := time.Now()
 	reply := &dns.Msg{}
+
+	// Save original question before any modifications by state machine
+	var originalQuestion dns.Question
+	if len(r.Question) > 0 {
+		originalQuestion = r.Question[0]
+	}
+
 	monitor.Rec53Metric.InCounterAdd("request", r.Question[0].Name, dns.TypeToString[r.Question[0].Qtype])
 	stm := newStateInitState(r, reply)
 	result, err := Change(stm)
@@ -39,14 +47,76 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		reply = result
 	}
 
-	// Ensure reply has question section for metrics
-	if len(reply.Question) == 0 && len(r.Question) > 0 {
-		reply.Question = r.Question
+	// Restore original question to ensure response matches query
+	// This handles all cases including early returns and error paths
+	if len(originalQuestion.Name) > 0 {
+		if len(reply.Question) == 0 {
+			reply.Question = make([]dns.Question, 1)
+		}
+		reply.Question[0] = originalQuestion
+	}
+
+	// Handle truncation for UDP responses
+	if isUDP(w) {
+		reply = truncateResponse(reply, r, getMaxUDPSize(r))
 	}
 
 	monitor.Rec53Metric.OutCounterAdd("response", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode])
 	monitor.Rec53Metric.LatencyHistogramObserve("latency", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode], float64(time.Since(startTime).Milliseconds()))
 	w.WriteMsg(reply)
+}
+
+// isUDP checks if the connection is UDP
+func isUDP(w dns.ResponseWriter) bool {
+	_, ok := w.RemoteAddr().(*net.UDPAddr)
+	return ok
+}
+
+// getMaxUDPSize returns the maximum UDP response size from EDNS0 or default
+func getMaxUDPSize(r *dns.Msg) int {
+	const defaultUDPSize = 512
+	if opt := r.IsEdns0(); opt != nil {
+		size := int(opt.UDPSize())
+		if size > 0 {
+			return size
+		}
+	}
+	return defaultUDPSize
+}
+
+// truncateResponse truncates a DNS response if it exceeds the maximum UDP size
+func truncateResponse(reply, request *dns.Msg, maxSize int) *dns.Msg {
+	// Check if response fits
+	if reply.Len() <= maxSize {
+		return reply
+	}
+
+	// Set truncated flag
+	reply.Truncated = true
+
+	// Try to fit as much as possible by removing answer records
+	// Keep removing from the end until it fits or no more answers
+	for len(reply.Answer) > 0 && reply.Len() > maxSize {
+		reply.Answer = reply.Answer[:len(reply.Answer)-1]
+	}
+
+	// If still too large, clear extra section
+	if reply.Len() > maxSize {
+		reply.Extra = nil
+	}
+
+	// If still too large, clear answer section completely
+	if reply.Len() > maxSize {
+		reply.Answer = nil
+	}
+
+	// Clear authoritative section for truncated responses
+	// This follows DNS protocol best practices
+	reply.Ns = nil
+
+	monitor.Rec53Log.Debugf("Response truncated: original size exceeded %d bytes", maxSize)
+
+	return reply
 }
 
 // Run starts the DNS server listeners and returns an error channel.

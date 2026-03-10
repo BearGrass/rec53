@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/miekg/dns"
@@ -14,12 +15,30 @@ func newCache() *cache.Cache {
 	return cache.New(5*time.Minute, 10*time.Minute)
 }
 
+// getCacheKey generates a cache key that includes both domain name and query type.
+// This ensures different record types for the same domain are cached separately.
+func getCacheKey(name string, qtype uint16) string {
+	return fmt.Sprintf("%s:%d", name, qtype)
+}
+
 func getCache(key string) (*dns.Msg, bool) {
 	value, found := globalDnsCache.Get(key)
 	if !found {
 		return nil, false
 	}
 	return value.(*dns.Msg), true
+}
+
+// getCacheCopyByType returns a deep copy of the cached message for a specific query type.
+func getCacheCopyByType(name string, qtype uint16) (*dns.Msg, bool) {
+	key := getCacheKey(name, qtype)
+	return getCacheCopy(key)
+}
+
+// setCacheCopyByType stores a copy of the message with the query type in the key.
+func setCacheCopyByType(name string, qtype uint16, value *dns.Msg, expire uint32) {
+	key := getCacheKey(name, qtype)
+	setCacheCopy(key, value, expire)
 }
 
 // getCacheCopy returns a deep copy of the cached message to prevent
