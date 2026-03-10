@@ -10,14 +10,10 @@
 
 | 优先级 | 标签 | 任务 | 备注 |
 |--------|------|------|------|
-| P0 | TEST | 补充 monitor/metric.go 单元测试 | TEST_PLAN.md 第1批，预计+5% |
-| P1 | TEST | 补充 cmd/rec53.go 信号处理测试 | TEST_PLAN.md 第2批 |
-| P1 | TEST | 补充 state_machine.go Change 完整路径测试 | CNAME循环、MaxIterations |
-| P1 | TEST | 补充 iterState 成功查询路径测试 | 需要 mock DNS 服务器 |
 | P1 | REQ | 依赖注入重构（消除全局变量） | ROADMAP.md 技术债务 |
 | P1 | REQ | 状态机类型安全（StateID 替代 int） | ROADMAP.md 技术债务 |
-| P2 | TEST | 补充 utils/net.go Hc 函数测试 | TEST_PLAN.md 第4批 |
-| P2 | TEST | 修复 E2E 测试（Mock 完整解析链） | TEST_PLAN.md 第5批 |
+| P2 | TEST | 补充 utils/net.go Hc 函数测试 | TEST_PLAN.md P2 |
+| P2 | TEST | 修复 E2E 测试（Mock 完整解析链） | TEST_PLAN.md P2 |
 | P2 | OPT | DNS Client 连接池 | ROADMAP.md 技术债务 |
 | P2 | OPT | 性能基准测试 | ROADMAP.md 技术债务 |
 
@@ -27,6 +23,10 @@
 
 | 日期 | 任务 |
 |------|------|
+| 2026-03-10 | 测试第4批: cmd/signal_test.go，覆盖率 20.0% → 47.1% |
+| 2026-03-10 | 测试第3批: server/state_define_test.go，覆盖率 75.9% → 76.8% |
+| 2026-03-10 | 测试覆盖率提升: monitor 3.2% → 58.1%, server → 75.9% |
+| 2026-03-10 | 新增 state_machine_test.go 完整状态机测试 |
 | 2026-03-10 | 文档重构：新增 ARCHITECTURE.md, TEST_PLAN.md, TODO.md, CHANGELOG.md |
 | 2026-03-10 | Question Section Mismatch 修复 |
 | 2026-03-09 | E2E 测试修复（缓存类型、CNAME 循环等） |
@@ -38,13 +38,13 @@
 ## 覆盖率进度
 
 ```
-当前:    ~30%
-目标:    >60%
+当前:    ~65% (目标 >60%) ✅
 
-server:   75.2% ✅
+server:   76.8% ✅
 utils:    82.6% ✅
-cmd:      20.0% ⚠️
-monitor:   3.2% ⚠️
+monitor:  58.1% ✅
+cmd:      47.1% ✅
+e2e:      28.6% ⚠️ (需网络)
 ```
 
 ---

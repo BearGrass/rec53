@@ -227,20 +227,33 @@ Query: www.example.com (A)
 ```
 rec53/
 ├── cmd/
-│   └── rec53.go          # 入口：flag 解析、信号处理、启动
+│   ├── rec53.go          # 入口：flag 解析、信号处理、启动
+│   ├── loglevel.go       # 日志级别解析
+│   └── log_level_test.go # 日志级别测试
 ├── server/
 │   ├── server.go         # UDP/TCP 服务器
+│   ├── state.go          # 状态常量定义
 │   ├── state_machine.go  # 状态机引擎
 │   ├── state_define.go   # 状态定义与实现
 │   ├── cache.go          # DNS 缓存
-│   └── ip_pool.go        # IP 质量管理
+│   ├── ip_pool.go        # IP 质量管理
+│   └── *_test.go         # 单元测试
 ├── monitor/
 │   ├── metric.go         # Prometheus 指标
-│   └── log.go            # zap 日志
+│   ├── log.go            # zap 日志
+│   ├── var.go            # 变量定义
+│   └── *_test.go         # 单元测试
 ├── utils/
-│   └── zone.go           # Zone 解析、Root servers
+│   ├── zone.go           # Zone 解析
+│   ├── root.go           # Root servers
+│   ├── net.go            # 网络工具 (Hc)
+│   └── *_test.go         # 单元测试
 └── e2e/
-    └── e2e_test.go       # 端到端测试
+    ├── helpers.go        # 测试辅助函数
+    ├── resolver_test.go  # 解析器测试
+    ├── cache_test.go     # 缓存集成测试
+    ├── server_test.go    # 服务器测试
+    └── error_test.go     # 错误处理测试
 ```
 
 ## 设计决策

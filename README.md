@@ -230,7 +230,7 @@ go vet ./...
 
 ## Roadmap
 
-See [`.rec53/roadmap/ROADMAP.md`](.rec53/roadmap/ROADMAP.md) for planned features:
+See [`.rec53/ROADMAP.md`](.rec53/ROADMAP.md) for planned features:
 - DNSSEC validation
 - DoT/DoH support
 - Concurrent queries
@@ -239,9 +239,7 @@ See [`.rec53/roadmap/ROADMAP.md`](.rec53/roadmap/ROADMAP.md) for planned feature
 ## Documentation
 
 - [`.rec53/README.md`](.rec53/README.md) - Project documentation index
-- [`.rec53/roadmap/`](.rec53/roadmap/) - Roadmap and requirements
-- [`.rec53/progress/`](.rec53/progress/) - Development progress
-- [`.rec53/quality/`](.rec53/quality/) - Code quality analysis
+- [`.rec53/ROADMAP.md`](.rec53/ROADMAP.md) - Roadmap and requirements
 
 ## References
 
