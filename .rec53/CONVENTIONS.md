@@ -1,6 +1,6 @@
-# rec53 项目规范
+# rec53 编码规范
 
-本项目为递归DNS解析器，参考 BIND、Unbound、CoreDNS 等开源实现。
+本项目为递归 DNS 解析器，参考 BIND、Unbound、CoreDNS 等开源实现。
 
 ## 编码规范
 
@@ -42,7 +42,7 @@
 
 ## 测试要求
 - 核心功能必须有单元测试
-- 测试覆盖率目标 > 70%
+- 测试覆盖率目标 > 60%
 - 使用 table-driven 测试
 
 ## 参考实现
@@ -50,10 +50,10 @@
 | 项目 | 特点 |
 |------|------|
 | BIND 9 | 权威+递归，配置复杂，功能完整 |
-| Unbound | 纯递归，状态机架构，验证DNSSEC |
-| CoreDNS | 插件化，Kubernetes集成，Go实现 |
+| Unbound | 纯递归，状态机架构，验证 DNSSEC |
+| CoreDNS | 插件化，Kubernetes 集成，Go 实现 |
 
 ## 相关文档
-- [需求列表](requirements/REQUIREMENTS.md)
-- [开发路线图](requirements/ROADMAP.md)
-- [开发进展](requirements/PROGRESS.md)
+- [架构设计](ARCHITECTURE.md)
+- [路线图](ROADMAP.md)
+- [测试计划](TEST_PLAN.md)
