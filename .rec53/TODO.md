@@ -1,67 +1,32 @@
-# TODO
+# Task Management
 
-## 当前任务
+## In Progress
 
-暂无进行中的任务。
+<!-- No tasks currently in progress -->
 
----
+## Backlog
 
-## 待办
+### BUG
+<!-- Format: - [ ] [B-xxx] description (file:line) -->
+- [ ] [B-001] E2E TestCacheBehavior timeout on second query (e2e/cache_test.go:74)
+- [ ] [B-002] E2E TestResolverIntegration NS record returns SERVFAIL (e2e/resolver_test.go:99)
 
-| 优先级 | 标签 | 任务 | 备注 |
-|--------|------|------|------|
-| P1 | REQ | 依赖注入重构（消除全局变量） | ROADMAP.md 技术债务 |
-| P1 | REQ | 状态机类型安全（StateID 替代 int） | ROADMAP.md 技术债务 |
-| P2 | TEST | 补充 utils/net.go Hc 函数测试 | TEST_PLAN.md P2 |
-| P2 | TEST | 修复 E2E 测试（Mock 完整解析链） | TEST_PLAN.md P2 |
-| P2 | OPT | DNS Client 连接池 | ROADMAP.md 技术债务 |
-| P2 | OPT | 性能基准测试 | ROADMAP.md 技术债务 |
+### Optimization
+<!-- Format: - [ ] [O-xxx] description -->
 
----
+### Technical Debt
+<!-- Format: - [ ] [D-xxx] description (source) -->
+- [ ] [D-001] Add test cases for state machine (server/state_machine_test.go:29)
 
-## 已完成
-
-| 日期 | 任务 |
-|------|------|
-| 2026-03-10 | 测试第4批: cmd/signal_test.go，覆盖率 20.0% → 47.1% |
-| 2026-03-10 | 测试第3批: server/state_define_test.go，覆盖率 75.9% → 76.8% |
-| 2026-03-10 | 测试覆盖率提升: monitor 3.2% → 58.1%, server → 75.9% |
-| 2026-03-10 | 新增 state_machine_test.go 完整状态机测试 |
-| 2026-03-10 | 文档重构：新增 ARCHITECTURE.md, TEST_PLAN.md, TODO.md, CHANGELOG.md |
-| 2026-03-10 | Question Section Mismatch 修复 |
-| 2026-03-09 | E2E 测试修复（缓存类型、CNAME 循环等） |
-| 2026-03-04 | Phase 1: 并发安全修复 |
-| 2026-03-04 | v0.1.0 发布 |
-
----
-
-## 覆盖率进度
-
-```
-当前:    ~65% (目标 >60%) ✅
-
-server:   76.8% ✅
-utils:    82.6% ✅
-monitor:  58.1% ✅
-cmd:      47.1% ✅
-e2e:      28.6% ⚠️ (需网络)
-```
-
----
-
-## 标签说明
-
-| 标签 | 含义 |
-|------|------|
-| REQ | 功能需求 |
-| BUG | 缺陷修复 |
-| OPT | 性能优化 |
-| TEST | 测试相关 |
-
-## 优先级说明
-
-| 优先级 | 含义 |
-|--------|------|
-| P0 | 当前版本必须完成 |
-| P1 | 下个版本完成 |
-| P2 | 想到了先记着 |
+## Completed
+<!-- Move completed items here with completion date -->
+<!-- Format: - [x] [B-001] description (completed YYYY-MM-DD) -->
+- [x] [B-004] CNAME with Valid NS Delegation Bug (completed 2026-03-10)
+  - Added `isNSRelevantForCNAME()` helper function using `dns.IsSubDomain()`
+  - Modified CHECK_RESP_GET_CNAME handler to conditionally preserve NS/Extra
+  - Unit tests pass: TestIsNSRelevantForCNAME, TestCNAMEChain_ValidNSDelegation, TestCNAMEChain_StaleNSDelegation
+  - E2E tests for real domains may timeout due to network issues
+- [x] [B-003] CNAME Chain Resolution Bug (completed 2026-03-10)
+  - Fix was already in place at state_machine.go:99-102
+  - Added comprehensive unit tests in state_machine_test.go
+  - Tests: TestCNAMEChain_ClearStaleRecords, TestCNAMEChain_CrossZoneResolution, TestCNAMEChain_MultiLevelResolution, TestCNAMEChain_TTLPreservation

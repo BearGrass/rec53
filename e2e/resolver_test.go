@@ -190,6 +190,106 @@ func TestCNAMEResolution(t *testing.T) {
 	}()
 }
 
+// TestCNAMEChainWithValidNSDelegation tests B-004 scenario:
+// CNAME chain where upstream provides valid NS delegation for the CNAME target's zone.
+// This test verifies that such delegation is preserved and used correctly.
+func TestCNAMEChainWithValidNSDelegation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	s := server.NewServer("127.0.0.1:0")
+	errChan := s.Run()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.Shutdown(ctx)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Domains that have CNAME chains with valid NS delegation from upstream
+	// These domains typically return CNAME + NS records for the CNAME target's zone
+	testDomains := []struct {
+		name        string
+		domain      string
+		description string
+	}{
+		{
+			name:        "www.huawei.com",
+			domain:      "www.huawei.com.",
+			description: "CNAME to akadns.net zone with valid NS delegation",
+		},
+		{
+			name:        "www.baidu.com",
+			domain:      "www.baidu.com.",
+			description: "CNAME chain with CDN delegation",
+		},
+	}
+
+	for _, tt := range testDomains {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &dns.Client{
+				Net:      "udp",
+				Timeout:  15 * time.Second,
+				UDPSize:  4096,
+			}
+
+			msg := new(dns.Msg)
+			msg.SetQuestion(tt.domain, dns.TypeA)
+			msg.RecursionDesired = true
+			msg.SetEdns0(4096, false)
+
+			resp, _, err := client.Exchange(msg, s.UDPAddr())
+			if err != nil {
+				t.Fatalf("Query failed: %v", err)
+			}
+
+			t.Logf("B-004 test for %s (%s):", tt.domain, tt.description)
+			t.Logf("  Response code: %s", dns.RcodeToString[resp.Rcode])
+			t.Logf("  Answer count: %d", len(resp.Answer))
+
+			// Log the answer chain
+			for i, rr := range resp.Answer {
+				switch v := rr.(type) {
+				case *dns.CNAME:
+					t.Logf("  [%d] CNAME: %s -> %s", i, v.Hdr.Name, v.Target)
+				case *dns.A:
+					t.Logf("  [%d] A: %s -> %s", i, v.Hdr.Name, v.A.String())
+				}
+			}
+
+			// B-004 fix: Should return SUCCESS (not SERVFAIL) with A records
+			if resp.Rcode == dns.RcodeServerFailure {
+				t.Errorf("B-004 FAIL: Got SERVFAIL for %s - NS delegation may not be preserved correctly", tt.domain)
+			}
+
+			// Check if we got final A records (CNAME chain resolved successfully)
+			hasARecord := false
+			for _, rr := range resp.Answer {
+				if _, ok := rr.(*dns.A); ok {
+					hasARecord = true
+					break
+				}
+			}
+
+			// Note: Some domains may have complex CNAME chains that timeout
+			// The important thing is we don't get SERVFAIL due to wrong NS delegation
+			if hasARecord {
+				t.Logf("  SUCCESS: CNAME chain resolved with A records")
+			} else {
+				t.Logf("  INFO: No A records in answer (may be complex chain or timeout)")
+			}
+		})
+	}
+
+	// Drain error channel
+	go func() {
+		for range errChan {
+		}
+	}()
+}
+
 // TestNonExistentDomain tests NXDOMAIN handling.
 func TestNonExistentDomain(t *testing.T) {
 	if testing.Short() {

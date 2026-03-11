@@ -20,8 +20,26 @@ type stateMachine interface {
 	handle(request *dns.Msg, response *dns.Msg) (int, error)
 }
 
+// isNSRelevantForCNAME checks if NS records are relevant for resolving a CNAME target.
+// NS records are relevant if their zone matches or is a parent of the CNAME target.
+// This enables smart preservation of valid delegation info when following CNAME chains.
+func isNSRelevantForCNAME(nsRecords []dns.RR, cnameTarget string) bool {
+	if len(nsRecords) == 0 {
+		return false
+	}
+
+	// Get the zone name from the first NS record
+	nsZone := nsRecords[0].Header().Name
+
+	// Check if CNAME target is a subdomain of the NS zone
+	// e.g., nsZone="akadns.net.", cnameTarget="www.huawei.com.akadns.net." -> true
+	// e.g., nsZone="zone1.com.", cnameTarget="target.zone2.com." -> false
+	return dns.IsSubDomain(nsZone, cnameTarget)
+}
+
 // Change executes the state machine until a final state is reached.
 // It includes protection against infinite loops via iteration count and CNAME cycle detection.
+// Per RFC1034 Section 3.6.2, CNAME chains are preserved in the response.
 func Change(stm stateMachine) (*dns.Msg, error) {
 	// Track visited domains for CNAME cycle detection
 	visitedDomains := make(map[string]bool)
@@ -29,6 +47,10 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 
 	// Save original question for response
 	originalQuestion := stm.getRequest().Question[0]
+
+	// Accumulate CNAME records for RFC1034 compliant responses
+	// The CNAME chain must be included in the Answer section
+	var cnameChain []dns.RR
 
 	for {
 		iterations++
@@ -38,6 +60,8 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 		}
 
 		st := stm.getCurrentState()
+		monitor.Rec53Log.Debugf("[STATE_MACHINE] Iteration %d, current state: %d, query: %s",
+			iterations, st, stm.getRequest().Question[0].Name)
 		switch st {
 		case STATE_INIT:
 			if _, err := stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
@@ -83,9 +107,11 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CHECK_RESP_GET_CNAME:
 				// Find the CNAME record in the answer
 				var cnameTarget string
+				var cnameRecord *dns.CNAME
 				for _, rr := range stm.getResponse().Answer {
 					if cname, ok := rr.(*dns.CNAME); ok {
 						cnameTarget = cname.Target
+						cnameRecord = cname
 						break
 					}
 				}
@@ -96,6 +122,28 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 						return nil, fmt.Errorf("CNAME cycle detected: %s", cnameTarget)
 					}
 					visitedDomains[cnameTarget] = true
+
+					// Per RFC1034 Section 3.6.2, preserve CNAME records in the chain
+					// The CNAME record must be included in the final response
+					if cnameRecord != nil {
+						cnameChain = append(cnameChain, dns.Copy(cnameRecord))
+						monitor.Rec53Log.Debugf("CNAME chain: added %s -> %s", cnameRecord.Hdr.Name, cnameRecord.Target)
+					}
+
+					// Smart NS/Extra handling for CNAME following (B-004):
+					// Only clear delegation records if they are NOT relevant to the CNAME target.
+					// This preserves valid NS delegation from upstream when the NS zone matches
+					// or is a parent of the CNAME target's zone.
+					if !isNSRelevantForCNAME(stm.getResponse().Ns, cnameTarget) {
+						monitor.Rec53Log.Debugf("Clearing stale NS/Extra for CNAME target %s (NS zone mismatch)", cnameTarget)
+						stm.getResponse().Ns = nil
+						stm.getResponse().Extra = nil
+					} else {
+						monitor.Rec53Log.Debugf("Preserving NS/Extra for CNAME target %s (NS zone matches)", cnameTarget)
+					}
+					// Clear the Answer section before following CNAME to avoid stale records
+					// being misinterpreted as new responses. CNAME records are preserved in cnameChain.
+					stm.getResponse().Answer = nil
 					stm.getRequest().Question[0].Name = cnameTarget
 				}
 				stm = newInCacheState(stm.getRequest(), stm.getResponse())
@@ -172,6 +220,14 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			// Restore original question before returning response
 			resp := stm.getResponse()
 			resp.Question[0] = originalQuestion
+
+			// Per RFC1034 Section 3.6.2: prepend CNAME chain to the answer section
+			// The CNAME records must appear before the final records
+			if len(cnameChain) > 0 {
+				resp.Answer = append(cnameChain, resp.Answer...)
+				monitor.Rec53Log.Debugf("Prepended %d CNAME records to answer section", len(cnameChain))
+			}
+
 			return resp, nil
 		default:
 			monitor.Rec53Log.Errorf("Wrong state %d", stm.getCurrentState())

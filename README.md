@@ -16,7 +16,7 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 
 ```bash
 # Build
-go build -o rec53 cmd/rec53.go
+go build -o rec53 ./cmd
 
 # Run (DNS on :5353, metrics on :9999)
 ./rec53
