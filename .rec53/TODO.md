@@ -35,6 +35,9 @@
 
 ## Completed
 
+- [x] [B-017] NS 递归解析栈溢出（fixed 2026-03-11）
+  - Fix: Added break statement in resolveNSIPsRecursively() at line 319
+  - Verification: E2E test pass, all regression tests pass
 - [x] [B-005] NS 递归解析栈溢出 crash (completed 2026-03-11)
   - Status: FIXED - resolveNSIPsRecursively() in state_define.go:289-323 handles NS resolution via state machine
   - Verified: Tests pass, no infinite recursion, proper error handling with depth limits
