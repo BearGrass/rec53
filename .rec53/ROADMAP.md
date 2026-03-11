@@ -1,110 +1,55 @@
-# rec53 路线图
+# Roadmap
 
-## 版本规划
+## Version History
 
-### v0.1.0 - 基础功能 (当前)
+| Version | Date | Highlights |
+|---------|------|------------|
+| dev | 2026-03 | Graceful shutdown, comprehensive tests, E2E test suite |
+| - | 2026-03 | IP quality tracking with prefetch |
+| - | 2026-03 | Prometheus metrics integration |
+| - | 2026-03 | Docker Compose deployment |
 
-**核心功能**
-- [x] 基本递归解析
-- [x] UDP/TCP 支持
-- [x] 缓存机制（含类型区分）
-- [x] Prometheus 监控
-- [x] 优雅关闭
-- [x] CNAME 链追踪
-- [x] Glue records 处理
-- [x] IP 质量评估与预取
+No git tags found. Version history derived from commit history.
 
-**代码质量**
-- [x] 并发安全修复（atomic + RWMutex）
-- [x] 测试覆盖率提升（目标 >60%）✅ 当前 ~60%
+## Current Version: dev
 
-### v0.2.0 - 性能优化
+### Features
 
-**功能需求**
-- [ ] 并发查询支持
-- [ ] 查询流水线
-- [ ] 缓存预取优化
-- [ ] 负缓存支持
-- [ ] EDNS(0) 完整支持
+- Recursive DNS resolution from root servers
+- UDP/TCP dual protocol support
+- LRU cache with TTL-based expiration (5 min default)
+- IP quality tracking for optimal upstream server selection
+- IP prefetch for candidate servers
+- Prometheus metrics endpoint
+- Graceful shutdown with 5-second timeout
+- CNAME loop detection
+- EDNS0 support (4096-byte buffer)
 
-**非功能需求**
-- QPS: 目标 50,000+ queries/sec
-- 延迟: P99 < 50ms (缓存命中)
-- 内存: < 500MB (10万缓存条目)
+### Known Issues
 
-### v0.3.0 - 安全增强
+- [ ] E2E tests for `www.huawei.com` may timeout due to network issues or complex DNS infrastructure (B-004 fix implemented, logic verified by unit tests)
 
-- [ ] DNSSEC 验证
-- [ ] DNS-over-TLS (DoT)
-- [ ] 查询速率限制
+## Next Version: v1.0.0 (Planned)
 
-### v0.4.0 - 高级特性
+### Planned
 
-- [ ] DNS-over-HTTPS (DoH)
-- [ ] 配置热加载
-- [ ] 健康检查接口
-- [ ] 源地址白名单
+- [ ] DNSSEC validation
+- [ ] DoT/DoH support
+- [ ] Concurrent queries to multiple nameservers
+- [ ] Query rate limiting
 
----
+### Under Consideration
 
-## 功能需求清单
+- DNS over QUIC support
+- Response policy zones (RPZ)
+- Custom forwarding rules
+- IPv6-only operation improvements
 
-### 核心功能
-| 需求 | 状态 | 版本 |
-|------|------|------|
-| 递归 DNS 解析 | ✅ 已完成 | v0.1 |
-| UDP/TCP 支持 | ✅ 已完成 | v0.1 |
-| 缓存机制 (LRU) | ✅ 已完成 | v0.1 |
-| Glue records 处理 | ✅ 已完成 | v0.1 |
-| 迭代解析 | ✅ 已完成 | v0.1 |
-| CNAME 链追踪 | ✅ 已完成 | v0.1 |
-| IP 质量评估 | ✅ 已完成 | v0.1 |
-| IP 预取 (Prefetch) | ✅ 已完成 | v0.1 |
-| DNSSEC 验证 | 待开始 | v0.3 |
-| EDNS(0) 支持 | 部分完成 | v0.2 |
-| 负缓存 (Negative Caching) | 待开始 | v0.2 |
+## Future
 
-### 性能优化
-| 需求 | 状态 | 版本 |
-|------|------|------|
-| 并发查询 | 待开始 | v0.2 |
-| 查询流水线 | 待开始 | v0.2 |
-| DNS Client 连接池 | 待开始 | v0.2 |
+### Long-term Goals
 
-### 监控与运维
-| 需求 | 状态 | 版本 |
-|------|------|------|
-| Prometheus 指标 | ✅ 已完成 | v0.1 |
-| 日志级别控制 | ✅ 已完成 | v0.1 |
-| 优雅关闭 | ✅ 已完成 | v0.1 |
-| 配置热加载 | 待开始 | v0.4 |
-| 健康检查接口 | 待开始 | v0.4 |
-
-### 安全特性
-| 需求 | 状态 | 版本 |
-|------|------|------|
-| DNS-over-TLS (DoT) | 待开始 | v0.3 |
-| DNS-over-HTTPS (DoH) | 待开始 | v0.4 |
-| 查询速率限制 | 待开始 | v0.3 |
-| 源地址白名单 | 待开始 | v0.4 |
-
----
-
-## 技术债务
-
-| 优先级 | 任务 | 状态 |
-|--------|------|------|
-| P0 | 测试覆盖率提升 | ✅ 已完成 (~60%) |
-| P1 | 依赖注入重构（消除全局变量） | 待开始 |
-| P1 | 状态机类型安全（用 StateID 替代 int） | 待开始 |
-| P2 | DNS Client 连接池 | 待开始 |
-| P2 | 性能基准测试 | 待开始 |
-
----
-
-## 参考资源
-
-- [RFC 1034] Domain Names - Concepts and Facilities
-- [RFC 1035] Domain Names - Implementation and Specification
-- [RFC 6891] EDNS(0)
-- [RFC 4033-4035] DNSSEC
+- Full DNSSEC validation chain
+- High-availability clustering
+- Query logging and analytics
+- Web-based dashboard

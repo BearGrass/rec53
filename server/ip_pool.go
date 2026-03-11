@@ -152,10 +152,10 @@ func (ipp *IPPool) UpIPsQuality(ips []string) {
 
 func (ipp *IPPool) getBestIPs(ips []string) (string, string) {
 	var (
-		bestIP                 string = ""
-		bestLatency            int32  = MAX_IP_LATENCY
-		bestIPWithoutInit      string = ""
-		bestLatencyWithoutInit int32  = MAX_IP_LATENCY
+		bestIP      string = ""
+		bestLatency int32  = MAX_IP_LATENCY
+		secondIP    string = ""
+		secondDelay int32  = MAX_IP_LATENCY
 	)
 
 	for _, ip := range ips {
@@ -166,17 +166,23 @@ func (ipp *IPPool) getBestIPs(ips []string) (string, string) {
 			ipp.SetIPQuality(ip, ipq)
 		}
 		currentLatency := ipq.GetLatency()
+		monitor.Rec53Log.Debug(ip, ",", ipq.GetLatency())
+
+		// Update best and second best IPs
 		if currentLatency < bestLatency {
+			// Current best becomes second best
+			secondIP = bestIP
+			secondDelay = bestLatency
+			// New best
 			bestIP = ip
 			bestLatency = currentLatency
+		} else if currentLatency < secondDelay && ip != bestIP {
+			// Update second best if better than current second
+			secondIP = ip
+			secondDelay = currentLatency
 		}
-		if !ipq.IsInit() && currentLatency < bestLatencyWithoutInit {
-			bestIPWithoutInit = ip
-			bestLatencyWithoutInit = currentLatency
-		}
-		monitor.Rec53Log.Debug(ip, ",", ipq.GetLatency())
 	}
-	return bestIP, bestIPWithoutInit
+	return bestIP, secondIP
 }
 
 func (ipp *IPPool) GetPrefetchIPs(bestIP string) []string {

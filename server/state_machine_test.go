@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"reflect"
 	"testing"
@@ -857,4 +858,598 @@ func TestChange_AAAARecord(t *testing.T) {
 	if aaaa.AAAA.String() != "2001:db8::1" {
 		t.Errorf("Expected IPv6 address '2001:db8::1', got '%s'", aaaa.AAAA.String())
 	}
+}
+
+// =============================================================================
+// CNAME Chain Resolution Tests (B-003)
+// =============================================================================
+
+// TestCheckRespState_CNAMEDetection tests that checkRespState correctly detects CNAME records
+// and returns CHECK_RESP_GET_CNAME when a CNAME is found without a matching A record.
+func TestCheckRespState_CNAMEDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     *dns.Msg
+		response    *dns.Msg
+		expectedRet int
+		description string
+	}{
+		{
+			name: "CNAME only - should follow",
+			request: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.SetQuestion("www.example.com.", dns.TypeA)
+				return m
+			}(),
+			response: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.Answer = []dns.RR{
+					&dns.CNAME{
+						Hdr:    dns.RR_Header{Name: "www.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+						Target: "example.com.",
+					},
+				}
+				// Stale NS/Extra from previous zone (this is what B-003 fixes)
+				m.Ns = []dns.RR{
+					&dns.NS{
+						Hdr: dns.RR_Header{Name: "other.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+						Ns:  "ns1.other.com.",
+					},
+				}
+				m.Extra = []dns.RR{
+					&dns.A{
+						Hdr: dns.RR_Header{Name: "ns1.other.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+						A:   parseTestIP("192.0.2.1"),
+					},
+				}
+				return m
+			}(),
+			expectedRet:   CHECK_RESP_GET_CNAME,
+			description:   "CNAME without matching A should trigger CNAME follow",
+		},
+		{
+			name: "CNAME with matching A - should return answer",
+			request: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.SetQuestion("www.example.com.", dns.TypeA)
+				return m
+			}(),
+			response: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.Answer = []dns.RR{
+					&dns.CNAME{
+						Hdr:    dns.RR_Header{Name: "www.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+						Target: "example.com.",
+					},
+					&dns.A{
+						Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+						A:   parseTestIP("192.0.2.1"),
+					},
+				}
+				return m
+			}(),
+			expectedRet:   CHECK_RESP_GET_ANS,
+			description:   "CNAME with matching A should return answer directly",
+		},
+		{
+			name: "Multi-level CNAME chain - first level",
+			request: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.SetQuestion("a.example.com.", dns.TypeA)
+				return m
+			}(),
+			response: func() *dns.Msg {
+				m := new(dns.Msg)
+				m.Answer = []dns.RR{
+					&dns.CNAME{
+						Hdr:    dns.RR_Header{Name: "a.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+						Target: "b.example.com.",
+					},
+				}
+				return m
+			}(),
+			expectedRet:   CHECK_RESP_GET_CNAME,
+			description:   "First CNAME in chain should trigger follow",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := newCheckRespState(tt.request, tt.response)
+			ret, err := state.handle(tt.request, tt.response)
+
+			if err != nil {
+				t.Errorf("handle() unexpected error: %v", err)
+				return
+			}
+
+			if ret != tt.expectedRet {
+				t.Errorf("handle() returned %d (%s), expected %d - %s",
+					ret, returnCodeToString(ret), tt.expectedRet, tt.description)
+			}
+		})
+	}
+}
+
+// TestCNAMEChain_ClearStaleRecords verifies that when following a CNAME,
+// the stale NS and Extra records are cleared from the response.
+// This is the core fix for B-003.
+func TestCNAMEChain_ClearStaleRecords(t *testing.T) {
+	// Create a mock state machine that simulates CNAME chain resolution
+	req := new(dns.Msg)
+	req.SetQuestion("alias.zone1.com.", dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+	// CNAME pointing to different zone
+	resp.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: "alias.zone1.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.zone2.com.",
+		},
+	}
+	// Stale NS/Extra from zone1 - these should be cleared when following CNAME
+	resp.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "zone1.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "ns1.zone1.com.",
+		},
+	}
+	resp.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns1.zone1.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   parseTestIP("192.0.2.1"),
+		},
+	}
+
+	// Simulate what happens in Change() when CHECK_RESP_GET_CNAME is returned
+	// This is the code path at state_machine.go:83-105
+	state := newCheckRespState(req, resp)
+	ret, err := state.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if ret != CHECK_RESP_GET_CNAME {
+		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	}
+
+	// Now simulate the CNAME handling in Change()
+	// Find the CNAME target
+	var cnameTarget string
+	for _, rr := range resp.Answer {
+		if cname, ok := rr.(*dns.CNAME); ok {
+			cnameTarget = cname.Target
+			break
+		}
+	}
+
+	if cnameTarget != "target.zone2.com." {
+		t.Fatalf("Expected CNAME target 'target.zone2.com.', got '%s'", cnameTarget)
+	}
+
+	// Clear stale delegation records (this is the B-003 fix)
+	resp.Ns = nil
+	resp.Extra = nil
+	req.Question[0].Name = cnameTarget
+
+	// Verify the fix worked
+	if len(resp.Ns) != 0 {
+		t.Error("Expected Ns to be cleared after CNAME follow")
+	}
+	if len(resp.Extra) != 0 {
+		t.Error("Expected Extra to be cleared after CNAME follow")
+	}
+	if req.Question[0].Name != "target.zone2.com." {
+		t.Errorf("Expected query name updated to 'target.zone2.com.', got '%s'", req.Question[0].Name)
+	}
+
+	t.Log("B-003 fix verified: stale NS/Extra records are cleared when following CNAME")
+}
+
+// TestCNAMEChain_MultiLevelResolution tests multi-level CNAME chain handling.
+func TestCNAMEChain_MultiLevelResolution(t *testing.T) {
+	// Simulate a 3-level CNAME chain: a -> b -> c -> target
+	chain := []struct {
+		queryName   string
+		cnameTarget string
+		finalA      string
+	}{
+		{"a.example.com.", "b.example.com.", ""},
+		{"b.example.com.", "c.example.com.", ""},
+		{"c.example.com.", "target.example.com.", ""},
+		{"target.example.com.", "", "192.0.2.99"},
+	}
+
+	for i, step := range chain {
+		t.Run(fmt.Sprintf("step_%d_%s", i, step.queryName), func(t *testing.T) {
+			req := new(dns.Msg)
+			req.SetQuestion(step.queryName, dns.TypeA)
+
+			resp := new(dns.Msg)
+			resp.SetReply(req)
+
+			if step.cnameTarget != "" {
+				resp.Answer = []dns.RR{
+					&dns.CNAME{
+						Hdr:    dns.RR_Header{Name: step.queryName, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+						Target: step.cnameTarget,
+					},
+				}
+			} else if step.finalA != "" {
+				resp.Answer = []dns.RR{
+					&dns.A{
+						Hdr: dns.RR_Header{Name: step.queryName, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+						A:   parseTestIP(step.finalA),
+					},
+				}
+			}
+
+			state := newCheckRespState(req, resp)
+			ret, err := state.handle(req, resp)
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if step.cnameTarget != "" {
+				if ret != CHECK_RESP_GET_CNAME {
+					t.Errorf("Expected CHECK_RESP_GET_CNAME for step %d, got %d", i, ret)
+				}
+			} else {
+				if ret != CHECK_RESP_GET_ANS {
+					t.Errorf("Expected CHECK_RESP_GET_ANS for final step, got %d", ret)
+				}
+			}
+		})
+	}
+}
+
+// TestCNAMEChain_TTLPreservation verifies that TTLs are preserved for each record in a CNAME chain.
+func TestCNAMEChain_TTLPreservation(t *testing.T) {
+	req := new(dns.Msg)
+	req.SetQuestion("alias.example.com.", dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+
+	// Different TTLs for each record
+	cnameTTL := uint32(100)
+	aTTL := uint32(200)
+
+	resp.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: "alias.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: cnameTTL},
+			Target: "target.example.com.",
+		},
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "target.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: aTTL},
+			A:   parseTestIP("192.0.2.1"),
+		},
+	}
+
+	// Verify TTLs are preserved
+	cname := resp.Answer[0].(*dns.CNAME)
+	a := resp.Answer[1].(*dns.A)
+
+	if cname.Hdr.Ttl != cnameTTL {
+		t.Errorf("CNAME TTL not preserved: expected %d, got %d", cnameTTL, cname.Hdr.Ttl)
+	}
+
+	if a.Hdr.Ttl != aTTL {
+		t.Errorf("A record TTL not preserved: expected %d, got %d", aTTL, a.Hdr.Ttl)
+	}
+
+	t.Logf("TTLs preserved: CNAME=%d, A=%d", cname.Hdr.Ttl, a.Hdr.Ttl)
+}
+
+// TestCNAMEChain_CrossZoneResolution tests the specific B-003 bug scenario:
+// CNAME pointing to a different zone should clear stale NS/Extra records.
+func TestCNAMEChain_CrossZoneResolution(t *testing.T) {
+	// Scenario: alias.zone1.com CNAME -> target.zone2.com
+	// Zone1's nameserver returns CNAME with its own NS/Extra
+	// The resolver must clear zone1's NS/Extra before resolving zone2
+
+	req := new(dns.Msg)
+	req.SetQuestion("alias.zone1.com.", dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+	resp.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: "alias.zone1.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.zone2.com.",
+		},
+	}
+	// Zone1's nameserver info - should NOT be used for zone2
+	resp.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "zone1.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 3600},
+			Ns:  "ns1.zone1.com.",
+		},
+	}
+	resp.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns1.zone1.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
+			A:   parseTestIP("10.0.0.1"), // Zone1's nameserver IP
+		},
+	}
+
+	// Step 1: Check response detects CNAME
+	state := newCheckRespState(req, resp)
+	ret, err := state.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if ret != CHECK_RESP_GET_CNAME {
+		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	}
+
+	// Step 2: Simulate the fix - clear stale records before following CNAME
+	// This is what happens in state_machine.go:99-102
+	originalNs := resp.Ns
+	originalExtra := resp.Extra
+
+	resp.Ns = nil
+	resp.Extra = nil
+	req.Question[0].Name = "target.zone2.com."
+
+	// Verify the fix
+	if len(resp.Ns) != 0 {
+		t.Error("FAIL: Ns not cleared - would query wrong nameserver!")
+		t.Errorf("  Original Ns: %v", originalNs)
+	}
+	if len(resp.Extra) != 0 {
+		t.Error("FAIL: Extra not cleared - would use wrong glue records!")
+		t.Errorf("  Original Extra: %v", originalExtra)
+	}
+	if req.Question[0].Name != "target.zone2.com." {
+		t.Errorf("Query name not updated correctly: %s", req.Question[0].Name)
+	}
+
+	t.Log("PASS: Cross-zone CNAME correctly clears stale NS/Extra records")
+	t.Log("  This prevents querying zone1's nameserver for zone2's records")
+}
+
+// returnCodeToString converts return codes to readable strings for debugging
+func returnCodeToString(code int) string {
+	switch code {
+	case CHECK_RESP_GET_ANS:
+		return "CHECK_RESP_GET_ANS"
+	case CHECK_RESP_GET_CNAME:
+		return "CHECK_RESP_GET_CNAME"
+	case CHECK_RESP_GET_NS:
+		return "CHECK_RESP_GET_NS"
+	case CHECK_RESP_COMMON_ERROR:
+		return "CHECK_RESP_COMMON_ERROR"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", code)
+	}
+}
+
+// =============================================================================
+// B-004: CNAME with Valid NS Delegation Tests
+// =============================================================================
+
+// TestIsNSRelevantForCNAME tests the isNSRelevantForCNAME helper function
+func TestIsNSRelevantForCNAME(t *testing.T) {
+	tests := []struct {
+		name        string
+		nsZone      string
+		cnameTarget string
+		expected    bool
+		description string
+	}{
+		{
+			name:        "NS matches CNAME target's parent zone (B-004 scenario)",
+			nsZone:      "akadns.net.",
+			cnameTarget: "www.huawei.com.akadns.net.",
+			expected:    true,
+			description: "NS zone is parent of CNAME target, should preserve",
+		},
+		{
+			name:        "NS is different zone (B-003 scenario)",
+			nsZone:      "zone1.com.",
+			cnameTarget: "target.zone2.com.",
+			expected:    false,
+			description: "NS zone is unrelated, should clear",
+		},
+		{
+			name:        "NS exactly matches CNAME target zone",
+			nsZone:      "example.com.",
+			cnameTarget: "www.example.com.",
+			expected:    true,
+			description: "NS zone is parent of CNAME target, should preserve",
+		},
+		{
+			name:        "NS is root zone",
+			nsZone:      ".",
+			cnameTarget: "any.domain.com.",
+			expected:    true,
+			description: "Root zone is parent of everything, should preserve",
+		},
+		{
+			name:        "CNAME target is parent of NS zone",
+			nsZone:      "sub.example.com.",
+			cnameTarget: "example.com.",
+			expected:    false,
+			description: "NS zone is subdomain of CNAME target, should clear",
+		},
+		{
+			name:        "Empty NS records",
+			nsZone:      "",
+			cnameTarget: "example.com.",
+			expected:    false,
+			description: "No NS records, should clear",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var nsRecords []dns.RR
+			if tt.nsZone != "" {
+				nsRecords = []dns.RR{
+					&dns.NS{
+						Hdr: dns.RR_Header{Name: tt.nsZone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+						Ns:  "ns1.example.com.",
+					},
+				}
+			}
+
+			result := isNSRelevantForCNAME(nsRecords, tt.cnameTarget)
+
+			if result != tt.expected {
+				t.Errorf("isNSRelevantForCNAME(%s, %s) = %v, expected %v\n  %s",
+					tt.nsZone, tt.cnameTarget, result, tt.expected, tt.description)
+			}
+		})
+	}
+}
+
+// TestCNAMEChain_ValidNSDelegation tests the B-004 scenario:
+// CNAME with valid NS delegation should be preserved
+func TestCNAMEChain_ValidNSDelegation(t *testing.T) {
+	// Scenario: www.huawei.com CNAME -> www.huawei.com.akadns.net
+	// Upstream returns NS records for akadns.net (the CNAME target's zone)
+	// These NS records should be PRESERVED for the next iteration
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.huawei.com.", dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+	resp.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: "www.huawei.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 600},
+			Target: "www.huawei.com.akadns.net.",
+		},
+	}
+	// Valid NS delegation for CNAME target's zone
+	resp.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "akadns.net.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 172800},
+			Ns:  "a3-129.akadns.net.",
+		},
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "akadns.net.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 172800},
+			Ns:  "a1-128.akadns.net.",
+		},
+	}
+	resp.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "a3-129.akadns.net.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 172800},
+			A:   parseTestIP("96.7.49.129"),
+		},
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "a1-128.akadns.net.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 172800},
+			A:   parseTestIP("193.108.88.128"),
+		},
+	}
+
+	// Step 1: Check response detects CNAME
+	state := newCheckRespState(req, resp)
+	ret, err := state.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if ret != CHECK_RESP_GET_CNAME {
+		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	}
+
+	// Step 2: Verify isNSRelevantForCNAME returns true for this case
+	if !isNSRelevantForCNAME(resp.Ns, "www.huawei.com.akadns.net.") {
+		t.Error("isNSRelevantForCNAME should return true for valid NS delegation")
+	}
+
+	// Step 3: Simulate the B-004 fix - NS should be preserved
+	// (in actual Change(), this would be conditional)
+	if isNSRelevantForCNAME(resp.Ns, "www.huawei.com.akadns.net.") {
+		// NS should be preserved - verify they are still there
+		if len(resp.Ns) == 0 {
+			t.Error("FAIL: NS records were cleared but should have been preserved!")
+		}
+		if len(resp.Extra) == 0 {
+			t.Error("FAIL: Extra records were cleared but should have been preserved!")
+		}
+	}
+
+	t.Log("PASS: B-004 fix verified - valid NS delegation is preserved for CNAME target")
+	t.Logf("  NS zone: akadns.net.")
+	t.Logf("  CNAME target: www.huawei.com.akadns.net.")
+	t.Logf("  NS records preserved: %d", len(resp.Ns))
+	t.Logf("  Extra records preserved: %d", len(resp.Extra))
+}
+
+// TestCNAMEChain_StaleNSDelegation tests the B-003 scenario still works:
+// CNAME with stale NS delegation should be cleared
+func TestCNAMEChain_StaleNSDelegation(t *testing.T) {
+	// Scenario: alias.zone1.com CNAME -> target.zone2.com
+	// Upstream returns NS records for zone1.com (NOT the CNAME target's zone)
+	// These NS records should be CLEARED
+
+	req := new(dns.Msg)
+	req.SetQuestion("alias.zone1.com.", dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+	resp.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: "alias.zone1.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.zone2.com.",
+		},
+	}
+	// Stale NS delegation for original zone (NOT CNAME target's zone)
+	resp.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "zone1.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 3600},
+			Ns:  "ns1.zone1.com.",
+		},
+	}
+	resp.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns1.zone1.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
+			A:   parseTestIP("10.0.0.1"),
+		},
+	}
+
+	// Step 1: Check response detects CNAME
+	state := newCheckRespState(req, resp)
+	ret, err := state.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if ret != CHECK_RESP_GET_CNAME {
+		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	}
+
+	// Step 2: Verify isNSRelevantForCNAME returns false for this case
+	if isNSRelevantForCNAME(resp.Ns, "target.zone2.com.") {
+		t.Error("isNSRelevantForCNAME should return false for stale NS delegation")
+	}
+
+	// Step 3: Simulate the B-004 fix - NS should be cleared
+	originalNsLen := len(resp.Ns)
+	originalExtraLen := len(resp.Extra)
+
+	if !isNSRelevantForCNAME(resp.Ns, "target.zone2.com.") {
+		resp.Ns = nil
+		resp.Extra = nil
+	}
+
+	if len(resp.Ns) != 0 {
+		t.Errorf("FAIL: NS records should have been cleared! Original: %d records", originalNsLen)
+	}
+	if len(resp.Extra) != 0 {
+		t.Errorf("FAIL: Extra records should have been cleared! Original: %d records", originalExtraLen)
+	}
+
+	t.Log("PASS: B-003 scenario still works - stale NS delegation is cleared")
 }

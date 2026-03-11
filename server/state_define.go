@@ -117,10 +117,13 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	}
 
 	qtype := request.Question[0].Qtype
+	monitor.Rec53Log.Debugf("[CHECK_RESP] Checking response for %s (type: %s), Answers: %d, Ns: %d, Extra: %d",
+		request.Question[0].Name, dns.TypeToString[qtype], len(response.Answer), len(response.Ns), len(response.Extra))
 
 	// Check if we have any answers
 	if len(response.Answer) == 0 {
 		// No answers, need to continue iteration
+		monitor.Rec53Log.Debugf("[CHECK_RESP] No answers, continuing to IN_GLUE")
 		return CHECK_RESP_GET_NS, nil
 	}
 
@@ -128,6 +131,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	for _, rr := range response.Answer {
 		if rr.Header().Rrtype == qtype {
 			// Found a matching record type, return the answer
+			monitor.Rec53Log.Debugf("[CHECK_RESP] Found matching type %s, returning answer", dns.TypeToString[qtype])
 			return CHECK_RESP_GET_ANS, nil
 		}
 	}
@@ -138,7 +142,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 		for _, rr := range response.Answer {
 			if cname, ok := rr.(*dns.CNAME); ok {
 				// Found a CNAME record, need to follow it
-				monitor.Rec53Log.Debugf("found CNAME: %s -> %s", rr.Header().Name, cname.Target)
+				monitor.Rec53Log.Debugf("[CHECK_RESP] Found CNAME: %s -> %s", rr.Header().Name, cname.Target)
 				return CHECK_RESP_GET_CNAME, nil
 			}
 		}
@@ -149,7 +153,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	// - Querying for a type that doesn't exist (but other types do)
 	// - The server returned a partial answer
 	// Continue iteration to get the correct type
-	monitor.Rec53Log.Debugf("no matching type %s in answers, continuing iteration", dns.TypeToString[qtype])
+	monitor.Rec53Log.Debugf("[CHECK_RESP] No matching type %s in answers, continuing to IN_GLUE", dns.TypeToString[qtype])
 	return CHECK_RESP_GET_NS, nil
 }
 
@@ -225,22 +229,88 @@ func getIPListFromResponse(response *dns.Msg) []string {
 	return ipList
 }
 
+// getNSNamesFromResponse extracts NS domain names from the Ns section
+func getNSNamesFromResponse(response *dns.Msg) []string {
+	var nsNames []string
+	for _, ns := range response.Ns {
+		if nsRR, ok := ns.(*dns.NS); ok {
+			nsNames = append(nsNames, nsRR.Ns)
+		}
+	}
+	return nsNames
+}
+
+// resolveNSIPs attempts to resolve IP addresses for NS names from cache
+func resolveNSIPs(nsNames []string) []string {
+	var ipList []string
+	for _, nsName := range nsNames {
+		// Try to get A record from cache
+		if msgInCache, ok := getCacheCopyByType(nsName, dns.TypeA); ok {
+			for _, ans := range msgInCache.Answer {
+				if a, ok := ans.(*dns.A); ok {
+					ipList = append(ipList, a.A.String())
+				}
+			}
+		}
+	}
+	return ipList
+}
+
+// resolveNSIPsRecursively resolves NS names using the state machine recursively.
+// This is the correct approach for a recursive resolver - we use the same
+// resolution mechanism to resolve NS names as we do for any other query.
+func resolveNSIPsRecursively(nsNames []string) []string {
+	var ipList []string
+
+	for _, nsName := range nsNames {
+		// Create a new query for NS A record
+		req := new(dns.Msg)
+		req.SetQuestion(nsName, dns.TypeA)
+		req.RecursionDesired = false
+		resp := new(dns.Msg)
+
+		// Use the state machine to resolve the NS name recursively
+		stm := newStateInitState(req, resp)
+		result, err := Change(stm)
+		if err != nil {
+			monitor.Rec53Log.Debugf("[ITER] Failed to resolve NS %s: %v", nsName, err)
+			continue
+		}
+
+		// Extract IP addresses from the result
+		for _, ans := range result.Answer {
+			if a, ok := ans.(*dns.A); ok {
+				ipList = append(ipList, a.A.String())
+			}
+		}
+
+		if len(ipList) > 0 {
+			monitor.Rec53Log.Debugf("[ITER] Resolved NS %s to IPs: %v", nsName, ipList)
+		}
+	}
+
+	return ipList
+}
+
 func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 	if len(ipList) == 0 {
 		return "", "", fmt.Errorf("no ip in extra")
 	}
-	bestIP, oldBestIP := globalIPPool.getBestIPs(ipList)
+	bestIP, backupIP := globalIPPool.getBestIPs(ipList)
 	if bestIP != "" {
 		IPs := globalIPPool.GetPrefetchIPs(bestIP)
 		globalIPPool.PrefetchIPs(IPs)
 	}
-	return bestIP, oldBestIP, nil
+	return bestIP, backupIP, nil
 }
 
 func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
 		return ITER_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
+
+	monitor.Rec53Log.Debugf("[ITER] Querying: %s (type: %s)", request.Question[0].Name, dns.TypeToString[request.Question[0].Qtype])
+
 	newQuery := new(dns.Msg)
 	newQuery.SetQuestion(request.Question[0].Name, request.Question[0].Qtype)
 	newQuery.RecursionDesired = false
@@ -248,12 +318,6 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	// Set EDNS0 with larger buffer size to handle larger responses
 	newQuery.SetEdns0(4096, false)
 
-	//check the best ip in the extra in response
-	ipList := getIPListFromResponse(response)
-	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
-	if bestAddr == "" || err != nil {
-		return ITER_COMMON_ERROR, err
-	}
 	dnsClient := &dns.Client{
 		Net:            "udp",
 		Timeout:        5 * time.Second,
@@ -261,19 +325,50 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		UDPSize:        4096, // Set larger UDP buffer size for EDNS
 	}
 
+	//check the best ip in the extra in response
+	ipList := getIPListFromResponse(response)
+	monitor.Rec53Log.Debugf("[ITER] IP list from Extra: %v", ipList)
+
+	// If no IP from Extra (no glue records), try to resolve NS names
+	if len(ipList) == 0 && len(response.Ns) > 0 {
+		nsNames := getNSNamesFromResponse(response)
+		monitor.Rec53Log.Debugf("[ITER] No glue records, trying to resolve NS names: %v", nsNames)
+
+		// First, try to get NS IPs from cache
+		ipList = resolveNSIPs(nsNames)
+		monitor.Rec53Log.Debugf("[ITER] Resolved IPs from cache: %v", ipList)
+
+		// If still no IPs, resolve NS names using recursive state machine
+		if len(ipList) == 0 {
+			monitor.Rec53Log.Debugf("[ITER] Resolving NS names recursively: %v", nsNames)
+			ipList = resolveNSIPsRecursively(nsNames)
+			monitor.Rec53Log.Debugf("[ITER] Resolved NS IPs: %v", ipList)
+		}
+	}
+
+	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
+	if bestAddr == "" || err != nil {
+		return ITER_COMMON_ERROR, err
+	}
+
 	//send query to the best ip
 	theBestIP := bestAddr
 	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
+	monitor.Rec53Log.Debugf("[ITER] Sending query to %s:53 for %s", bestAddr, request.Question[0].Name)
 	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":53")
 	if err != nil {
+		monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
 		ipq := globalIPPool.GetIPQuality(bestAddr)
 		ipq.SetLatency(MAX_IP_LATENCY)
 		//try to use the second ip
 		if secondAddr == "" {
+			monitor.Rec53Log.Debugf("[ITER] No second IP available, returning error")
 			return ITER_COMMON_ERROR, err
 		}
+		monitor.Rec53Log.Debugf("[ITER] Retrying with second IP: %s", secondAddr)
 		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":53")
 		if err != nil {
+			monitor.Rec53Log.Debugf("[ITER] Query to second IP %s also failed: %v", secondAddr, err)
 			ipq := globalIPPool.GetIPQuality(secondAddr)
 			ipq.SetLatency(MAX_IP_LATENCY)
 			return ITER_COMMON_ERROR, err
@@ -289,6 +384,10 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	monitor.Rec53Metric.IPQualityGaugeSet(theBestIP, float64(rtt/time.Millisecond))
 
 	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
+
+	monitor.Rec53Log.Debugf("[ITER] Response from %s: Rcode=%s, Answers=%d, Ns=%d, Extra=%d",
+		theBestIP, dns.RcodeToString[newResponse.Rcode], len(newResponse.Answer), len(newResponse.Ns), len(newResponse.Extra))
+
 	//check the response
 	if newResponse.Rcode != dns.RcodeSuccess {
 		// Copy response code and authority section
@@ -298,23 +397,29 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		// Handle different response codes appropriately
 		switch newResponse.Rcode {
 		case dns.RcodeNameError: // NXDOMAIN - domain does not exist
+			monitor.Rec53Log.Debugf("[ITER] NXDOMAIN received for %s", request.Question[0].Name)
 			// Return normally with NXDOMAIN code preserved
 			return ITER_NO_ERROR, nil
 		case dns.RcodeSuccess:
 			return ITER_NO_ERROR, nil
 		default:
 			// Other errors (REFUSED, SERVFAIL, etc.) - return as error
+			monitor.Rec53Log.Debugf("[ITER] Non-success Rcode: %s", dns.RcodeToString[newResponse.Rcode])
 			return ITER_COMMON_ERROR, fmt.Errorf("response rcode: %s",
 				dns.RcodeToString[newResponse.Rcode])
 		}
 	}
 	//check the response is the same as the request
 	if len(newResponse.Question) == 0 {
+		monitor.Rec53Log.Debugf("[ITER] Response has no question section")
 		return ITER_COMMON_ERROR, fmt.Errorf("response has no question")
 	}
 	if newResponse.Question[0].Name != request.Question[0].Name {
+		monitor.Rec53Log.Debugf("[ITER] Question mismatch: response=%s, request=%s", newResponse.Question[0].Name, request.Question[0].Name)
 		return ITER_COMMON_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
+	monitor.Rec53Log.Debugf("[ITER] Response validated, Answers: %d, Ns: %d, Extra: %d",
+		len(newResponse.Answer), len(newResponse.Ns), len(newResponse.Extra))
 	if len(newResponse.Answer) != 0 {
 		// Use setCacheCopyByType to store with query type in key
 		q := newResponse.Question[0]
@@ -329,6 +434,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	s.response.Answer = append(s.response.Answer, newResponse.Answer...)
 	s.response.Ns = newResponse.Ns
 	s.response.Extra = newResponse.Extra
+	monitor.Rec53Log.Debugf("[ITER] State complete, total answers: %d", len(s.response.Answer))
 	return ITER_NO_ERROR, nil
 }
 

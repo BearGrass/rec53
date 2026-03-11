@@ -1,286 +1,129 @@
-# 架构设计
+# Architecture
 
-本文档描述 rec53 递归 DNS 解析器的核心架构设计。
+## Overview
 
-## 系统概述
+rec53 is a recursive DNS resolver implemented in Go with a state machine architecture. It performs iterative DNS resolution from root servers, featuring IP quality tracking for optimal upstream server selection, TTL-based caching, and Prometheus metrics for monitoring.
 
-rec53 是一个递归 DNS 解析器，采用状态机架构处理 DNS 查询请求。核心设计参考了 Unbound 的状态机模型。
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         DNS Query                                │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        ServeDNS (Entry)                          │
-│  - Save original question                                        │
-│  - Create state machine                                          │
-│  - Restore question before response                              │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-                    ┌───────────────────┐
-                    │    STATE_INIT     │
-                    └───────────────────┘
-                                │
-                                ▼
-                    ┌───────────────────┐
-                    │    IN_CACHE       │── HIT ──┐
-                    └───────────────────┘         │
-                                │ MISS            │
-                                ▼                 │
-                    ┌───────────────────┐         │
-                    │    IN_GLUE        │         │
-                    └───────────────────┘         │
-                      │           │               │
-                 EXIST│           │NOT_EXIST      │
-                      ▼           ▼               │
-              ┌───────────┐ ┌───────────────┐     │
-              │   ITER    │◄│ IN_GLUE_CACHE │     │
-              └───────────┘ └───────────────┘     │
-                      │                           │
-                      │                           │
-                      ▼                           │
-              ┌───────────────────┐ ◄─────────────┘
-              │   CHECK_RESP      │
-              └───────────────────┘
-                      │
-        ┌─────────────┼─────────────┐
-        │             │             │
-    GET_ANS      GET_CNAME     GET_NS
-        │             │             │
-        ▼             ▼             ▼
-┌─────────────┐ ┌───────────┐ ┌───────────┐
-│  RET_RESP   │ │ IN_CACHE  │ │  IN_GLUE  │
-│  (done)     │ │ (follow)  │ │ (next NS) │
-└─────────────┘ └───────────┘ └───────────┘
-```
-
-## 核心组件
-
-### 1. 状态机 (State Machine)
-
-位置: `server/state_machine.go`, `server/state_define.go`
-
-状态机是 DNS 解析的核心，每个状态实现 `stateMachine` 接口：
-
-```go
-type stateMachine interface {
-    getCurrentState() int
-    getRequest() *dns.Msg
-    getResponse() *dns.Msg
-    handle(request *dns.Msg, response *dns.Msg) (int, error)
-}
-```
-
-**状态说明：**
-
-| 状态 | 职责 | 转换目标 |
-|------|------|----------|
-| STATE_INIT | 初始化响应消息 | IN_CACHE |
-| IN_CACHE | 检查缓存命中/未命中 | CHECK_RESP / IN_GLUE |
-| CHECK_RESP | 分析响应内容 | RET_RESP / IN_CACHE / IN_GLUE |
-| IN_GLUE | 检查是否有 Glue records | ITER / IN_GLUE_CACHE |
-| IN_GLUE_CACHE | 从缓存查找上级 NS | ITER |
-| ITER | 向上游服务器发送查询 | CHECK_RESP |
-| RET_RESP | 返回最终响应 | (结束) |
-
-**安全机制：**
-- `MaxIterations = 50` 防止无限循环
-- `visitedDomains` map 检测 CNAME 循环
-- 原始 Question 在入口保存、出口恢复
-
-### 2. 缓存 (Cache)
-
-位置: `server/cache.go`
-
-使用 `patrickmn/go-cache` 实现，特性：
-- 默认 TTL: 5 分钟
-- 清理间隔: 10 分钟
-- 缓存键格式: `domain:qtype`（如 `google.com.:1` 表示 A 记录）
-- 深拷贝存取，防止并发修改
-
-```go
-// 全局缓存实例
-var globalDnsCache = newCache()
-
-// 缓存键包含查询类型
-func getCacheKey(name string, qtype uint16) string {
-    return fmt.Sprintf("%s:%d", name, qtype)
-}
-```
-
-### 3. IP 质量池 (IP Pool)
-
-位置: `server/ip_pool.go`
-
-跟踪上游 Nameserver 的质量，用于选择最佳服务器：
-- 初始延迟: 1000ms
-- 最大延迟: 10000ms
-- Prefetch 并发限制: 10
-- 使用 `atomic` 操作保证并发安全
-
-**质量评分逻辑：**
-- 查询成功: 更新为实际 RTT
-- 查询失败: 设置为 MAX_IP_LATENCY
-- Prefetch: 后台探测未初始化的 IP
-
-### 4. 服务器 (Server)
-
-位置: `server/server.go`
-
-统一处理 UDP 和 TCP 请求：
-- 单一 `ServeDNS` 处理器
-- UDP 截断处理（TC flag）
-- EDNS0 支持（4096 buffer size）
-- 优雅关闭（5 超时）
-
-## 数据流
-
-### 查询处理流程
-
-1. **入口 (ServeDNS)**
-   - 保存原始 Question
-   - 创建初始状态机
-   - 执行状态转换
-
-2. **缓存检查 (IN_CACHE)**
-   - 命中：直接进入 CHECK_RESP
-   - 未命中：进入 IN_GLUE
-
-3. **迭代查询 (ITER)**
-   - 选择最佳上游 IP
-   - 发送查询，处理响应
-   - 更新缓存和 IP 质量
-
-4. **响应检查 (CHECK_RESP)**
-   - 有匹配记录：返回
-   - 有 CNAME：跟随后继续
-   - 无答案：继续迭代
-
-5. **出口**
-   - 恢复原始 Question
-   - 处理 UDP 截断
-   - 记录指标
-
-### CNAME 链处理
-
-```
-Query: www.example.com (A)
-  │
-  ├─ Cache Miss → Iterate
-  │
-  ├─ Response: www.example.com → CNAME → alias.example.com
-  │
-  ├─ CHECK_RESP: GET_CNAME
-  │
-  ├─ Query: alias.example.com (A)
-  │
-  └─ Response: alias.example.com → A → 192.0.2.1
-     │
-     └─ RET_RESP
-```
-
-## 并发模型
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  UDP Server │     │  TCP Server │     │  Metrics    │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       └───────────────────┴───────────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │  ServeDNS   │  (无锁，每个请求独立)
-                    └─────────────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-    ┌───────────┐    ┌───────────┐    ┌───────────┐
-    │  Cache    │    │  IP Pool  │    │  Metrics  │
-    │ (RWMutex) │    │ (RWMutex) │    │ (atomic)  │
-    └───────────┘    └───────────┘    └───────────┘
-```
-
-**并发安全策略：**
-- Cache: `sync.RWMutex` 保护
-- IP Pool: `sync.RWMutex` + `atomic` 操作
-- Metrics: `sync/atomic` 计数器
-- Prefetch: semaphore 限制并发数
-
-## 监控
-
-位置: `monitor/metric.go`, `monitor/log.go`
-
-**Prometheus 指标：**
-
-| 指标名 | 类型 | 描述 |
-|--------|------|------|
-| `rec53_in_total` | Counter | 入站查询数 |
-| `rec53_out_total` | Counter | 出站响应数 |
-| `rec53_latency_ms` | Histogram | 查询延迟 |
-| `rec53_ip_quality` | Gauge | 上游 IP 延迟 |
-
-## 目录结构
+## Directory Structure
 
 ```
 rec53/
-├── cmd/
-│   ├── rec53.go          # 入口：flag 解析、信号处理、启动
-│   ├── loglevel.go       # 日志级别解析
-│   └── log_level_test.go # 日志级别测试
-├── server/
-│   ├── server.go         # UDP/TCP 服务器
-│   ├── state.go          # 状态常量定义
-│   ├── state_machine.go  # 状态机引擎
-│   ├── state_define.go   # 状态定义与实现
-│   ├── cache.go          # DNS 缓存
-│   ├── ip_pool.go        # IP 质量管理
-│   └── *_test.go         # 单元测试
-├── monitor/
-│   ├── metric.go         # Prometheus 指标
-│   ├── log.go            # zap 日志
-│   ├── var.go            # 变量定义
-│   └── *_test.go         # 单元测试
-├── utils/
-│   ├── zone.go           # Zone 解析
-│   ├── root.go           # Root servers
-│   ├── net.go            # 网络工具 (Hc)
-│   └── *_test.go         # 单元测试
-└── e2e/
-    ├── helpers.go        # 测试辅助函数
-    ├── resolver_test.go  # 解析器测试
-    ├── cache_test.go     # 缓存集成测试
-    ├── server_test.go    # 服务器测试
-    └── error_test.go     # 错误处理测试
+├── cmd/                    # Entry point and CLI
+│   ├── rec53.go            # Main application, flag parsing, signal handling
+│   ├── loglevel.go         # Log level parsing utilities
+│   └── *_test.go           # Command package tests
+├── server/                 # Core DNS resolution logic
+│   ├── server.go           # UDP/TCP DNS server, request handling
+│   ├── state_machine.go    # State machine orchestration
+│   ├── state_define.go     # State constants and return codes
+│   ├── state.go            # State handler implementations
+│   ├── cache.go            # DNS response cache with TTL
+│   ├── ip_pool.go          # Nameserver quality tracking
+│   └── *_test.go           # Server package tests
+├── monitor/                # Observability
+│   ├── metric.go           # Prometheus metrics
+│   ├── log.go              # Zap structured logging
+│   └── var.go              # Global metric instances
+├── utils/                  # Utilities
+│   ├── root.go             # Root DNS servers configuration
+│   ├── zone.go             # Zone parsing utilities
+│   └── net.go              # Network utilities
+├── e2e/                    # End-to-end integration tests
+│   ├── helpers.go          # Test utilities and mock servers
+│   ├── resolver_test.go    # Resolver integration tests
+│   ├── cache_test.go       # Cache behavior tests
+│   ├── server_test.go      # Server lifecycle tests
+│   └── error_test.go       # Error handling tests
+├── etc/                    # Configuration
+│   └── prometheus.yml      # Prometheus config for Docker
+└── single_machine/         # Docker Compose deployment
+    └── docker-compose.yml
 ```
 
-## 设计决策
+## Core Flow
 
-### 为什么用状态机？
+```
+DNS Query
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Server.ServeDNS (server.go)                                │
+│  - Receives UDP/TCP query                                   │
+│  - Creates state machine with request/response              │
+│  - Executes Change() to run state machine                   │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  State Machine (state_machine.go)                           │
+│                                                             │
+│  STATE_INIT → IN_CACHE → CHECK_RESP → IN_GLUE → ITER ─┐    │
+│                   ↑           │          │         │  │    │
+│                   └───────────┘          └─────────┘  │    │
+│                                                       │    │
+│  States:                                              │    │
+│  - STATE_INIT: Initialize response, set reply         │    │
+│  - IN_CACHE: Check if answer is cached                │    │
+│  - CHECK_RESP: Determine if ANS/CNAME/NS referral     │    │
+│  - IN_GLUE: Get nameserver addresses from glue        │    │
+│  - IN_GLUE_CACHE: Get nameserver from cache or root   │    │
+│  - ITER: Query upstream nameserver (best IP selected) │    │
+│  - RET_RESP: Return final response                     │    │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  IP Pool (ip_pool.go)                                       │
+│  - Tracks latency for each upstream nameserver              │
+│  - Selects best IP based on measured RTT                    │
+│  - Prefetches quality for candidate servers                 │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+DNS Response
+```
 
-参考 Unbound 设计：
-- 每个 state 职责单一，易于测试
-- 状态转换显式，流程可控
-- 方便添加新功能（如 DNSSEC 验证）
+## Key Components
 
-### 为什么用全局变量？
+### server.Server
 
-当前阶段简化设计：
-- 快速迭代原型
-- 单实例部署场景
-- 后续可重构为依赖注入
+- **Responsibility**: UDP/TCP DNS listener, request routing
+- **Interface**: `NewServer(addr)`, `Run()`, `ServeDNS()`, `Shutdown(ctx)`
+- **Dependencies**: miekg/dns, state machine, metrics
 
-### 为什么缓存键包含类型？
+### server.StateMachine
 
-避免 A/AAAA 混淆：
-- `example.com.:1` → A 记录
-- `example.com.:28` → AAAA 记录
-- 同一域名不同类型独立缓存
+- **Responsibility**: Orchestrates DNS resolution through states
+- **Interface**: `Change(stm) (*dns.Msg, error)`
+- **Dependencies**: Cache, IP pool, all state handlers
 
-## 参考资源
+### server.IPPool
 
-- [RFC 1034] Domain Names - Concepts and Facilities
-- [RFC 1035] Domain Names - Implementation and Specification
-- [Unbound Architecture](https://nlnetlabs.nl/documentation/unbound/)
+- **Responsibility**: Nameserver quality tracking and selection
+- **Interface**: `getBestIPs()`, `updateIPQuality()`, `PrefetchIPs()`
+- **Dependencies**: dns.Client for prefetch queries
+
+### server.Cache
+
+- **Responsibility**: DNS response caching with TTL
+- **Interface**: `getCacheCopyByType()`, `setCacheCopyByType()`
+- **Dependencies**: patrickmn/go-cache
+
+### monitor.Metric
+
+- **Responsibility**: Prometheus metrics export
+- **Interface**: `InCounterAdd()`, `OutCounterAdd()`, `LatencyHistogramObserve()`
+- **Dependencies**: prometheus/client_golang
+
+## Design Constraints
+
+- Single binary deployment
+- Must handle both UDP and TCP protocols
+- Graceful shutdown with 5-second timeout
+- Max 50 state machine iterations (CNAME loop protection)
+- EDNS0 support with 4096-byte UDP buffer
+
+## Known Limitations
+
+- DNSSEC validation not implemented
+- DoT/DoH not supported
