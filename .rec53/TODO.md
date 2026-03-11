@@ -25,16 +25,15 @@
   - [ ] [F-003/14] Add E2E integration tests in e2e/dns_test.go (Phase 4)
   - [ ] [F-003/15] Add feature flag support (optional) in server/config.go (Phase 4)
 
-- [ ] [B-005] NS 递归解析栈溢出 crash (state_define.go:262-293)
-  - Critical: 程序 crash
-  - 修复后删除此条目
-
 ### Technical Debt
 
 - [ ] [D-001] Add test cases for state machine (server/state_machine_test.go:29)
 
 ## Completed
 
+- [x] [B-005] NS 递归解析栈溢出 crash (completed 2026-03-11)
+  - Status: FIXED - resolveNSIPsRecursively() in state_define.go:289-323 handles NS resolution via state machine
+  - Verified: Tests pass, no infinite recursion, proper error handling with depth limits
 - [x] [T-001] 权威应答 E2E 测试覆盖 (completed 2026-03-11)
   - Step 1: Root hints injection (utils/root.go) — SetRootGlue/ResetRootGlue
   - Step 2: Iter port override + MultiZoneMockServer + test helpers
