@@ -9,9 +9,9 @@
 ### Feature Tasks (from BACKLOG.md)
 
 - [ ] [F-003] IP Pool Maintenance Algorithm Improvement
-  - [ ] [F-003/1] Create `IPQualityV2` struct in server/ip_pool.go (Phase 1 foundation)
-  - [ ] [F-003/2] Implement `RecordLatency()` and `updatePercentiles()` in server/ip_pool.go (Phase 1)
-  - [ ] [F-003/3] Write unit tests for percentile calculations in server/ip_pool_test.go (Phase 1)
+  - [x] [F-003/1] Create `IPQualityV2` struct in server/ip_pool.go (Phase 1 foundation)
+  - [x] [F-003/2] Implement `RecordLatency()` and `updatePercentiles()` in server/ip_pool.go (Phase 1)
+  - [x] [F-003/3] Write unit tests for percentile calculations in server/ip_pool_test.go (Phase 1)
   - [ ] [F-003/4] Implement `RecordFailure()` with exponential backoff in server/ip_pool.go (Phase 2)
   - [ ] [F-003/5] Implement `ShouldProbe()` and `ResetForProbe()` in server/ip_pool.go (Phase 2)
   - [ ] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 2)
