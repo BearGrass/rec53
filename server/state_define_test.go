@@ -243,22 +243,31 @@ func TestGetIPListFromResponse_MixedRecords(t *testing.T) {
 // getBestAddressAndPrefetchIPs Tests (additional cases)
 // =============================================================================
 
-// TestGetBestAddressAndPrefetchIPs_LatencyBased tests latency-based selection
+// TestGetBestAddressAndPrefetchIPs_LatencyBased tests latency-based selection using V2 algorithm
 func TestGetBestAddressAndPrefetchIPs_LatencyBased(t *testing.T) {
 	globalIPPool = NewIPPool()
 
-	// Set different latencies
-	ipq1 := &IPQuality{latency: 500}
-	ipq1.isInit.Store(true)
-	globalIPPool.SetIPQuality("192.0.2.1", ipq1)
+	// Set up V2 with different latencies using RecordLatency()
+	// 192.0.2.1: 500ms latency
+	iqv2_1 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_1.RecordLatency(500)
+	}
+	globalIPPool.SetIPQualityV2("192.0.2.1", iqv2_1)
 
-	ipq2 := &IPQuality{latency: 200}
-	ipq2.isInit.Store(true)
-	globalIPPool.SetIPQuality("192.0.2.2", ipq2)
+	// 192.0.2.2: 200ms latency (should be best)
+	iqv2_2 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_2.RecordLatency(200)
+	}
+	globalIPPool.SetIPQualityV2("192.0.2.2", iqv2_2)
 
-	ipq3 := &IPQuality{latency: 800}
-	ipq3.isInit.Store(true)
-	globalIPPool.SetIPQuality("192.0.2.3", ipq3)
+	// 192.0.2.3: 800ms latency
+	iqv2_3 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_3.RecordLatency(800)
+	}
+	globalIPPool.SetIPQualityV2("192.0.2.3", iqv2_3)
 
 	bestIP, _, err := getBestAddressAndPrefetchIPs([]string{"192.0.2.1", "192.0.2.2", "192.0.2.3"})
 	if err != nil {
