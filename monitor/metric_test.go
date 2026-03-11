@@ -19,6 +19,9 @@ func unregisterMetrics() {
 	prometheus.Unregister(OutCounter)
 	prometheus.Unregister(LatencyHistogramObserver)
 	prometheus.Unregister(IPQuality)
+	prometheus.Unregister(IPQualityV2_P50)
+	prometheus.Unregister(IPQualityV2_P95)
+	prometheus.Unregister(IPQualityV2_P99)
 }
 
 // TestMetric_InCounterAdd tests the InCounterAdd method
@@ -150,6 +153,74 @@ func TestMetric_IPQualityGaugeSet(t *testing.T) {
 	}))
 	if value != 25.0 {
 		t.Errorf("Expected gauge to be 25.0, got %f", value)
+	}
+}
+
+// TestMetric_IPQualityV2GaugeSet tests the IPQualityV2GaugeSet method for V2 percentile metrics
+func TestMetric_IPQualityV2GaugeSet(t *testing.T) {
+	unregisterMetrics()
+	reg := prometheus.NewRegistry()
+	m := &Metric{reg: reg}
+	m.Register()
+
+	// Set IP quality V2 metrics (P50, P95, P99)
+	m.IPQualityV2GaugeSet("192.0.2.1", 50.0, 150.0, 250.0)
+
+	// Verify P50 gauge was set
+	p50Value := testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p50Value != 50.0 {
+		t.Errorf("Expected P50 gauge to be 50.0, got %f", p50Value)
+	}
+
+	// Verify P95 gauge was set
+	p95Value := testutil.ToFloat64(IPQualityV2_P95.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p95Value != 150.0 {
+		t.Errorf("Expected P95 gauge to be 150.0, got %f", p95Value)
+	}
+
+	// Verify P99 gauge was set
+	p99Value := testutil.ToFloat64(IPQualityV2_P99.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p99Value != 250.0 {
+		t.Errorf("Expected P99 gauge to be 250.0, got %f", p99Value)
+	}
+
+	// Update metrics (gauges should overwrite)
+	m.IPQualityV2GaugeSet("192.0.2.1", 100.0, 200.0, 300.0)
+
+	p50Value = testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p50Value != 100.0 {
+		t.Errorf("Expected P50 gauge to be 100.0 after update, got %f", p50Value)
+	}
+
+	p95Value = testutil.ToFloat64(IPQualityV2_P95.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p95Value != 200.0 {
+		t.Errorf("Expected P95 gauge to be 200.0 after update, got %f", p95Value)
+	}
+
+	p99Value = testutil.ToFloat64(IPQualityV2_P99.With(prometheus.Labels{
+		"ip": "192.0.2.1",
+	}))
+	if p99Value != 300.0 {
+		t.Errorf("Expected P99 gauge to be 300.0 after update, got %f", p99Value)
+	}
+
+	// Set different IP
+	m.IPQualityV2GaugeSet("192.0.2.2", 75.0, 175.0, 275.0)
+	p50Value = testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
+		"ip": "192.0.2.2",
+	}))
+	if p50Value != 75.0 {
+		t.Errorf("Expected P50 gauge for 192.0.2.2 to be 75.0, got %f", p50Value)
 	}
 }
 
