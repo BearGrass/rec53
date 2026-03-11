@@ -16,45 +16,50 @@ Use these prefixes:
 - `[B-xxx]` for bugs
 - `[O-xxx]` for optimizations
 
-## Planned
+## In Progress
 
 ### [F-003] IP Pool Maintenance Algorithm Improvement
 Priority: High
 Description: Implement sliding window histogram-based IP pool quality tracking with automatic fault recovery. Current algorithm lacks fault recovery (IPs marked MAX_LATENCY never recover), lacks confidence-based selection, and has no exponential backoff. This leads to permanent performance degradation from transient network faults. Proposed solution uses 64-sample ring buffer with P50/P95/P99 metrics, exponential backoff for failures, and periodic background probing for recovery.
 
+**Current Phase**: Phase 4 (Integration & Migration) - Phases 1-3 complete with 33 passing tests
+
+Implementation Phases:
+- `Phase 1` ✅ Complete: IPQualityV2 struct with ring buffer, percentile calculations
+- `Phase 2` ✅ Complete: Fault handling with exponential backoff, ShouldProbe/ResetForProbe
+- `Phase 3` ✅ Complete: Composite scoring with GetScore() and GetBestIPsV2()
+- `Phase 4` 🔄 In Progress: Integration, metrics, benchmarks, background probing
+
 Design & Roadmap:
 - `.rec53/IP_POOL_DESIGN.md` — Technical design (data structures, algorithms, concurrency strategy)
 - `.rec53/IP_POOL_ROADMAP.md` — Implementation roadmap (4 phases, 15.5 days, risk mitigation)
+- `.rec53/IP_POOL_PHASE4_GUIDE.md` — Phase 4 implementation guide (1 week estimated)
 
-Acceptance criteria:
-- [ ] Phase 1: `IPQualityV2` struct with 64-sample ring buffer and percentile calculations
-  - `RecordLatency()`, `updatePercentiles()` methods implemented
-  - Unit tests: 12+ test cases for percentile accuracy, boundary conditions
-  - Integration test: simulate realistic latency distributions
-- [ ] Phase 2: Fault handling with exponential backoff and auto-recovery
-  - `RecordFailure()` implements: DEGRADED (1-3 failures) → SUSPECT (4-6) → RECOVERED (7+ auto-probe)
-  - `ShouldProbe()`, `ResetForProbe()` for periodic recovery probing
-  - Background probe loop: every 30 seconds, context-based shutdown
-  - Integration test: verify recovery time < 5 seconds for transient faults
-  - Concurrency verified with RWMutex + atomic operations
-- [ ] Phase 3: Composite scoring and intelligent selection
-  - `GetScore()` = p50 × confidenceMultiplier × stateWeight
-  - `GetBestIPsV2()` returns top 2 IPs based on composite scores
-  - Comparative testing: new algorithm vs old on 100 IPs with various fault scenarios
-- [ ] Phase 4: Integration and monitoring
-  - Migrate `state_define.go` to use GetBestIPsV2() instead of getBestIPs
-  - Prometheus metrics: `rec53_ip_p50_latency_ms`, `rec53_ip_p95_latency_ms`, `rec53_ip_p99_latency_ms` gauges
-  - Performance benchmark: 1000 IPs selection time < 1ms
-  - E2E test: full DNS query flow with IP pool selection
-  - Optional: feature flag for A/B testing old vs new algorithm
+Phase 4 Acceptance Criteria:
+- [ ] F-003/6: Background probe loop (StartProbeLoop, periodicProbeLoop, probeAllSuspiciousIPs)
+  - Recovery time: 30-60 seconds for SUSPECT IPs
+  - No impact on normal query handling
+  - Context-based graceful shutdown
+- [ ] F-003/11: Migrate state_define.go to use GetBestIPsV2()
+  - Replace getBestIPs() calls with GetBestIPsV2()
+  - Add latency recording on success/failure
+  - All existing tests pass
+- [ ] F-003/12: Prometheus metrics for P50/P95/P99 latency per IP
+  - `rec53_ip_p50_latency_ms`, `rec53_ip_p95_latency_ms`, `rec53_ip_p99_latency_ms` gauges
+  - Metrics update every 10 seconds
+- [ ] F-003/13: Performance benchmark (1000 IPs selection < 1ms)
+- [ ] F-003/14: E2E integration tests (full DNS flow with V2 algorithm)
+- [ ] F-003/15: Feature flag support (optional, for A/B testing)
 
-Success criteria:
+Overall Success Criteria:
 - Fault recovery time: 3-5 seconds (vs current infinite)
 - P99 latency: > 10% improvement
 - Unit test coverage: > 80%
 - Performance: < 1ms per IP selection for 1000 IPs
 - 0 production rollbacks
 - No increase in monitoring alerts
+
+## Planned
 
 ### [B-012] NXDOMAIN / NODATA 响应码不传递给客户端
 Priority: High

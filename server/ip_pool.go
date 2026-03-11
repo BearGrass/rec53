@@ -344,6 +344,83 @@ func (ipp *IPPool) Shutdown(ctx context.Context) error {
 	}
 }
 
+// StartProbeLoop initializes and launches the background probe goroutine
+// for periodic SUSPECT IP recovery attempts
+func (ipp *IPPool) StartProbeLoop() {
+	ipp.wg.Add(1)
+	go ipp.periodicProbeLoop()
+	monitor.Rec53Log.Debugf("IP pool probe loop started")
+}
+
+// periodicProbeLoop runs periodically every 30 seconds to probe SUSPECT IPs
+func (ipp *IPPool) periodicProbeLoop() {
+	defer ipp.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	monitor.Rec53Log.Debugf("probe loop: entering periodic check loop")
+
+	for {
+		select {
+		case <-ipp.ctx.Done():
+			monitor.Rec53Log.Debugf("probe loop: context cancelled, exiting")
+			return
+		case <-ticker.C:
+			ipp.probeAllSuspiciousIPs()
+		}
+	}
+}
+
+// probeAllSuspiciousIPs queries all SUSPECT IPs to detect recovery
+func (ipp *IPPool) probeAllSuspiciousIPs() {
+	// Find SUSPECT IP candidates (under read lock)
+	ipp.l.RLock()
+	candidates := make([]string, 0)
+	for ip, iqv2 := range ipp.poolV2 {
+		if iqv2.ShouldProbe() {
+			candidates = append(candidates, ip)
+		}
+	}
+	ipp.l.RUnlock()
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	monitor.Rec53Log.Debugf("probe loop: probing %d SUSPECT IPs", len(candidates))
+
+	// Probe each candidate (no lock during probing to avoid blocking queries)
+	for _, ip := range candidates {
+		// Create a simple DNS query for root zone
+		req := new(dns.Msg)
+		req.SetQuestion(".", dns.TypeA)
+
+		// Probe with 3-second timeout
+		client := &dns.Client{
+			Timeout: 3 * time.Second,
+			Net:     "udp",
+		}
+
+		_, _, err := client.Exchange(req, ip+":53")
+
+		// Check IP quality tracker
+		iqv2 := ipp.GetIPQualityV2(ip)
+		if iqv2 == nil {
+			continue
+		}
+
+		if err == nil {
+			// Probe succeeded - mark IP as recovered
+			iqv2.ResetForProbe()
+			monitor.Rec53Log.Debugf("probe loop: IP %s recovered from SUSPECT state", ip)
+		} else {
+			// Probe failed - IP stays in SUSPECT state, retry in 30s
+			monitor.Rec53Log.Debugf("probe loop: IP %s probe failed (will retry in 30s): %v", ip, err)
+		}
+	}
+}
+
 func (ipp *IPPool) isTheIPInit(ip string) bool {
 	ipq := ipp.GetIPQuality(ip)
 	if ipq == nil {

@@ -136,6 +136,9 @@ func (s *server) Run() <-chan error {
 	s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
 	s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
 
+	// Start background IP probe loop for fault recovery
+	globalIPPool.StartProbeLoop()
+
 	s.errChan = make(chan error, 2)
 	s.wg.Add(2)
 

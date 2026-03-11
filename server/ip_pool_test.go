@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"rec53/monitor"
 
+	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
 
@@ -1147,4 +1150,240 @@ func BenchmarkGetScore(b *testing.B) {
 
 	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000
 	b.Logf("Average time per GetScore(): %.2f µs", avgTime)
+}
+
+// ============================================================================
+// F-003/6: Background Probe Loop Tests
+// ============================================================================
+
+// TestStartProbeLoop_LaunchesGoroutine verifies goroutine is launched and cleaned up
+func TestStartProbeLoop_LaunchesGoroutine(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	// Count goroutines before
+	initialGoroutines := runtime.NumGoroutine()
+
+	// Start probe loop
+	ipp.StartProbeLoop()
+
+	// Give goroutine time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify goroutine was added
+	afterStartGoroutines := runtime.NumGoroutine()
+	if afterStartGoroutines <= initialGoroutines {
+		t.Errorf("expected more goroutines after StartProbeLoop, got %d (before %d)",
+			afterStartGoroutines, initialGoroutines)
+	}
+
+	// Shutdown and verify goroutine is cleaned up
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := ipp.Shutdown(ctx)
+	if err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	finalGoroutines := runtime.NumGoroutine()
+
+	// Goroutine count should return to initial
+	if finalGoroutines > initialGoroutines+1 {
+		t.Errorf("goroutine leak detected: initial=%d, final=%d",
+			initialGoroutines, finalGoroutines)
+	}
+}
+
+// TestPeriodicProbeLoop_ExitsOnContext verifies loop exits on context cancellation
+func TestPeriodicProbeLoop_ExitsOnContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ipp := &IPPool{
+		pool:   make(map[string]*IPQuality),
+		poolV2: make(map[string]*IPQualityV2),
+		l:      sync.RWMutex{},
+		ctx:    ctx,
+		cancel: cancel,
+		sem:    make(chan struct{}, MAX_PREFETCH_CONCUR),
+		dnsClient: &dns.Client{
+			Net:     "udp",
+			Timeout: PREFETCH_TIMEOUT * time.Second,
+		},
+	}
+
+	// Start probe loop goroutine
+	ipp.wg.Add(1)
+	go ipp.periodicProbeLoop()
+
+	// Give goroutine time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Wait for goroutine to exit (with timeout)
+	done := make(chan struct{})
+	go func() {
+		ipp.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success - goroutine exited
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe loop did not exit within 2 seconds after context cancellation")
+	}
+}
+
+// TestProbeAllSuspiciousIPs_IdentifiesCandidates verifies only SUSPECT IPs are probed
+func TestProbeAllSuspiciousIPs_IdentifiesCandidates(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	// Create 3 IPs with different states
+	activeIP := "192.0.2.1"
+	degradedIP := "192.0.2.2"
+	suspectIP := "192.0.2.3"
+
+	// Setup ACTIVE IP
+	iq1 := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iq1.RecordLatency(50)
+	}
+	ipp.SetIPQualityV2(activeIP, iq1)
+
+	// Setup DEGRADED IP (1-3 failures)
+	iq2 := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iq2.RecordLatency(50)
+	}
+	iq2.RecordFailure() // Now DEGRADED
+	ipp.SetIPQualityV2(degradedIP, iq2)
+
+	// Setup SUSPECT IP (4-6 failures)
+	iq3 := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iq3.RecordLatency(50)
+	}
+	for i := 0; i < 4; i++ { // 4 failures = SUSPECT
+		iq3.RecordFailure()
+	}
+	ipp.SetIPQualityV2(suspectIP, iq3)
+
+	// Wait for 5+ seconds to ensure ShouldProbe doesn't block due to lastFailure check
+	time.Sleep(5100 * time.Millisecond)
+
+	// Verify states
+	if iq1.GetState() != IP_STATE_ACTIVE {
+		t.Errorf("expected ACTIVE, got %d", iq1.GetState())
+	}
+	if iq2.GetState() != IP_STATE_DEGRADED {
+		t.Errorf("expected DEGRADED, got %d", iq2.GetState())
+	}
+	if iq3.GetState() != IP_STATE_SUSPECT {
+		t.Errorf("expected SUSPECT, got %d", iq3.GetState())
+	}
+
+	// Verify only SUSPECT IP returns true for ShouldProbe
+	if iq1.ShouldProbe() {
+		t.Errorf("ACTIVE IP should not be probed")
+	}
+	if iq2.ShouldProbe() {
+		t.Errorf("DEGRADED IP should not be probed")
+	}
+	if !iq3.ShouldProbe() {
+		t.Errorf("SUSPECT IP should be probed (state=%d, lastFailure=%v)", iq3.GetState(), iq3.lastFailure)
+	}
+}
+
+// TestProbeAllSuspiciousIPs_RecoveryOnSuccess verifies ResetForProbe marks recovery
+func TestProbeAllSuspiciousIPs_RecoveryOnSuccess(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	suspectIP := "192.0.2.100"
+
+	// Create SUSPECT IP
+	iq := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iq.RecordLatency(50)
+	}
+	for i := 0; i < 4; i++ { // 4 failures = SUSPECT
+		iq.RecordFailure()
+	}
+	ipp.SetIPQualityV2(suspectIP, iq)
+
+	if iq.GetState() != IP_STATE_SUSPECT {
+		t.Errorf("expected SUSPECT state, got %d", iq.GetState())
+	}
+
+	// Simulate successful probe
+	iq.ResetForProbe()
+
+	// Verify state changed to RECOVERED
+	if iq.GetState() != IP_STATE_RECOVERED {
+		t.Errorf("expected RECOVERED state after ResetForProbe, got %d", iq.GetState())
+	}
+
+	// Subsequent probes should not trigger on RECOVERED IP
+	if iq.ShouldProbe() {
+		t.Errorf("RECOVERED IP should not be probed immediately")
+	}
+}
+
+// TestProbeAllSuspiciousIPs_ConcurrencyWithQueries verifies probes don't block queries
+func TestProbeAllSuspiciousIPs_ConcurrencyWithQueries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrency test in short mode")
+	}
+
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	// Setup a SUSPECT IP
+	suspectIP := "192.0.2.200"
+	iq := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iq.RecordLatency(50)
+	}
+	for i := 0; i < 4; i++ {
+		iq.RecordFailure()
+	}
+	ipp.SetIPQualityV2(suspectIP, iq)
+
+	// Start probe loop
+	ipp.StartProbeLoop()
+
+	// Measure time for concurrent GetIPQualityV2 calls while probes are running
+	startTime := time.Now()
+	successCount := int32(0)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				// Simulate query accessing IP pool (like state_define.go does)
+				iqv2 := ipp.GetIPQualityV2(suspectIP)
+				if iqv2 != nil {
+					atomic.AddInt32(&successCount, 1)
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+		}()
+	}
+
+	wg.Wait()
+	elapsed := time.Since(startTime)
+
+	// Verify queries completed without excessive delay
+	if elapsed > 2*time.Second {
+		t.Errorf("concurrent queries took too long: %v", elapsed)
+	}
+
+	if successCount < 900 {
+		t.Errorf("expected ~1000 successful accesses, got %d", successCount)
+	}
 }
