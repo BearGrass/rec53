@@ -89,6 +89,117 @@ Acceptance criteria:
 - [ ] 添加 delegation 深度跟踪
 - [ ] 单元测试验证各种死循环场景
 
+## Test Coverage Enhancement Tasks
+
+根据 doc/example 中25个场景的测试覆盖分析（当前覆盖率64%），以下为补充测试开发计划。
+详细分析见：`.rec53/TEST_COVERAGE_ANALYSIS.md`
+
+### [T-002] Fix B-012: Enable NODATA/NXDOMAIN Tests
+Priority: High
+Related issues: B-012
+Description: 移除 TestAuthorityNODATA 和 TestAuthorityNXDOMAIN 上的 SKIP 标记，通过修复状态机响应分类逻辑使其通过。对应 doc/example 中的例9和例10。
+Acceptance criteria:
+- [ ] 分析 checkRespState.handle() 的响应分类逻辑
+- [ ] 修改 S9(CLASSIFY_RESPONSE) 正确识别情况C（负响应：Authority+SOA）
+- [ ] 确保 Authority+SOA 响应被路由到 S12(HANDLE_NEGATIVE) 而非 S10(HANDLE_DELEGATION)
+- [ ] 移除 TestAuthorityNODATA 和 TestAuthorityNXDOMAIN 的 SKIP 标记
+- [ ] 运行 go test ./e2e/... -v 验证两个测试通过
+- [ ] 运行完整测试套件验证无回归
+
+### [T-003] Implement Negative Cache E2E Test
+Priority: High
+Related issues: O-005
+Description: 实现缓存命中 negative cache 的 E2E 测试。验证 NXDOMAIN/NODATA 响应被缓存，后续相同查询直接从 negative cache 返回而无需上游查询。对应 doc/example 中的例2。
+Location: e2e/cache_test.go
+Acceptance criteria:
+- [ ] 实现 TestNegativeCacheHit() 函数
+- [ ] Mock 权威服务器返回 RCODE=NXDOMAIN + SOA(TTL=300)
+- [ ] 验证第一次查询向上游发起
+- [ ] 验证第二次相同查询直接从 negative cache 返回（无上游查询）
+- [ ] 验证响应时间<100ms（缓存命中）
+- [ ] 验证缓存过期后重新向上游查询
+
+### [T-004] Implement Query Budget Exhaustion Test
+Priority: High
+Description: 测试当查询预算耗尽时（budget=0）触发 S15 失败处理。构造深层 NS 委派链强制逐次递减 budget，验证最终返回 SERVFAIL。对应 doc/example 中的例21。
+Location: 新建 e2e/budget_test.go
+Acceptance criteria:
+- [ ] 构造深层 NS 委派链：. → com → example.com → sub.example.com → ...
+- [ ] 每层都返回 NS referral，强制 budget 逐次递减
+- [ ] 验证当 budget 接近 0 时返回 SERVFAIL
+- [ ] 验证状态机进入 S15(FAIL_SERVFAIL) 状态
+- [ ] 验证在合理时间内完成（防止真正的无限循环）
+
+### [T-005] Implement Timeout Retry and Server Switch Test
+Priority: High
+Description: 扩展 TestQueryTimeout，实现超时重试和换服务器的完整流程。当一个 NS 超时后重试，失败后自动切换到备用 NS 并成功。对应 doc/example 中的例15。
+Location: e2e/resolver_test.go 或 e2e/error_test.go
+Acceptance criteria:
+- [ ] 实现 TestTimeoutRetryAndServerSwitch() 函数
+- [ ] 配置 NS 池中两个服务器：ns1（总是超时）、ns2（正常响应）
+- [ ] 验证向 ns1 发查询超时
+- [ ] 验证重试相同 NS 仍然超时
+- [ ] 验证自动切换到 ns2 并成功返回
+- [ ] 验证最终查询成功，总耗时<5秒
+
+### [T-006] Implement SERVFAIL and Server Blacklist Test
+Priority: High
+Description: 测试上游返回 SERVFAIL 后自动标记服务器为 bad 并切换到备用服务器。对应 doc/example 中的例16 和 B-013。
+Location: e2e/error_test.go
+Acceptance criteria:
+- [ ] 实现 TestServfailAndServerBlacklist() 函数
+- [ ] Mock NS1 返回 RCODE=SERVFAIL
+- [ ] Mock NS2 返回正常的 A 记录
+- [ ] 验证状态机标记 NS1 为 bad_server
+- [ ] 验证查询自动切换到 NS2
+- [ ] 验证最终响应来自 NS2，不是 NS1
+
+### [T-007] Implement Response ID Mismatch Test
+Priority: Medium
+Description: 测试当响应 ID 与查询 ID 不匹配时的处理。解析器应丢弃错误 ID 的响应并继续等待正确响应。对应 doc/example 中的例17 和 O-022。
+Location: 新建 e2e/protocol_test.go
+Acceptance criteria:
+- [ ] 实现 TestResponseIDMismatch() 函数
+- [ ] 发送查询（ID=0x1234）
+- [ ] Mock 返回错误 ID 的响应（ID=0xABCD）
+- [ ] 验证解析器丢弃该响应并继续等待
+- [ ] Mock 再发送正确 ID 的响应
+- [ ] 验证最终收到正确响应，查询成功
+
+### [T-008] Implement CNAME + NXDOMAIN Combination Test
+Priority: Medium
+Description: 测试 CNAME 链与 NXDOMAIN 同时出现的组合场景。Answer 段含 CNAME，但 RCODE=NXDOMAIN，Authority 含 SOA。对应 doc/example 中的例13。
+Location: e2e/resolver_test.go
+Acceptance criteria:
+- [ ] 实现 TestCNAMENXDomainResponse() 函数
+- [ ] Mock 权威返回：Answer 含 CNAME，RCODE=NXDOMAIN，Authority 含 SOA
+- [ ] 验证 Answer 段保留完整 CNAME 链
+- [ ] 验证 RCODE=NXDOMAIN
+- [ ] 验证 Authority 段含 SOA 记录
+
+### [T-009] Implement Referral Loop Detection Test
+Priority: Medium
+Description: 测试委派循环检测。当查询进入循环委派（例如 example.com NS 返回 referral 到 example.com 自己）时，应检测循环并返回 SERVFAIL。对应 doc/example 中的例20。
+Location: e2e/error_test.go
+Acceptance criteria:
+- [ ] 实现 TestReferralLoop() 函数
+- [ ] 构造循环委派：查询 x.example.com/A，example.com NS 返回 referral 到 example.com 自己
+- [ ] 验证状态机检测循环（referral_history 中检测到重复签名）
+- [ ] 验证返回 SERVFAIL
+- [ ] 验证总查询次数<10（防止真正的无限循环）
+
+### [T-010] Implement All NS Unreachable Test
+Priority: Medium
+Description: 测试当所有 NS 都不可达时的处理。某区域有多个 NS，全部超时或返回 REFUSED，无更多可选服务器时应返回 SERVFAIL。对应 doc/example 中的例23。
+Location: e2e/error_test.go
+Acceptance criteria:
+- [ ] 实现 TestAllNSUnreachable() 函数
+- [ ] 配置区域有两个 NS：NS1（全部查询超时）、NS2（全部返回 REFUSED）
+- [ ] 验证 NS1 重试用尽后切换到 NS2
+- [ ] 验证 NS2 也失败
+- [ ] 验证状态机进入 S15(FAIL_SERVFAIL)
+- [ ] 验证返回 SERVFAIL 给客户端
+
 
 
 ## Completed
