@@ -67,15 +67,24 @@ Key states:
 
 ### IP Quality Tracking
 
-`server/ip_pool.go` tracks upstream nameserver latency for optimal server selection:
-- **IPQuality structure**: Each IP has `isInit` flag (measured vs. initial) and `latency` (in milliseconds)
-- **Initial state**: `isInit=true`, `latency=1000ms` (assumed value before measurement)
-- **Measured state**: `isInit=false`, `latency=actual RTT` (after prefetch verification)
-- **Best IP selection**: Via `getBestIPs()` returning highest-priority and second-best IP
-- **Quality improvement**: `UpIPsQuality()` reduces latency by 10% for well-performing IPs
-- **Background prefetch**: `PrefetchIPs()` measures candidate servers with semaphore-limited concurrency (max 10)
-- **Prefetch candidates**: `GetPrefetchIPs()` selects IPs with latency in range `[best × 0.9, best]`
-- **Graceful shutdown**: `Shutdown()` waits for all prefetch goroutines with context timeout
+`server/ip_pool.go` tracks upstream nameserver latency using **IPQualityV2**, a sliding-window histogram system for optimal server selection:
+- **IPQualityV2 structure** (server/ip_pool.go:68-88): Tracks P50/P95/P99 percentiles, failure state, and confidence level
+  - Sliding window: Last 64 RTT samples in milliseconds
+  - Percentiles: P50 (median) for selection, P95/P99 for monitoring
+  - Confidence: 0-100% based on sample count (10+ samples = 100%)
+  - Failure tracking: Consecutive failure counter with exponential backoff phases
+  - State machine: ACTIVE (0), DEGRADED (1), SUSPECT (2), RECOVERED (3)
+- **Latency recording**: `RecordLatency()` updates ring buffer, recalculates percentiles, resets failure counter
+- **Failure handling**: `RecordFailure()` applies exponential backoff strategy
+  - Phase 1 (1-3 failures): DEGRADED state with 20% latency penalty
+  - Phase 2 (4-6 failures): SUSPECT state, all metrics set to MAX (10000ms)
+  - Phase 3 (7+ failures): Remains SUSPECT, eligible for periodic probing
+- **Probe strategy**: `ShouldProbe()` identifies SUSPECT candidates, `ResetForProbe()` marks recovery after successful probe
+- **Composite scoring**: `GetScore()` ranks IPs via formula: `p50 × confidenceMult × stateWeight`
+  - Confidence multiplier: Low-confidence IPs encouraged to boost sampling (confidence=0 → 2x bonus)
+  - State weights: ACTIVE(1.0), DEGRADED(1.5), SUSPECT(100.0), RECOVERED(1.1)
+- **Best IP selection**: `GetBestIPsV2()` returns primary and secondary IP based on lowest composite score
+- **Prometheus metrics**: `IPQualityV2GaugeSet()` exports P50/P95/P99 latencies as `rec53_ipv2_p{50,95,99}_latency_ms` gauges
 
 ## Dependencies
 
