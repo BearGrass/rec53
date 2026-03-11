@@ -430,6 +430,40 @@ func TestIPPool_UpdateIPQuality(t *testing.T) {
 }
 
 // =============================================================================
+// iterPort override Tests
+// =============================================================================
+
+// TestSetIterPort tests the iter port override mechanism
+func TestSetIterPort(t *testing.T) {
+	// Ensure clean state
+	ResetIterPort()
+
+	t.Run("default port is 53", func(t *testing.T) {
+		if got := getIterPort(); got != "53" {
+			t.Errorf("expected default port '53', got '%s'", got)
+		}
+	})
+
+	t.Run("SetIterPort overrides port", func(t *testing.T) {
+		SetIterPort("15353")
+		defer ResetIterPort()
+
+		if got := getIterPort(); got != "15353" {
+			t.Errorf("expected overridden port '15353', got '%s'", got)
+		}
+	})
+
+	t.Run("ResetIterPort restores default", func(t *testing.T) {
+		SetIterPort("9999")
+		ResetIterPort()
+
+		if got := getIterPort(); got != "53" {
+			t.Errorf("expected default port '53' after reset, got '%s'", got)
+		}
+	})
+}
+
+// =============================================================================
 // Integration Tests (require network/mocked DNS server on port 53)
 // =============================================================================
 

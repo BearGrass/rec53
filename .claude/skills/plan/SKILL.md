@@ -5,40 +5,26 @@ argument-hint: [requirement-id or blank for all]
 disable-model-invocation: true
 ---
 
-# Requirement Planning Workflow
+# Requirement Planning
 
-## Steps
+1. Read: CLAUDE.md, .rec53/BACKLOG.md, .rec53/ARCHITECTURE.md, .rec53/TODO.md, .rec53/ROADMAP.md
+2. Find "Unplanned" items (or filter by $ARGUMENTS if specified)
+3. For each item, analyze: files to modify, new files needed, external deps, architecture conflicts, complexity (S/M/L), suggested order
+4. **Present analysis. Wait for confirmation.**
+5. After confirmation: move items to "Planned" in BACKLOG.md, write tasks to TODO.md, update ARCHITECTURE.md/ROADMAP.md if affected
 
-1. Read these files to build full project context:
-   - CLAUDE.md
-   - .rec53/BACKLOG.md
-   - .rec53/ARCHITECTURE.md
-   - .rec53/TODO.md
-   - .rec53/ROADMAP.md
+## TODO.md Task Format
 
-2. Find all items under "Unplanned" in BACKLOG.md. If the user specified a requirement ID in $ARGUMENTS, process only that one.
+Each requirement becomes one task entry with numbered steps:
 
-3. For each item, produce a technical analysis:
-   - Which existing files need modification
-   - Which new files need to be created
-   - External library dependencies (if any)
-   - Conflicts with existing architecture (if any)
-   - Estimated complexity: Small / Medium / Large
-   - Suggested implementation order considering dependencies
+```
+- [ ] [F-001] Title (source: BACKLOG.md)
+  - [ ] [F-001/1] Create src/foo.go — implement X
+  - [ ] [F-001/2] Update src/bar.go — add Y to Z
+  - [ ] [F-001/3] Write tests for foo.go
+```
 
-4. Present the analysis. **Wait for user confirmation.**
-
-5. After confirmation:
-   - Move confirmed items from "Unplanned" to "Planned" in BACKLOG.md
-   - Create specific tasks in TODO.md for each requirement, broken down to file level
-   - If requirement affects architecture → update ARCHITECTURE.md
-   - If requirement belongs to a new version → update ROADMAP.md
-   - Update CLAUDE.md if any section is affected
-
-6. Tell the user: ready to start with /dev
-
-## Rules
-
-- Do NOT write any code in this phase
-- If a requirement is ambiguous, list your questions and ask the user. Do not assume.
-- If a requirement conflicts with existing functionality, state the conflict clearly and let the user decide.
+Rules:
+- Every step must reference a specific file
+- Steps ordered by dependency (files depended upon come first)
+- No code in this phase. Ask if ambiguous. State conflicts clearly.

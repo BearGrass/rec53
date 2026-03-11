@@ -201,6 +201,29 @@ func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	return IN_GLUE_NOT_EXIST, nil
 }
 
+// iterPortOverride allows tests to inject a custom port for upstream queries.
+// When non-empty, iterState uses this port instead of the default "53".
+var iterPortOverride string
+
+// SetIterPort overrides the port used by iterState for upstream DNS queries.
+// This is intended for testing with mock servers on non-standard ports.
+func SetIterPort(port string) {
+	iterPortOverride = port
+}
+
+// ResetIterPort clears the port override so iterState uses port 53 again.
+func ResetIterPort() {
+	iterPortOverride = ""
+}
+
+// getIterPort returns the port to use for upstream DNS queries.
+func getIterPort() string {
+	if iterPortOverride != "" {
+		return iterPortOverride
+	}
+	return "53"
+}
+
 type iterState struct {
 	request  *dns.Msg
 	response *dns.Msg
@@ -361,8 +384,9 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	//send query to the best ip
 	theBestIP := bestAddr
 	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
-	monitor.Rec53Log.Debugf("[ITER] Sending query to %s:53 for %s", bestAddr, request.Question[0].Name)
-	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":53")
+	port := getIterPort()
+	monitor.Rec53Log.Debugf("[ITER] Sending query to %s:%s for %s", bestAddr, port, request.Question[0].Name)
+	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":"+port)
 	if err != nil {
 		monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
 		ipq := globalIPPool.GetIPQuality(bestAddr)
@@ -373,7 +397,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			return ITER_COMMON_ERROR, err
 		}
 		monitor.Rec53Log.Debugf("[ITER] Retrying with second IP: %s", secondAddr)
-		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":53")
+		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":"+port)
 		if err != nil {
 			monitor.Rec53Log.Debugf("[ITER] Query to second IP %s also failed: %v", secondAddr, err)
 			ipq := globalIPPool.GetIPQuality(secondAddr)

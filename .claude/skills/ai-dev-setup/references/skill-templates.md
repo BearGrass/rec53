@@ -4,17 +4,29 @@ Generated into `.claude/skills/` for project-specific workflows.
 
 ## Placeholder Substitution
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `{DOC_DIR}` | Documentation directory | `.rec53`, `docs` |
-| `{TEST_CMD}` | Test command | `go test ./...` |
-| `{LINT_CMD}` | Lint command | `go vet ./...` |
-| `{TEST_COVER_CMD}` | Coverage command | `go test -coverprofile=coverage.out ./...` |
-| `{RACE_FLAG}` | Race detection flag | `-race` or empty |
+| Placeholder | Example |
+|-------------|---------|
+| `{DOC_DIR}` | `.docs`, `docs` |
+| `{TEST_CMD}` | `go test ./...` |
+| `{LINT_CMD}` | `go vet ./...` |
+| `{TEST_COVER_CMD}` | `go test -coverprofile=coverage.out ./...` |
+| `{RACE_FLAG}` | `-race` or empty |
 
-## /plan - Requirement Planning
+## Directory Structure
 
-**Target:** `.claude/skills/plan/SKILL.md`
+```
+.claude/skills/
+├── plan/SKILL.md
+├── dev/SKILL.md
+├── dev-resume/SKILL.md
+├── test/SKILL.md
+├── test-resume/SKILL.md
+└── sync-docs/SKILL.md
+```
+
+---
+
+## /plan
 
 ```markdown
 ---
@@ -24,110 +36,91 @@ argument-hint: [requirement-id or blank for all]
 disable-model-invocation: true
 ---
 
-# Requirement Planning Workflow
+# Requirement Planning
 
-## Steps
+1. Read: CLAUDE.md, {DOC_DIR}/BACKLOG.md, {DOC_DIR}/ARCHITECTURE.md, {DOC_DIR}/TODO.md, {DOC_DIR}/ROADMAP.md
+2. Find "Unplanned" items (or filter by $ARGUMENTS if specified)
+3. For each item, analyze: files to modify, new files needed, external deps, architecture conflicts, complexity (S/M/L), suggested order
+4. **Present analysis. Wait for confirmation.**
+5. After confirmation: move items to "Planned" in BACKLOG.md, write tasks to TODO.md, update ARCHITECTURE.md/ROADMAP.md if affected
 
-1. Read these files to build full project context:
-   - CLAUDE.md
-   - {DOC_DIR}/BACKLOG.md
-   - {DOC_DIR}/ARCHITECTURE.md
-   - {DOC_DIR}/TODO.md
-   - {DOC_DIR}/ROADMAP.md
+## TODO.md Task Format
 
-2. Find all items under "Unplanned" in BACKLOG.md. If the user specified a requirement ID in $ARGUMENTS, process only that one.
+Each requirement becomes one task entry with numbered steps:
 
-3. For each item, produce a technical analysis:
-   - Which existing files need modification
-   - Which new files need to be created
-   - External library dependencies (if any)
-   - Conflicts with existing architecture (if any)
-   - Estimated complexity: Small / Medium / Large
-   - Suggested implementation order considering dependencies
-
-4. Present the analysis. **Wait for user confirmation.**
-
-5. After confirmation:
-   - Move confirmed items from "Unplanned" to "Planned" in BACKLOG.md
-   - Create specific tasks in TODO.md for each requirement, broken down to file level
-   - If requirement affects architecture → update ARCHITECTURE.md
-   - If requirement belongs to a new version → update ROADMAP.md
-   - Update CLAUDE.md if any section is affected
-
-6. Tell the user: ready to start with /dev
-
-## Rules
-
-- Do NOT write any code in this phase
-- If a requirement is ambiguous, list your questions and ask the user. Do not assume.
-- If a requirement conflicts with existing functionality, state the conflict clearly and let the user decide.
+```
+- [ ] [F-001] Title (source: BACKLOG.md)
+  - [ ] [F-001/1] Create src/foo.go — implement X
+  - [ ] [F-001/2] Update src/bar.go — add Y to Z
+  - [ ] [F-001/3] Write tests for foo.go
 ```
 
-## /dev - Development Workflow
+Rules:
+- Every step must reference a specific file
+- Steps ordered by dependency (files depended upon come first)
+- No code in this phase. Ask if ambiguous. State conflicts clearly.
+```
 
-**Target:** `.claude/skills/dev/SKILL.md`
+## /dev
 
 ```markdown
 ---
 name: dev
-description: Develop the highest priority task from TODO.md with code, tests, and doc updates.
-argument-hint: [task-id or blank for highest priority]
+description: Develop tasks from TODO.md with code, tests, and doc updates. Accepts task-id (e.g. F-001) to work the whole task, or task-id/step (e.g. F-001/2) to work a single step.
+argument-hint: [task-id | task-id/step | blank for highest priority]
 disable-model-invocation: true
 ---
 
 # Development Workflow
 
-## Steps
+## Argument Parsing
 
-1. Read: CLAUDE.md, {DOC_DIR}/TODO.md, {DOC_DIR}/ARCHITECTURE.md, {DOC_DIR}/CONVENTIONS.md
-2. Find highest priority "Not started" task (or use $ARGUMENTS if specified)
-3. Present plan: files to modify, approach. **Wait for confirmation.**
+Parse $ARGUMENTS:
+- blank → find highest priority task with any "Not started" step
+- `F-001` → work task F-001 from its first "Not started" step through all steps
+- `F-001/2` → work only step 2 of task F-001
 
-## Per-File Loop
+Read: CLAUDE.md, {DOC_DIR}/TODO.md, {DOC_DIR}/ARCHITECTURE.md, {DOC_DIR}/CONVENTIONS.md
 
-For each file in the task:
-1. Write code changes
-2. Write/update unit tests
+**Present target: task title, which step(s) will be worked, files involved. Wait for confirmation.**
+
+## Per-Step Loop
+
+For each step in scope:
+1. Mark step `[ ]` → `[~]` (in-progress) in TODO.md
+2. Write code changes for that file + unit tests
 3. Run `{TEST_CMD} {RACE_FLAG}` on relevant package — fix until pass
-4. Update docs if needed:
-   - New package/dependency → CLAUDE.md
-   - Architecture change → ARCHITECTURE.md
-   - User-facing feature → README.md
-   - Found issue → TODO.md
-5. Report changes. **Wait for confirmation.**
+4. Update docs if needed: new package → CLAUDE.md, arch change → ARCHITECTURE.md, user feature → README.md, new issue → TODO.md
+5. Mark step `[~]` → `[x]` in TODO.md
+6. **Report step done. Wait for confirmation before next step.**
 
 ## Task Completion
 
+When all steps of a task are `[x]`:
 1. Run full test suite: `{TEST_CMD} {RACE_FLAG}` — must pass
-2. Run lint: `{LINT_CMD}` — must have no warnings
-3. Mark task completed in TODO.md
+2. Run lint: `{LINT_CMD}` — no warnings
+3. Mark task `[ ]` → `[x]` in TODO.md
 4. Move requirement to "Completed" in BACKLOG.md
 ```
 
-## /dev-resume - Resume Development
-
-**Target:** `.claude/skills/dev-resume/SKILL.md`
+## /dev-resume
 
 ```markdown
 ---
 name: dev-resume
-description: Resume an interrupted development session by reading TODO.md for in-progress tasks.
+description: Resume an interrupted development session by finding the first in-progress or incomplete step in TODO.md.
 disable-model-invocation: true
 ---
 
-# Resume Development Workflow
+# Resume Development
 
-1. Read CLAUDE.md, {DOC_DIR}/TODO.md, {DOC_DIR}/BACKLOG.md
-2. Find tasks with status "In Progress" in TODO.md
-3. Report current progress: which task, which files are done, what remains
-4. **Wait for user confirmation before continuing**
-
-After confirmation, continue following the same rules as /dev: per-file loop with self-check, wait for confirmation after each file.
+1. Read: CLAUDE.md, {DOC_DIR}/TODO.md, {DOC_DIR}/BACKLOG.md
+2. Find the first task containing a `[~]` (in-progress) or the first task with mixed `[x]`/`[ ]` steps
+3. Report: task title, steps completed `[x]`, current step `[~]` or next `[ ]`, steps remaining
+4. **Wait for confirmation, then continue per /dev per-step loop rules starting from the identified step**
 ```
 
-## /test - Test Coverage Workflow
-
-**Target:** `.claude/skills/test/SKILL.md`
+## /test
 
 ```markdown
 ---
@@ -139,36 +132,23 @@ disable-model-invocation: true
 
 # Test Coverage Workflow
 
-## Phase 1: Planning
+Phase 1 — Planning:
+1. Read: CLAUDE.md, {DOC_DIR}/TEST_PLAN.md
+2. Scan source files vs existing tests, run `{TEST_COVER_CMD}` for baseline
+3. Update TEST_PLAN.md: utilities → core → interfaces → integration order
+4. **Present plan. Wait for confirmation.**
 
-1. Read CLAUDE.md, {DOC_DIR}/TEST_PLAN.md
-2. Scan source files, compare against existing tests
-3. Run `{TEST_COVER_CMD}` for baseline
-4. Update TEST_PLAN.md sorted by dependency: utilities → core → interfaces → integration
-5. Present plan. **Wait for confirmation.**
-
-## Phase 2: Execution
-
-For each file:
-1. Write test file following conventions
+Phase 2 — Execution (per file):
+1. Write test file per conventions
 2. Run `{TEST_CMD} {RACE_FLAG}` — fix until pass
-3. Update TEST_PLAN.md status
-4. Report. **Wait for confirmation before next file.**
+3. Update TEST_PLAN.md status, report
+4. **Wait for confirmation before next file**
+After each batch: run `{TEST_COVER_CMD}`, report delta, **wait for instruction**
 
-After each batch:
-1. Run `{TEST_COVER_CMD}`, report delta
-2. **Wait for instruction to continue**
-
-## Phase 3: Wrap-up
-
-1. Full test suite pass
-2. Final coverage report
-3. Update TEST_PLAN.md, CLAUDE.md, TODO.md
+Phase 3 — Wrap-up: full suite pass, final coverage report, update TEST_PLAN.md + CLAUDE.md + TODO.md
 ```
 
-## /test-resume - Resume Testing
-
-**Target:** `.claude/skills/test-resume/SKILL.md`
+## /test-resume
 
 ```markdown
 ---
@@ -179,17 +159,13 @@ disable-model-invocation: true
 
 # Resume Test Workflow
 
-1. Read CLAUDE.md, {DOC_DIR}/TEST_PLAN.md, {DOC_DIR}/TODO.md
-2. Find the first entry with status "Not started" or "In Progress"
-3. Report progress: X completed, Y remaining, current batch Z
-4. **Wait for confirmation before continuing**
-
-After confirmation, continue following /test Phase 2 rules: per-file loop with self-check, wait for confirmation.
+1. Read: CLAUDE.md, {DOC_DIR}/TEST_PLAN.md, {DOC_DIR}/TODO.md
+2. Find first "Not started" or "In Progress" entry
+3. Report: X completed, Y remaining, current batch
+4. **Wait for confirmation, then continue per /test Phase 2 rules**
 ```
 
-## /sync-docs - Documentation Sync
-
-**Target:** `.claude/skills/sync-docs/SKILL.md`
+## /sync-docs
 
 ```markdown
 ---
@@ -202,36 +178,8 @@ disable-model-invocation: true
 
 1. Read CLAUDE.md "Document Self-Maintenance Rules" section
 2. Run `git diff --name-only` (or `HEAD~5` if no staged changes)
-3. Check each modified file against trigger rules:
-   - CLAUDE.md: Architecture, Dependencies, Testing, Build sections?
-   - README.md: features, usage, install up to date?
-   - {DOC_DIR}/TODO.md: completed items marked? new issues?
-   - {DOC_DIR}/TEST_PLAN.md: statuses current?
-   - {DOC_DIR}/ARCHITECTURE.md: descriptions accurate?
-   - {DOC_DIR}/BACKLOG.md: completed items moved?
-4. List discrepancies: which doc, which section, what's wrong, what it should say
+3. Check each modified file against trigger rules in CLAUDE.md
+4. List discrepancies: doc, section, current state, correct state
 5. **Wait for confirmation**
 6. Apply fixes, report updates
 ```
-
-## Directory Creation
-
-Each skill needs its own directory:
-
-```
-.claude/skills/
-├── plan/
-│   └── SKILL.md
-├── dev/
-│   └── SKILL.md
-├── dev-resume/
-│   └── SKILL.md
-├── test/
-│   └── SKILL.md
-├── test-resume/
-│   └── SKILL.md
-└── sync-docs/
-    └── SKILL.md
-```
-
-Create directories if they don't exist before writing files.

@@ -6,7 +6,28 @@ import (
 	"github.com/miekg/dns"
 )
 
+// rootGlueOverride allows tests to inject a custom root glue message.
+// When non-nil, GetRootGlue() returns a copy of this instead of the
+// hardcoded root servers.
+var rootGlueOverride *dns.Msg
+
+// SetRootGlue overrides the root glue returned by GetRootGlue().
+// The provided message is deep-copied to prevent external mutation.
+func SetRootGlue(msg *dns.Msg) {
+	rootGlueOverride = msg.Copy()
+}
+
+// ResetRootGlue clears the override so GetRootGlue() returns the
+// hardcoded root servers again.
+func ResetRootGlue() {
+	rootGlueOverride = nil
+}
+
 func GetRootGlue() *dns.Msg {
+	if rootGlueOverride != nil {
+		return rootGlueOverride.Copy()
+	}
+
 	rootGlue := new(dns.Msg)
 	rootGlue.SetUpdate(".")
 	rootGlue.Ns = make([]dns.RR, 0)

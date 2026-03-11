@@ -14,8 +14,8 @@ import (
 const (
 	INIT_IP_LATENCY     = 1000
 	MAX_IP_LATENCY      = 10000
-	MAX_PREFETCH_CONCUR = 10  // 最大并发 prefetch 数
-	PREFETCH_TIMEOUT    = 3   // prefetch 超时秒数
+	MAX_PREFETCH_CONCUR = 10 // 最大并发 prefetch 数
+	PREFETCH_TIMEOUT    = 3  // prefetch 超时秒数
 )
 
 type IPQuality struct {
@@ -55,13 +55,13 @@ func (ipq *IPQuality) SetLatencyAndState(latency int32) {
 }
 
 type IPPool struct {
-	pool         map[string]*IPQuality
-	l            sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	sem          chan struct{} // semaphore for concurrency limit
-	dnsClient    *dns.Client
+	pool      map[string]*IPQuality
+	l         sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	sem       chan struct{} // semaphore for concurrency limit
+	dnsClient *dns.Client
 }
 
 var globalIPPool = NewIPPool()
@@ -69,11 +69,11 @@ var globalIPPool = NewIPPool()
 func NewIPPool() *IPPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	ipp := &IPPool{
-		pool:    make(map[string]*IPQuality),
-		l:       sync.RWMutex{},
-		ctx:     ctx,
-		cancel:  cancel,
-		sem:     make(chan struct{}, MAX_PREFETCH_CONCUR),
+		pool:   make(map[string]*IPQuality),
+		l:      sync.RWMutex{},
+		ctx:    ctx,
+		cancel: cancel,
+		sem:    make(chan struct{}, MAX_PREFETCH_CONCUR),
 		dnsClient: &dns.Client{
 			Net:     "udp",
 			Timeout: PREFETCH_TIMEOUT * time.Second,
@@ -233,7 +233,7 @@ func (ipp *IPPool) prefetchIPQuality(ip string) {
 	default:
 	}
 
-	_, rtt, err := ipp.dnsClient.Exchange(&dns.Msg{}, ip+":53")
+	_, rtt, err := ipp.dnsClient.Exchange(&dns.Msg{}, ip+":"+getIterPort())
 	if err != nil {
 		monitor.Rec53Log.Errorf("prefetch ip %s error: %s", ip, err.Error())
 		return
@@ -243,4 +243,15 @@ func (ipp *IPPool) prefetchIPQuality(ip string) {
 	ipq.SetLatencyAndState(int32(rtt / time.Millisecond))
 	ipp.SetIPQuality(ip, ipq)
 	monitor.Rec53Metric.IPQualityGaugeSet(ip, float64(rtt/time.Millisecond))
+}
+
+// ResetIPPoolForTest replaces the global IP pool with a fresh instance.
+// Exported for use by E2E tests to ensure a clean state.
+func ResetIPPoolForTest() {
+	// Shutdown existing pool's goroutines
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	globalIPPool.Shutdown(ctx)
+
+	globalIPPool = NewIPPool()
 }
