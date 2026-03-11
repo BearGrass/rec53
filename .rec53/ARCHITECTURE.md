@@ -97,22 +97,36 @@ DNS Response
 - **Interface**: `Change(stm) (*dns.Msg, error)`
 - **Dependencies**: Cache, IP pool, all state handlers
 
-### server.IPPool
+### server.IPPool (IPQualityV2)
 
-- **Responsibility**: Nameserver quality tracking, best IP selection, and background prefetch
-- **Data structure**:
-  - `IPQuality`: Atomic-based tracking with `isInit` flag (initialized before/after measurement) and `latency` (milliseconds)
-  - `IPPool`: Concurrent-safe pool with RWMutex, context-based shutdown, prefetch semaphore
+- **Responsibility**: Nameserver quality tracking with sliding-window histograms, intelligent selection, and background fault recovery
+- **Data structures**:
+  - `IPQualityV2`: Per-IP quality tracking with:
+    - Ring buffer: Last 64 RTT samples (milliseconds)
+    - Percentiles: P50, P95, P99 computed incrementally
+    - Confidence: 0-100% based on sample count (≥10 samples = 100%)
+    - State machine: ACTIVE(0) → DEGRADED(1) → SUSPECT(2) → RECOVERED(3)
+    - Failure counter: Tracks consecutive failures for exponential backoff
+  - `IPPool`: Concurrent-safe pool with RWMutex protecting IP quality map
 - **Core methods**:
-  - `getBestIPs(ips)`: Returns (best IP, second-best IP) based on lowest latency
-  - `UpIPsQuality(ips)`: Reduces latency by 10% for measured IPs to reward good performers
-  - `GetPrefetchIPs(bestIP)`: Identifies candidates in `[bestLatency × 0.9, bestLatency]` range
-  - `PrefetchIPs(ips)`: Asynchronously measures candidate IPs with concurrency limit (max 10)
-  - `updateIPQuality(ip, latency)`: Updates IP with actual measurement (sets `isInit=false`)
-- **State transitions**:
-  - New: `isInit=true, latency=1000ms` (assumed)
-  - Measured: `isInit=false, latency=actualRTT` (after prefetch)
-- **Dependencies**: dns.Client for prefetch queries, context for graceful shutdown
+  - `RecordLatency(ip, rtt)`: Records RTT in ring buffer, updates percentiles, resets failure counter
+  - `RecordFailure(ip)`: Increments failure counter, applies exponential backoff phases:
+    - Phase 1 (1-3 failures): DEGRADED, 20% latency penalty
+    - Phase 2 (4-6 failures): SUSPECT, all metrics set to MAX (10000ms)
+    - Phase 3 (7+ failures): Remains SUSPECT, eligible for probing
+  - `GetScore(ip)`: Composite score = p50 × confidence_multiplier × state_weight
+    - Low-confidence IPs (0%) get 2x bonus to encourage sampling
+    - State weights: ACTIVE(1.0), DEGRADED(1.5), SUSPECT(100.0), RECOVERED(1.1)
+  - `GetBestIPsV2(ips)`: Returns (best, secondary) by lowest composite score
+  - `ShouldProbe(ip)`: Identifies SUSPECT candidates for recovery probing
+  - `ResetForProbe(ip)`: Resets to ACTIVE state on successful probe
+  - `IPQualityV2GaugeSet(ip, quality)`: Exports P50/P95/P99 to Prometheus
+- **Background recovery**:
+  - `StartProbeLoop()`: Launches background goroutine on server startup
+  - `periodicProbeLoop()`: Runs every 30 seconds, non-blocking to queries
+  - `probeAllSuspiciousIPs()`: Probes only SUSPECT IPs via A record query
+  - Uses RWMutex to prevent blocking normal query path
+- **Dependencies**: dns.Client for probing, context for graceful shutdown, RWMutex for concurrency
 
 ### server.Cache
 
@@ -139,57 +153,95 @@ DNS Response
 - DNSSEC validation not implemented
 - DoT/DoH not supported
 
-## IP Quality Management Lifecycle
+## IP Quality Management Lifecycle (IPQualityV2)
 
-The IP quality tracking follows this lifecycle:
+The IP quality tracking follows this lifecycle with automatic fault recovery:
 
 ```
-1. IP INITIALIZATION
-   ┌─────────────────────────────────────┐
-   │ New IP discovered from nameserver   │
-   │ isInit=true, latency=1000ms (assumed)│
-   └─────────────────────────────────────┘
-           │
-           ▼
-2. SELECTION & USAGE
-   ┌─────────────────────────────────────┐
-   │ getBestIPs(): Pick top 2 IPs by latency
-   │ Use best IP for iterative query     │
-   └─────────────────────────────────────┘
-           │
-           ▼
-3. PREFETCH DISCOVERY (Background)
-   ┌─────────────────────────────────────┐
-   │ GetPrefetchIPs(): Find candidates   │
-   │ in range [best×0.9, best]           │
-   │ PrefetchIPs(): Measure them async   │
-   │ (max 10 concurrent)                 │
-   └─────────────────────────────────────┘
-           │
-           ├─ Success ─→ updateIPQuality(ip, RTT)
-           │             isInit=false, latency=RTT
-           │
-           └─ Failure ─→ Retain original value
-                        Retry in future prefetch
-   
-4. QUALITY IMPROVEMENT
-   ┌─────────────────────────────────────┐
-   │ UpIPsQuality(): For measured IPs    │
-   │ latency *= 0.9 (10% reduction)      │
-   │ Rewards consistent good performers  │
-   └─────────────────────────────────────┘
-
-5. GRACEFUL SHUTDOWN
-   ┌─────────────────────────────────────┐
-   │ Shutdown(): Cancel context          │
-   │ Wait for all prefetch goroutines    │
-   │ (context timeout: configurable)     │
-   └─────────────────────────────────────┘
+1. IP DISCOVERY
+   ┌──────────────────────────────┐
+   │ New IP from NS delegation    │
+   │ State: ACTIVE (0)            │
+   │ Confidence: 0% (no samples)  │
+   │ Score: 1000 × 2.0 × 1.0 = 2000 (encouraged for sampling)
+   └──────────────────────────────┘
+          │
+          ▼
+2. LATENCY RECORDING (On Query Success)
+   ┌──────────────────────────────┐
+   │ RecordLatency(ip, rtt)       │
+   │ - Add RTT to ring buffer     │
+   │ - Update P50/P95/P99         │
+   │ - Increment sample count     │
+   │ - Reset failure counter = 0  │
+   │ - Export metrics to Prometheus
+   └──────────────────────────────┘
+          │
+          ▼
+3. FAILURE TRACKING (On Query Failure)
+   ┌──────────────────────────────┐
+   │ RecordFailure(ip)            │
+   │ Exponential backoff phases:  │
+   │                              │
+   │ Phase 1 (1-3 failures):      │
+   │   State: DEGRADED (1)        │
+   │   Score: p50 × 1.0 × 1.5    │
+   │   Effect: 20% latency penalty│
+   │                              │
+   │ Phase 2 (4-6 failures):      │
+   │   State: SUSPECT (2)         │
+   │   Score: 10000 × 1.0 × 100.0│
+   │   Effect: Avoided in selection
+   │                              │
+   │ Phase 3 (7+ failures):       │
+   │   State: SUSPECT (2)         │
+   │   Eligible for background    │
+   │   probing every 30 seconds   │
+   └──────────────────────────────┘
+          │
+          ▼
+4. BACKGROUND RECOVERY (Every 30 seconds)
+   ┌──────────────────────────────┐
+   │ periodicProbeLoop()          │
+   │ - Identify SUSPECT IPs       │
+   │ - Query A record to each     │
+   │ - On success:                │
+   │   ResetForProbe(ip) →        │
+   │   State: ACTIVE (0)          │
+   │   Failure counter reset      │
+   │ - Non-blocking to queries    │
+   └──────────────────────────────┘
+          │
+          ▼
+5. COMPOSITE SCORING & SELECTION
+   ┌──────────────────────────────┐
+   │ GetScore(ip):                │
+   │ score = p50 ×                │
+   │         confidence_mult ×    │
+   │         state_weight         │
+   │                              │
+   │ GetBestIPsV2(ips):           │
+   │ - Return lowest score IP     │
+   │ - Balanced best+explore      │
+   └──────────────────────────────┘
 ```
+
+### Score Calculation Examples
+
+| State | Confidence | P50ms | Conf Mult | State Weight | Score |
+|-------|------------|-------|-----------|--------------|-------|
+| ACTIVE | 0% | 100 | 2.0 | 1.0 | 200 (encouraged) |
+| ACTIVE | 100% | 100 | 1.0 | 1.0 | 100 (preferred) |
+| DEGRADED | 100% | 100 | 1.0 | 1.5 | 150 (penalized) |
+| SUSPECT | 100% | 10000 | 1.0 | 100.0 | 1,000,000 (avoided) |
+| RECOVERED | 100% | 100 | 1.0 | 1.1 | 110 (slightly penalized) |
 
 ## Concurrent Access Patterns
 
-- **IPQuality**: Uses atomic operations (`atomic.Load/Store`) for lock-free reads/writes
+- **IPQualityV2**: Lock-free design with atomic operations for latency/confidence
 - **IPPool.pool**: Protected by `RWMutex` for safe concurrent map access
-- **Prefetch concurrency**: Semaphore-based with channel (max 10 concurrent goroutines)
-- **Shutdown coordination**: WaitGroup tracks all goroutines, context cancellation for graceful termination
+  - Reader lock: Query latency recording (RecordLatency, RecordFailure)
+  - Writer lock: Background probing only (periodicProbeLoop)
+  - Design: Non-blocking to queries, probing happens out-of-band
+- **Background probing**: Goroutine-based with periodic 30-second intervals
+- **Shutdown coordination**: Context-based cancellation with graceful goroutine termination
