@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +53,116 @@ func (ipq *IPQuality) SetLatency(latency int32) {
 func (ipq *IPQuality) SetLatencyAndState(latency int32) {
 	atomic.StoreInt32(&ipq.latency, latency)
 	ipq.isInit.Store(false)
+}
+
+// IP state constants for IPQualityV2
+const (
+	IP_STATE_ACTIVE    = 0 // Normal operation
+	IP_STATE_DEGRADED  = 1 // Performance degraded (1-3 failures)
+	IP_STATE_SUSPECT   = 2 // Suspected bad (4-6 failures)
+	IP_STATE_RECOVERED = 3 // Recovering (probe successful)
+)
+
+// IPQualityV2 tracks IP quality using sliding window histogram with P50/P95/P99 metrics
+// This replaces the simple IPQuality struct for improved fault recovery and confidence-based selection
+type IPQualityV2 struct {
+	// Sliding window samples (ring buffer)
+	samples     [64]int32 // Last 64 RTT samples in milliseconds
+	sampleCount uint8     // Number of samples currently in buffer (0-64)
+	nextIdx     uint8     // Next write position in ring buffer
+
+	// Statistical metrics
+	p50        int32 // Median latency (P50) - used for selection
+	p95        int32 // 95th percentile latency - for monitoring
+	p99        int32 // 99th percentile latency - for monitoring
+	confidence uint8 // Confidence level 0-100% (sampleCount * 10, capped at 100)
+
+	// Failure tracking
+	failCount   uint8     // Consecutive failure count
+	state       uint8     // Current IP state (ACTIVE, DEGRADED, SUSPECT, RECOVERED)
+	lastUpdate  time.Time // Last update timestamp
+	lastFailure time.Time // Last failure timestamp
+
+	// Concurrency protection
+	mu sync.RWMutex
+}
+
+// NewIPQualityV2 creates a new IP quality tracker with initial state
+func NewIPQualityV2() *IPQualityV2 {
+	return &IPQualityV2{
+		sampleCount: 0,
+		nextIdx:     0,
+		p50:         int32(INIT_IP_LATENCY),
+		p95:         int32(INIT_IP_LATENCY),
+		p99:         int32(INIT_IP_LATENCY),
+		confidence:  0,
+		failCount:   0,
+		state:       IP_STATE_ACTIVE,
+		lastUpdate:  time.Now(),
+		lastFailure: time.Time{},
+	}
+}
+
+// RecordLatency records a successful latency sample and updates percentiles
+// Thread-safe via internal RWMutex
+func (iq *IPQualityV2) RecordLatency(latency int32) {
+	iq.mu.Lock()
+	defer iq.mu.Unlock()
+
+	// Add sample to ring buffer
+	iq.samples[iq.nextIdx] = latency
+	iq.nextIdx = (iq.nextIdx + 1) % 64
+	if iq.sampleCount < 64 {
+		iq.sampleCount++
+	}
+
+	// Update confidence (10 samples = 100%)
+	iq.confidence = uint8(int(iq.sampleCount) * 10)
+	if iq.confidence > 100 {
+		iq.confidence = 100
+	}
+
+	// Reset failure counter on success (recovery sign)
+	iq.failCount = 0
+	iq.state = IP_STATE_ACTIVE
+
+	// Recalculate percentiles
+	iq.updatePercentiles()
+	iq.lastUpdate = time.Now()
+}
+
+// updatePercentiles recalculates P50, P95, P99 from current samples
+// Must be called with mutex held
+func (iq *IPQualityV2) updatePercentiles() {
+	if iq.sampleCount == 0 {
+		return
+	}
+
+	// Copy samples for sorting (must sort to compute percentiles)
+	samples := make([]int32, iq.sampleCount)
+	for i := 0; i < int(iq.sampleCount); i++ {
+		samples[i] = iq.samples[i]
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		return samples[i] < samples[j]
+	})
+
+	// Calculate P50 (median)
+	iq.p50 = samples[iq.sampleCount/2]
+
+	// Calculate P95
+	idx95 := int(float64(iq.sampleCount) * 0.95)
+	if idx95 >= int(iq.sampleCount) {
+		idx95 = int(iq.sampleCount) - 1
+	}
+	iq.p95 = samples[idx95]
+
+	// Calculate P99
+	idx99 := int(float64(iq.sampleCount) * 0.99)
+	if idx99 >= int(iq.sampleCount) {
+		idx99 = int(iq.sampleCount) - 1
+	}
+	iq.p99 = samples[idx99]
 }
 
 type IPPool struct {
