@@ -28,12 +28,22 @@ func (m *Metric) IPQualityGaugeSet(ip string, quality float64) {
 	IPQuality.With(prometheus.Labels{"ip": ip}).Set(quality)
 }
 
+// IPQualityV2GaugeSet sets the P50, P95, P99 latency gauges for an IP
+func (m *Metric) IPQualityV2GaugeSet(ip string, p50, p95, p99 float64) {
+	IPQualityV2_P50.With(prometheus.Labels{"ip": ip}).Set(p50)
+	IPQualityV2_P95.With(prometheus.Labels{"ip": ip}).Set(p95)
+	IPQualityV2_P99.With(prometheus.Labels{"ip": ip}).Set(p99)
+}
+
 // register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
 	m.reg.MustRegister(OutCounter)
 	m.reg.MustRegister(LatencyHistogramObserver)
 	m.reg.MustRegister(IPQuality)
+	m.reg.MustRegister(IPQualityV2_P50)
+	m.reg.MustRegister(IPQualityV2_P95)
+	m.reg.MustRegister(IPQualityV2_P99)
 }
 
 // MetricServer holds the HTTP server for metrics

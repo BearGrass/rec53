@@ -426,6 +426,12 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	iqv2 := globalIPPool.GetIPQualityV2(theBestIP)
 	if iqv2 != nil {
 		iqv2.RecordLatency(int32(rtt / time.Millisecond))
+		// Export V2 percentile metrics to Prometheus
+		monitor.Rec53Metric.IPQualityV2GaugeSet(theBestIP,
+			float64(iqv2.GetP50Latency()),
+			float64(iqv2.GetP95Latency()),
+			float64(iqv2.GetP99Latency()),
+		)
 	}
 	monitor.Rec53Metric.IPQualityGaugeSet(theBestIP, float64(rtt/time.Millisecond))
 
