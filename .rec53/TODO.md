@@ -2,19 +2,6 @@
 
 ## In Progress
 
-- [x] [F-003] IP Pool Phase 4: Integration & Migration
-  - [x] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 4)
-    - [x] [F-003/6a] Implement `StartProbeLoop()` method in server/ip_pool.go
-    - [x] [F-003/6b] Implement `periodicProbeLoop()` method in server/ip_pool.go
-    - [x] [F-003/6c] Implement `probeAllSuspiciousIPs()` method in server/ip_pool.go
-    - [x] [F-003/6d] Integrate probe loop startup in server/server.go Run() method
-    - [x] [F-003/6e] Write unit tests for probe loop in server/ip_pool_test.go
-  - [x] [F-003/11] Migrate state_define.go to use GetBestIPsV2() (Phase 4)
-  - [x] [F-003/12] Add Prometheus metrics for p50/p95/p99 in monitor/metrics.go (Phase 4)
-  - [x] [F-003/13] Run performance benchmark for 1000 IPs in server/ip_pool_test.go (Phase 4)
-  - [ ] [F-003/14] Add E2E integration tests in e2e/dns_test.go (Phase 4)
-  - [ ] [F-003/15] Add feature flag support (optional) in server/config.go (Phase 4)
-
 ## Backlog
 
 ### Feature Tasks (from BACKLOG.md)
@@ -35,6 +22,18 @@
 
 ## Completed
 
+- [x] [F-003] IP Pool Phase 4: Integration & Migration (completed 2026-03-11)
+  - [x] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 4)
+    - [x] [F-003/6a] Implement `StartProbeLoop()` method in server/ip_pool.go
+    - [x] [F-003/6b] Implement `periodicProbeLoop()` method in server/ip_pool.go
+    - [x] [F-003/6c] Implement `probeAllSuspiciousIPs()` method in server/ip_pool.go
+    - [x] [F-003/6d] Integrate probe loop startup in server/server.go Run() method
+    - [x] [F-003/6e] Write unit tests for probe loop in server/ip_pool_test.go
+  - [x] [F-003/11] Migrate state_define.go to use GetBestIPsV2() (Phase 4)
+  - [x] [F-003/12] Add Prometheus metrics for p50/p95/p99 in monitor/metrics.go (Phase 4)
+  - [x] [F-003/13] Run performance benchmark for 1000 IPs in server/ip_pool_test.go (Phase 4)
+  - [x] [F-003/14] Add E2E integration tests in e2e/dns_test.go (Phase 4)
+  - Skipped: [F-003/15] Feature flag support (optional)
 - [x] [B-017] NS 递归解析栈溢出（fixed 2026-03-11）
   - Fix: Added break statement in resolveNSIPsRecursively() at line 319
   - Verification: E2E test pass, all regression tests pass
