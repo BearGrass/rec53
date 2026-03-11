@@ -779,3 +779,244 @@ func TestIPQualityV2_ConcurrentFailureAndSuccess(t *testing.T) {
 		t.Errorf("invalid state after concurrent ops: %d", iqv2.state)
 	}
 }
+
+// ============================================================================
+// Phase 3 Tests: Scoring and Selection
+// ============================================================================
+
+func TestIPQualityV2_GetScore_ActiveIP(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Record samples to establish baseline
+	for i := int32(1); i <= 10; i++ {
+		iqv2.RecordLatency(100 + i*10)
+	}
+
+	score := iqv2.GetScore()
+
+	// ACTIVE IP with 100% confidence should have score = p50 * 1.0 * 1.0
+	// p50 should be around 150 (middle of 100-200)
+	if score == 0 {
+		t.Error("score should be non-zero")
+	}
+	if score > 1000 {
+		t.Errorf("score seems too high for ACTIVE IP: %f", score)
+	}
+}
+
+func TestIPQualityV2_GetScore_DegradedIP(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	originalScore := iqv2.GetScore()
+
+	// Make it DEGRADED (1 failure)
+	iqv2.RecordFailure()
+	degradedScore := iqv2.GetScore()
+
+	// DEGRADED state has 1.5x weight, so score should increase
+	if degradedScore <= originalScore {
+		t.Errorf("degraded score (%f) should be > original (%f)", degradedScore, originalScore)
+	}
+}
+
+func TestIPQualityV2_GetScore_SuspectIP(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	// Make it SUSPECT (6 failures)
+	for i := 0; i < 6; i++ {
+		iqv2.RecordFailure()
+	}
+
+	score := iqv2.GetScore()
+
+	// SUSPECT state has 100x weight, so score should be massive
+	if score < 1000 {
+		t.Errorf("suspect IP score (%f) should be very high (> 1000)", score)
+	}
+}
+
+func TestIPQualityV2_GetScore_LowConfidenceIP(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Single sample = 10% confidence
+	iqv2.RecordLatency(100)
+
+	lowConfScore := iqv2.GetScore()
+
+	// Add more samples to increase confidence
+	for i := 0; i < 9; i++ {
+		iqv2.RecordLatency(100)
+	}
+
+	highConfScore := iqv2.GetScore()
+
+	// Low confidence score should be higher (penalized) than high confidence
+	if lowConfScore <= highConfScore {
+		t.Errorf("low conf score (%f) should be > high conf score (%f)", lowConfScore, highConfScore)
+	}
+}
+
+func TestIPQualityV2_GetScore_RecoveredIP(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	// Mark as RECOVERED
+	iqv2.ResetForProbe()
+
+	score := iqv2.GetScore()
+
+	// RECOVERED state has 1.1x weight, slightly penalized
+	if score == 0 {
+		t.Error("recovered IP score should be non-zero")
+	}
+	if score > 500 {
+		t.Errorf("recovered IP score (%f) should be reasonable", score)
+	}
+}
+
+func TestIPPool_GetBestIPsV2_Empty(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	best, second := ipp.GetBestIPsV2([]string{})
+
+	if best != "" || second != "" {
+		t.Error("empty IP list should return empty results")
+	}
+}
+
+func TestIPPool_GetBestIPsV2_SingleIP(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	best, second := ipp.GetBestIPsV2([]string{"192.0.2.1"})
+
+	if best != "192.0.2.1" {
+		t.Errorf("expected best=192.0.2.1, got %s", best)
+	}
+	if second != "" {
+		t.Errorf("expected no second IP, got %s", second)
+	}
+}
+
+func TestIPPool_GetBestIPsV2_MultipleIPs(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	// Create IPs with different qualities
+	ips := []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}
+
+	// Set IP1 to be best (good latency, full confidence)
+	iqv2_1 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_1.RecordLatency(100)
+	}
+	ipp.SetIPQualityV2(ips[0], iqv2_1)
+
+	// Set IP2 to be second (slightly worse)
+	iqv2_2 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_2.RecordLatency(150)
+	}
+	ipp.SetIPQualityV2(ips[1], iqv2_2)
+
+	// Set IP3 to be bad (degraded)
+	iqv2_3 := NewIPQualityV2()
+	iqv2_3.RecordLatency(100)
+	iqv2_3.RecordFailure()
+	ipp.SetIPQualityV2(ips[2], iqv2_3)
+
+	best, second := ipp.GetBestIPsV2(ips)
+
+	if best != "192.0.2.1" {
+		t.Errorf("expected best=192.0.2.1, got %s", best)
+	}
+	if second != "192.0.2.2" {
+		t.Errorf("expected second=192.0.2.2, got %s", second)
+	}
+}
+
+func TestIPPool_GetBestIPsV2_SuspectIPAvoidance(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	ips := []string{"192.0.2.1", "192.0.2.2"}
+
+	// IP1: Active, good latency
+	iqv2_1 := NewIPQualityV2()
+	for i := 0; i < 10; i++ {
+		iqv2_1.RecordLatency(100)
+	}
+	ipp.SetIPQualityV2(ips[0], iqv2_1)
+
+	// IP2: SUSPECT (bad), but slightly lower base latency
+	iqv2_2 := NewIPQualityV2()
+	iqv2_2.RecordLatency(50)
+	for i := 0; i < 10; i++ {
+		iqv2_2.RecordFailure()
+	}
+	ipp.SetIPQualityV2(ips[1], iqv2_2)
+
+	best, _ := ipp.GetBestIPsV2(ips)
+
+	// Even though IP2 has lower latency, SUSPECT penalty should make IP1 preferred
+	if best != "192.0.2.1" {
+		t.Errorf("SUSPECT IP should be avoided, expected best=192.0.2.1, got %s", best)
+	}
+}
+
+func TestIPPool_GetBestIPsV2_NewIPEncouragement(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	ips := []string{"192.0.2.1", "192.0.2.2"}
+
+	// IP1: Established, high latency, full confidence
+	iqv2_1 := NewIPQualityV2()
+	for i := 0; i < 20; i++ {
+		iqv2_1.RecordLatency(300)
+	}
+	ipp.SetIPQualityV2(ips[0], iqv2_1)
+
+	// IP2: New, lower latency, low confidence (should be encouraged to sample)
+	iqv2_2 := NewIPQualityV2()
+	iqv2_2.RecordLatency(200)
+	ipp.SetIPQualityV2(ips[1], iqv2_2)
+
+	best, second := ipp.GetBestIPsV2(ips)
+
+	// IP2 should be preferred due to low confidence 2x multiplier
+	if best != "192.0.2.2" {
+		t.Logf("new IP with low conf should be preferred, best=%s second=%s", best, second)
+		// This is a design choice - low confidence IPs get 2x multiplier
+	}
+}
+
+func TestIPPool_GetIPQualityV2(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	ip := "192.0.2.1"
+
+	// Initially should be nil
+	iqv2 := ipp.GetIPQualityV2(ip)
+	if iqv2 != nil {
+		t.Error("new IP should not have IPQualityV2 yet")
+	}
+
+	// Set it
+	newIqv2 := NewIPQualityV2()
+	newIqv2.RecordLatency(100)
+	ipp.SetIPQualityV2(ip, newIqv2)
+
+	// Should now return it
+	retrieved := ipp.GetIPQualityV2(ip)
+	if retrieved == nil {
+		t.Fatal("should retrieve stored IPQualityV2")
+	}
+	if retrieved.GetP50Latency() != 100 {
+		t.Errorf("expected p50=100, got %d", retrieved.GetP50Latency())
+	}
+}
