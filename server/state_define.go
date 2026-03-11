@@ -316,6 +316,7 @@ func resolveNSIPsRecursively(nsNames []string) []string {
 
 		if len(ipList) > 0 {
 			monitor.Rec53Log.Debugf("[ITER] Resolved NS %s to IPs: %v", nsName, ipList)
+			break // Only need one NS IP to continue iteration, avoid unnecessary recursion
 		}
 	}
 
