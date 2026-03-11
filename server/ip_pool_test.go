@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -1019,4 +1020,131 @@ func TestIPPool_GetIPQualityV2(t *testing.T) {
 	if retrieved.GetP50Latency() != 100 {
 		t.Errorf("expected p50=100, got %d", retrieved.GetP50Latency())
 	}
+}
+
+// =============================================================================
+// Benchmarks for F-003/13: Performance testing
+// =============================================================================
+
+// BenchmarkGetBestIPsV2_1000IPs benchmarks IP selection with 1000 IPs
+// Target: < 1ms per operation
+func BenchmarkGetBestIPsV2_1000IPs(b *testing.B) {
+	ipp := NewIPPool()
+
+	// Setup 1000 IPs with varying latencies and states
+	ipList := make([]string, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		ip := fmt.Sprintf("192.0.%d.%d", (i+1)/256, (i%256)+1)
+		ipList = append(ipList, ip)
+
+		// Create IPQualityV2 with samples
+		iqv2 := NewIPQualityV2()
+		latency := int32(100 + (i % 500)) // 100-600ms range
+		for j := 0; j < 20; j++ {
+			iqv2.RecordLatency(latency)
+		}
+		ipp.SetIPQualityV2(ip, iqv2)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ipp.GetBestIPsV2(ipList)
+	}
+	b.StopTimer()
+
+	// Report results
+	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000 // microseconds
+	b.Logf("Average time per GetBestIPsV2(1000 IPs): %.2f µs (target: < 1000 µs)", avgTime)
+	if avgTime > 1000 {
+		b.Errorf("Performance regression: %.2f µs > 1000 µs target", avgTime)
+	}
+}
+
+// BenchmarkGetBestIPsV2_100IPs benchmarks IP selection with 100 IPs
+func BenchmarkGetBestIPsV2_100IPs(b *testing.B) {
+	ipp := NewIPPool()
+
+	// Setup 100 IPs with varying latencies
+	ipList := make([]string, 0, 100)
+	for i := 0; i < 100; i++ {
+		ip := fmt.Sprintf("10.0.%d.%d", i/256, (i%256)+1)
+		ipList = append(ipList, ip)
+
+		iqv2 := NewIPQualityV2()
+		latency := int32(100 + (i % 300))
+		for j := 0; j < 20; j++ {
+			iqv2.RecordLatency(latency)
+		}
+		ipp.SetIPQualityV2(ip, iqv2)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ipp.GetBestIPsV2(ipList)
+	}
+	b.StopTimer()
+
+	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000
+	b.Logf("Average time per GetBestIPsV2(100 IPs): %.2f µs", avgTime)
+}
+
+// BenchmarkGetBestIPsV2_10IPs benchmarks IP selection with 10 IPs
+func BenchmarkGetBestIPsV2_10IPs(b *testing.B) {
+	ipp := NewIPPool()
+
+	// Setup 10 IPs
+	ipList := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		ip := fmt.Sprintf("8.8.%d.%d", 8+i, i)
+		ipList = append(ipList, ip)
+
+		iqv2 := NewIPQualityV2()
+		latency := int32(50 + (i * 50))
+		for j := 0; j < 20; j++ {
+			iqv2.RecordLatency(latency)
+		}
+		ipp.SetIPQualityV2(ip, iqv2)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ipp.GetBestIPsV2(ipList)
+	}
+	b.StopTimer()
+
+	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000
+	b.Logf("Average time per GetBestIPsV2(10 IPs): %.2f µs", avgTime)
+}
+
+// BenchmarkRecordLatency benchmarks latency recording
+func BenchmarkRecordLatency(b *testing.B) {
+	iqv2 := NewIPQualityV2()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		iqv2.RecordLatency(int32(50 + (i % 950)))
+	}
+	b.StopTimer()
+
+	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000
+	b.Logf("Average time per RecordLatency(): %.2f µs", avgTime)
+}
+
+// BenchmarkGetScore benchmarks composite score calculation
+func BenchmarkGetScore(b *testing.B) {
+	iqv2 := NewIPQualityV2()
+
+	// Pre-populate with samples
+	for i := 0; i < 64; i++ {
+		iqv2.RecordLatency(int32(100 + (i % 200)))
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = iqv2.GetScore()
+	}
+	b.StopTimer()
+
+	avgTime := float64(b.Elapsed().Nanoseconds()) / float64(b.N) / 1000
+	b.Logf("Average time per GetScore(): %.2f µs", avgTime)
 }
