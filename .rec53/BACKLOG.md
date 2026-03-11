@@ -18,49 +18,153 @@ Use these prefixes:
 
 ## Planned
 
-<!-- No items currently planned -->
+### [B-012] NXDOMAIN / NODATA 响应码不传递给客户端
+Priority: High
+Description: ITER 收到 NXDOMAIN 后设置 response.Rcode，但随后 CHECK_RESP 发现 Answer 为空继续迭代 IN_GLUE，导致所有 NXDOMAIN 和 NODATA 最终以 SERVFAIL 返回客户端，与 O-005（缓存）是两个独立问题。
+Acceptance criteria:
+- [ ] ITER 收到 NXDOMAIN 时，CHECK_RESP / 状态机能识别并直接组装负响应
+- [ ] RCODE=NOERROR + 空 Answer + Authority 含 SOA 的 NODATA 场景正确返回 NOERROR+空Answer
+- [ ] E2E 测试验证 NXDOMAIN 和 NODATA 正确到达客户端
+
+### [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试
+Priority: Medium
+Description: ITER 收到 SERVFAIL、REFUSED、FORMERR、NOTIMPL 时直接返回 ITER_COMMON_ERROR，未标记 bad server 并换其他 NS 重试，单个故障服务器即导致查询失败（doc S7 要求换 server）。
+Acceptance criteria:
+- [ ] 上述 Rcode 时标记当前服务器为 bad 并尝试备用服务器
+- [ ] 所有可用服务器均失败后才返回 SERVFAIL
+
+### [B-014] Glue 无 bailiwick 校验（安全风险）
+Priority: Medium
+Description: getIPListFromResponse() 直接采信 Additional 中的所有 A 记录作为 NS 地址，未验证 glue 是否在 bailiwick 范围内，存在 DNS cache poisoning 隐患（doc S10 明确要求 out-of-bailiwick glue 不纳入可信缓存）。
+Acceptance criteria:
+- [ ] 提取 glue 时校验 A/AAAA 记录的名字是否在当前 zone 的 bailiwick 内
+- [ ] out-of-bailiwick glue 触发 NS 子查询解析，而非直接使用
+- [ ] 添加单元测试验证 bailiwick 校验逻辑
+
+### [O-021] 无 glue 时委派 NS 不缓存
+Priority: Medium
+Description: ITER 仅在 `len(Ns)>0 && len(Extra)>0` 时才缓存委派信息，NS 无 glue（out-of-bailiwick）时委派 NS 完全不缓存，导致相同区域下次解析无法命中委派缓存，需重新从更上层迭代。
+Acceptance criteria:
+- [ ] NS-only 响应（无 Extra）也应缓存 NS RRset
+- [ ] 下次解析同区域时能从缓存找到委派起点，跳过上层迭代
+
+### [O-022] Response ID 未校验（S7）
+Priority: Low
+Description: ITER 只校验 response.Question[0].Name，未校验 response.ID 是否与发出的 query.ID 一致，存在乱序响应或伪造响应被误接受的风险（doc S7 要求 ID 不匹配时丢弃）。
+Acceptance criteria:
+- [ ] 校验 newResponse.Id == newQuery.Id，不一致时视为无效响应
+- [ ] 添加单元测试验证 ID 校验
+
+### [T-001] 权威应答 E2E 测试覆盖
+Priority: High
+Description: 构建全面的 E2E 测试，模拟各种权威 DNS 服务器响应场景，验证状态机正确处理各类响应。
+Test scenarios:
+1. **标准 Answer 响应**: 正常 A 记录响应
+2. **CNAME 链响应**: 单跳和多跳 CNAME 链
+3. **纯 NS Delegation 响应**: 只有 NS 记录，无 Glue 记录
+4. **Authority Section Only**: Answer 为空，NS 在 Ns 部分
+5. **NXDOMAIN 响应**: 域名不存在，带 SOA 记录
+6. **NODATA 响应**: Success + empty Answer + SOA in Ns
+7. **截断响应 (TC flag)**: 大响应被截断
+8. **多 Answers**: 多个 A 记录 (round-robin)
+9. **复杂 NS 链**: 深层 NS 委托 (B-005 验证)
+
+Acceptance criteria:
+- [ ] 创建 mock DNS server 框架用于模拟权威服务器响应
+- [ ] 实现核心 9 个测试场景
+- [ ] 验证 baidu.cc 等复杂 NS 链不再 crash (B-005 验证)
+- [ ] 集成到 CI
+
+### [O-016] Add AAAA (IPv6) Support
+Priority: High
+Description: getIPListFromResponse() only extracts IPv4 (A) records, missing IPv6 (AAAA) support.
+Acceptance criteria:
+- [ ] Update getIPListFromResponse() to also extract AAAA records
+- [ ] Update getBestAddressAndPrefetchIPs() to handle IPv6
+- [ ] Test with AAAA queries
+
+### [O-006] TCP Retry for Truncated Responses (RFC 1035)
+Priority: High
+Description: Implement TCP retry when UDP response is truncated (TC flag set).
+Acceptance criteria:
+- [ ] Detect TC flag in response
+- [ ] Retry query via TCP when TC is set
+- [ ] Handle larger responses via TCP
+
+### [O-005] Implement Negative Caching (RFC 2308)
+Priority: Medium
+Description: Implement NXDOMAIN and NODATA response caching as required by RFC 2308.
+Acceptance criteria:
+- [ ] Cache NXDOMAIN responses with TTL from SOA minimum field
+- [ ] Cache NODATA responses (success with empty Answer)
+- [ ] Unit tests for negative caching scenarios
+
+### [O-018] 状态机死循环保护增强
+Priority: Medium
+Description: 状态机当前使用 MaxIterations=50 限制迭代次数，需增强保护机制防止栈溢出。
+Acceptance criteria:
+- [ ] 添加 NS 解析递归深度限制 (如最大 10 层)
+- [ ] 添加 delegation 深度跟踪
+- [ ] 单元测试验证各种死循环场景
 
 ## Completed
 
+### [B-011] S0 无基本请求校验（FORMERR） (completed 2026-03-11)
+Priority: High
+Description: STATE_INIT 未校验 QDCOUNT=1、QR=0、OPCODE=QUERY，畸形查询直接进入解析流程而非返回 FORMERR（违反 RFC 1035 Section 4.1.1）。
+Acceptance criteria:
+- [x] stateInitState.handle() 校验 QDCOUNT、QR、Opcode
+- [x] 不通过校验时直接返回 FORMERR 响应
+- [x] 添加单元测试覆盖畸形查询场景
+
+### [B-010] IN_GLUE_CACHE 返回错误码问题
+Priority: Low
+Description: inGlueCacheState.handle() 返回错误的常量值。
+Location: state_define.go:485
+Acceptance criteria:
+- [x] 修正返回值为 IN_GLUE_CACHE_MISS_CACHE
+
+### [B-005] NS 递归解析栈溢出 Crash (completed 2026-03-11)
+Priority: Critical
+Description: 当请求 baidu.cc 等域名时，程序会 crash 并显示栈溢出错误。
+
+Root Cause: resolveNSIPsRecursively() 函数在解析 NS 域名的 A 记录时会递归调用 Change() 状态机，导致无限递归。
+
+Acceptance criteria:
+- [x] 修复无限递归问题
+- [x] 添加 NS 解析缓存机制
+- [x] 添加 NS 递归深度限制
+- [x] 请求 baidu.cc 不再 crash
+
 ### [B-004] CNAME with Valid NS Delegation Bug (completed 2026-03-10)
 Priority: High
-Description: When querying `www.huawei.com`, the resolver returns SERVFAIL instead of following the CNAME chain. The upstream server returns CNAME + valid NS delegation for the CNAME target's zone (`akadns.net`), but the previous fix (B-003) cleared ALL NS/Extra records, losing useful delegation info.
-
-Root Cause: The fix at `state_machine.go:99-102` was too aggressive - it cleared NS/Extra even when they contained valid delegation info for the CNAME target's zone.
-
-Fix: Added `isNSRelevantForCNAME()` helper function using `dns.IsSubDomain()` to check if NS zone matches or is parent of CNAME target. Modified CNAME handler to conditionally preserve NS/Extra.
+Description: When querying www.huawei.com, the resolver returns SERVFAIL instead of following the CNAME chain.
 
 Acceptance criteria:
 - [x] Query CNAME chain domains returns complete chain and final A records
 - [x] NS delegation for CNAME target's zone is preserved and used
-- [x] No regression on cross-zone CNAME tests (B-003)
-- [x] Unit tests for CNAME + valid delegation scenario
-- [x] E2E test for `www.huawei.com` or similar CNAME chain
-
-## Completed
 
 ### [B-003] CNAME Chain Resolution Bug (completed 2026-03-10)
 Priority: High
-Description: When querying a domain with CNAME chain (e.g., www.huawei.com), the resolver returns SERVFAIL instead of following the CNAME chain to get final A records.
-
-Root Cause: In `CHECK_RESP_GET_CNAME` state transition, the response still contains stale NS/Extra records from the previous zone after updating the query name to the CNAME target. This causes the resolver to query wrong nameservers.
+Description: When querying a domain with CNAME chain, the resolver returns SERVFAIL instead of following the CNAME chain.
 
 Acceptance criteria:
 - [x] Query CNAME chain domains returns complete chain and final A records
-- [x] TTL handling is correct (preserve individual TTLs from each record)
 - [x] No regression on normal queries
-- [x] E2E tests for CNAME chain scenarios
 
-Implementation:
-- Fix already in place at `state_machine.go:99-102`: Clear `response.Ns` and `response.Extra` before transitioning to `IN_CACHE`
-- Added unit tests in `server/state_machine_test.go` for CNAME chain scenarios
+---
 
-### 启动报错 (completed 2026-03-10)
-优先级： 高
-描述：执行 `go build -o rec53 cmd/rec53.go` 时出现错误：
-```bash
-# command-line-arguments
-cmd/rec53.go:70:22: undefined: parseLogLevel
-```
-**Root Cause**: Single-file build excludes other package files. Use `go build -o rec53 ./cmd` instead.
-**Fix**: Updated CLAUDE.md and README.md with correct build command.
+## 已删除的低价值项目
+
+以下项目已从 backlog 中移除，因为价值低或非必要：
+
+- O-012 ~ O-015: 代码重构 (当前代码可工作，重构引入风险)
+- O-017: Cache API 统一 (不影响功能)
+- O-007: CNAME + 其他记录共存 (RFC 违规响应罕见)
+- O-008: Authority Section NS 处理 (已有 fallback)
+- O-009: QNAME Minimization (隐私优化，复杂度高收益小)
+- O-010: Iteration Depth Limiting (MaxIterations 已足够)
+- O-011: TTL Upper Bound (几乎无实际需求)
+- O-019: DNAME 支持 (几乎无人使用)
+- O-020: SVCB/HTTPS 支持 (新技术，支持者少)
+- B-006, B-007, B-008, B-009: 潜在问题 (实际影响小，可后续观察)

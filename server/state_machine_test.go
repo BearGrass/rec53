@@ -904,8 +904,8 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet:   CHECK_RESP_GET_CNAME,
-			description:   "CNAME without matching A should trigger CNAME follow",
+			expectedRet: CHECK_RESP_GET_CNAME,
+			description: "CNAME without matching A should trigger CNAME follow",
 		},
 		{
 			name: "CNAME with matching A - should return answer",
@@ -928,8 +928,8 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet:   CHECK_RESP_GET_ANS,
-			description:   "CNAME with matching A should return answer directly",
+			expectedRet: CHECK_RESP_GET_ANS,
+			description: "CNAME with matching A should return answer directly",
 		},
 		{
 			name: "Multi-level CNAME chain - first level",
@@ -948,8 +948,8 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet:   CHECK_RESP_GET_CNAME,
-			description:   "First CNAME in chain should trigger follow",
+			expectedRet: CHECK_RESP_GET_CNAME,
+			description: "First CNAME in chain should trigger follow",
 		},
 	}
 
@@ -1452,4 +1452,125 @@ func TestCNAMEChain_StaleNSDelegation(t *testing.T) {
 	}
 
 	t.Log("PASS: B-003 scenario still works - stale NS delegation is cleared")
+}
+
+// =============================================================================
+// B-011: S0 基本请求校验 (FORMERR) Tests
+// =============================================================================
+
+func TestStateInit_FORMERR_NoQuestion(t *testing.T) {
+	req := new(dns.Msg)
+	// QDCOUNT=0: no question section
+	req.Question = nil
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	ret, err := stm.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != STATE_INIT_FORMERR {
+		t.Errorf("expected STATE_INIT_FORMERR, got %d", ret)
+	}
+	if resp.Rcode != dns.RcodeFormatError {
+		t.Errorf("expected FORMERR rcode, got %s", dns.RcodeToString[resp.Rcode])
+	}
+}
+
+func TestStateInit_FORMERR_MultipleQuestions(t *testing.T) {
+	req := new(dns.Msg)
+	req.Question = []dns.Question{
+		{Name: "a.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET},
+		{Name: "b.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET},
+	}
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	ret, err := stm.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != STATE_INIT_FORMERR {
+		t.Errorf("expected STATE_INIT_FORMERR, got %d", ret)
+	}
+	if resp.Rcode != dns.RcodeFormatError {
+		t.Errorf("expected FORMERR rcode, got %s", dns.RcodeToString[resp.Rcode])
+	}
+}
+
+func TestStateInit_FORMERR_QRSet(t *testing.T) {
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	req.Response = true // QR=1: this is a response, not a query
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	ret, err := stm.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != STATE_INIT_FORMERR {
+		t.Errorf("expected STATE_INIT_FORMERR, got %d", ret)
+	}
+	if resp.Rcode != dns.RcodeFormatError {
+		t.Errorf("expected FORMERR rcode, got %s", dns.RcodeToString[resp.Rcode])
+	}
+}
+
+func TestStateInit_FORMERR_NonQueryOpcode(t *testing.T) {
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	req.Opcode = dns.OpcodeStatus // OPCODE=2, not QUERY
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	ret, err := stm.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != STATE_INIT_FORMERR {
+		t.Errorf("expected STATE_INIT_FORMERR, got %d", ret)
+	}
+	if resp.Rcode != dns.RcodeFormatError {
+		t.Errorf("expected FORMERR rcode, got %s", dns.RcodeToString[resp.Rcode])
+	}
+}
+
+func TestStateInit_ValidQuery_NoError(t *testing.T) {
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	ret, err := stm.handle(req, resp)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != STATE_INIT_NO_ERROR {
+		t.Errorf("expected STATE_INIT_NO_ERROR, got %d", ret)
+	}
+}
+
+func TestChange_FORMERR_NoQuestion(t *testing.T) {
+	req := new(dns.Msg)
+	req.Question = nil
+	resp := new(dns.Msg)
+
+	stm := newStateInitState(req, resp)
+	result, err := Change(stm)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if result.Rcode != dns.RcodeFormatError {
+		t.Errorf("expected FORMERR rcode, got %s", dns.RcodeToString[result.Rcode])
+	}
 }
