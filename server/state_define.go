@@ -389,9 +389,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":"+port)
 	if err != nil {
 		monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
-		ipq := globalIPPool.GetIPQuality(bestAddr)
-		ipq.SetLatency(MAX_IP_LATENCY)
-		// Record failure in V2
+		// Record failure in V2 only (V1 deprecated)
 		iqv2 := globalIPPool.GetIPQualityV2(bestAddr)
 		if iqv2 != nil {
 			iqv2.RecordFailure()
@@ -405,9 +403,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":"+port)
 		if err != nil {
 			monitor.Rec53Log.Debugf("[ITER] Query to second IP %s also failed: %v", secondAddr, err)
-			ipq := globalIPPool.GetIPQuality(secondAddr)
-			ipq.SetLatency(MAX_IP_LATENCY)
-			// Record failure in V2
+			// Record failure in V2 only (V1 deprecated)
 			iqv2 := globalIPPool.GetIPQualityV2(secondAddr)
 			if iqv2 != nil {
 				iqv2.RecordFailure()
@@ -417,12 +413,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		theBestIP = secondAddr
 	}
 
-	if !globalIPPool.isTheIPInit(theBestIP) {
-		globalIPPool.UpIPsQuality(ipList)
-	}
-	//update the ip quality
-	globalIPPool.updateIPQuality(theBestIP, int32(rtt/time.Millisecond))
-	// Record latency in V2
+	// Record latency and metrics using V2 only (V1 deprecated)
 	iqv2 := globalIPPool.GetIPQualityV2(theBestIP)
 	if iqv2 != nil {
 		iqv2.RecordLatency(int32(rtt / time.Millisecond))
@@ -433,7 +424,6 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			float64(iqv2.GetP99Latency()),
 		)
 	}
-	monitor.Rec53Metric.IPQualityGaugeSet(theBestIP, float64(rtt/time.Millisecond))
 
 	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 
