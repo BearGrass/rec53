@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"net"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -91,5 +92,127 @@ func TestGetRootGlueConsistency(t *testing.T) {
 
 	if len(rootGlue1.Extra) != len(rootGlue2.Extra) {
 		t.Error("GetRootGlue returned inconsistent Extra count")
+	}
+}
+
+func TestSetRootGlue(t *testing.T) {
+	// Ensure we restore default after test
+	defer ResetRootGlue()
+
+	// Build a custom root glue with a single mock root server
+	custom := new(dns.Msg)
+	custom.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock-root.test.",
+		},
+	}
+	custom.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "mock-root.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.ParseIP("127.0.0.1"),
+		},
+	}
+
+	SetRootGlue(custom)
+
+	got := GetRootGlue()
+	if got == nil {
+		t.Fatal("GetRootGlue returned nil after SetRootGlue")
+	}
+	if len(got.Ns) != 1 {
+		t.Fatalf("expected 1 NS record, got %d", len(got.Ns))
+	}
+	ns, ok := got.Ns[0].(*dns.NS)
+	if !ok {
+		t.Fatal("NS record is not *dns.NS")
+	}
+	if ns.Ns != "mock-root.test." {
+		t.Errorf("expected NS=mock-root.test., got %s", ns.Ns)
+	}
+	if len(got.Extra) != 1 {
+		t.Fatalf("expected 1 Extra record, got %d", len(got.Extra))
+	}
+	a, ok := got.Extra[0].(*dns.A)
+	if !ok {
+		t.Fatal("Extra record is not *dns.A")
+	}
+	if a.A.String() != "127.0.0.1" {
+		t.Errorf("expected A=127.0.0.1, got %s", a.A.String())
+	}
+}
+
+func TestSetRootGlueDeepCopy(t *testing.T) {
+	defer ResetRootGlue()
+
+	custom := new(dns.Msg)
+	custom.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock-root.test.",
+		},
+	}
+	custom.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "mock-root.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.ParseIP("127.0.0.1"),
+		},
+	}
+
+	SetRootGlue(custom)
+
+	// Mutate the original — should not affect stored override
+	custom.Ns[0].(*dns.NS).Ns = "mutated.test."
+
+	got := GetRootGlue()
+	ns := got.Ns[0].(*dns.NS)
+	if ns.Ns != "mock-root.test." {
+		t.Errorf("SetRootGlue did not deep-copy: got %s after mutating original", ns.Ns)
+	}
+}
+
+func TestGetRootGlueReturnsCopy(t *testing.T) {
+	defer ResetRootGlue()
+
+	custom := new(dns.Msg)
+	custom.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock-root.test.",
+		},
+	}
+	custom.Extra = []dns.RR{}
+
+	SetRootGlue(custom)
+
+	// Mutate the returned value — should not affect subsequent calls
+	got1 := GetRootGlue()
+	got1.Ns[0].(*dns.NS).Ns = "mutated.test."
+
+	got2 := GetRootGlue()
+	ns := got2.Ns[0].(*dns.NS)
+	if ns.Ns != "mock-root.test." {
+		t.Errorf("GetRootGlue did not return a copy: got %s after mutating previous return", ns.Ns)
+	}
+}
+
+func TestResetRootGlue(t *testing.T) {
+	defer ResetRootGlue()
+
+	custom := new(dns.Msg)
+	custom.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock-root.test.",
+		},
+	}
+	custom.Extra = []dns.RR{}
+
+	SetRootGlue(custom)
+	ResetRootGlue()
+
+	got := GetRootGlue()
+	if len(got.Ns) != 13 {
+		t.Errorf("after ResetRootGlue expected 13 NS records (default), got %d", len(got.Ns))
 	}
 }

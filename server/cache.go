@@ -74,3 +74,9 @@ func deleteAllCache() {
 func getCacheSize() int {
 	return globalDnsCache.ItemCount()
 }
+
+// FlushCacheForTest flushes the global DNS cache.
+// Exported for use by E2E tests to ensure a clean state.
+func FlushCacheForTest() {
+	deleteAllCache()
+}

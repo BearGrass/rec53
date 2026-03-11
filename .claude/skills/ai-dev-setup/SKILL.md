@@ -26,88 +26,79 @@ Set up a complete AI-collaborative development environment for an existing codeb
 /ai-dev-setup [doc-directory-name]
 ```
 
-Default doc directory is `.docs`. Override with argument, e.g., `/ai-dev-setup docs` or `/ai-dev-setup .rec53`.
+Default doc directory: `.docs`. Override with argument, e.g., `/ai-dev-setup docs`.
 
-## Process Overview
+## Context Budget Rules
 
-1. **Detect Environment** → Language, build/test/lint commands
-2. **Scan Codebase** → Source files, dependencies, TODOs, git history
-3. **Generate Documentation** → ARCHITECTURE, CONVENTIONS, ROADMAP, TODO, TEST_PLAN, BACKLOG
-4. **Create CLAUDE.md** → Project instructions with self-maintenance rules
-5. **Create Project Skills** → /plan, /dev, /test, /sync-docs
-6. **Verify & Report** → Validate outputs, summarize findings
+**Load reference files on demand — not all at once. Each step specifies which file to load.**
+
+- Do NOT read all source files. Use directory listing + targeted sampling.
+- Skip: vendor/, node_modules/, .git/, dist/, build/, __pycache__/, .venv/, target/, *.min.js, *.lock
+- For large codebases (>50 source files): read 2-3 representative files per component, not every file.
+- Keep generated docs concise — summaries, not code transcription.
 
 ---
 
 ## Step 1: Environment Detection
 
-1. Detect primary language from config files (see [references/env-detection.md](./references/env-detection.md))
-2. Set variables: `LANG`, `BUILD_CMD`, `TEST_CMD`, `LINT_CMD`, `TEST_COVER_CMD`, `RACE_FLAG`
-3. Check existing: CLAUDE.md, `.claude/skills/`, DOC_DIR
+> **Load:** [references/env-detection.md](./references/env-detection.md)
 
-**Report detection results. Wait for user confirmation before proceeding.**
+1. Check project root config files → detect `LANG`, `BUILD_CMD`, `TEST_CMD`, `LINT_CMD`, `TEST_COVER_CMD`, `RACE_FLAG`, `DOC_DIR`
+2. Check for existing: CLAUDE.md, `.claude/skills/`, DOC_DIR — handle per env-detection.md conflict rules
 
-If user rejects → ask which commands to adjust, then re-detect.
+**Report detection results. Wait for user confirmation.**
 
 ---
 
 ## Step 2: Codebase Scan
 
-1. Read all source files (exclude: vendor/, node_modules/, .git/, dist/, build/, __pycache__/, .venv/, target/, *.min.js)
-2. Read dependency files (go.mod, package.json, requirements.txt, Cargo.toml, etc.)
-3. Run `TEST_COVER_CMD` for coverage baseline (if tests exist)
-4. Collect TODO/FIXME/HACK/XXX comments with file:line
-5. Run `git log --oneline -20` for recent history
+**Context-efficient — do NOT read all source files.**
+
+1. List top-level structure (2 levels deep) to map components
+2. Read dependency files: go.mod, package.json, requirements.txt, Cargo.toml, etc.
+3. For each component directory: read 1-2 representative files to understand patterns
+4. `git log --oneline -20` for recent history
+5. Grep for TODO/FIXME/HACK/XXX → collect file:line only, do not read surrounding code
+6. Run `TEST_COVER_CMD` for coverage baseline (skip if no tests)
 
 ---
 
 ## Step 3: Generate Documentation
 
-Create `DOC_DIR` and generate files using templates from [references/doc-templates.md](./references/doc-templates.md):
+> **Load:** [references/doc-templates.md](./references/doc-templates.md)
 
-| File | Content Source |
-|------|----------------|
-| README.md | Index of all documentation |
-| ARCHITECTURE.md | Directory structure from actual files, key components from code |
-| CONVENTIONS.md | Code patterns extracted from actual code (use project's language) |
-| ROADMAP.md | Version history from git tags, recent commits |
-| TODO.md | TODO/FIXME/HACK comments collected, categorized as BUG/OPT/DEBT |
-| TEST_PLAN.md | Coverage baseline, test files found, dependency-ordered batches |
-| BACKLOG.md | Empty template for user to add requirements |
+Create `DOC_DIR/` and generate per templates. Rules:
+- All content from actual code — never fabricate
+- Mark unknowns as `__%` or `[TBD]`
+- Each file max ~100 lines — link to code rather than quoting it
 
-**Critical rules:**
-- All content must come from actual code — never fabricate
-- Use the project's language for code examples, not Go
-- Mark unknown values as `__%` or `[TBD]`
+Files: README.md, ARCHITECTURE.md, CONVENTIONS.md, ROADMAP.md, TODO.md, TEST_PLAN.md, BACKLOG.md
 
 ---
 
 ## Step 4: Create CLAUDE.md
 
-Generate CLAUDE.md with these required sections:
-
 ```markdown
-# Project Name
+# {Project Name}
 
 ## Build & Run
 - Build: {BUILD_CMD}
-- Run: [how to run the application]
+- Run: [how to run]
 
 ## Testing
 - Test: {TEST_CMD}
 - Coverage: {TEST_COVER_CMD}
 
 ## Architecture
-[One paragraph describing purpose and structure]
+[One paragraph: purpose and structure]
 
 ## Dependencies
-[List external dependencies with purpose]
+[External deps with purpose]
 
 ## Coding Conventions
 See {DOC_DIR}/CONVENTIONS.md. Core principles:
-1. [Principle from actual code]
-2. [Principle from actual code]
-3. [Principle from actual code]
+1. [From actual code]
+2. [From actual code]
 
 ## Documentation
 - [Architecture](./{DOC_DIR}/ARCHITECTURE.md)
@@ -118,76 +109,43 @@ See {DOC_DIR}/CONVENTIONS.md. Core principles:
 - [Backlog](./{DOC_DIR}/BACKLOG.md)
 ```
 
-Then append self-maintenance rules from [templates/claude-md-appendix.md](./templates/claude-md-appendix.md).
+Append: [templates/claude-md-appendix.md](./templates/claude-md-appendix.md)
 
-**If CLAUDE.md exists:**
-1. Show current sections
-2. Offer: augment (recommended) / backup & overwrite / cancel
-3. Wait for user choice
+**If CLAUDE.md exists:** show sections, offer augment (recommended) / backup+overwrite / cancel. Wait.
 
 ---
 
 ## Step 5: Create Project Skills
 
-Generate skills into `.claude/skills/` using templates from [references/skill-templates.md](./references/skill-templates.md):
+> **Load:** [references/skill-templates.md](./references/skill-templates.md)
 
-| Skill | Purpose |
-|-------|---------|
-| /plan | Analyze BACKLOG requirements, decompose into TODO tasks |
-| /dev | Develop TODO tasks with code + tests + doc updates |
-| /dev-resume | Resume interrupted development session |
-| /test | Improve test coverage systematically |
-| /test-resume | Resume interrupted testing session |
-| /sync-docs | Sync documentation with code changes |
+Generate into `.claude/skills/`: plan, dev, dev-resume, test, test-resume, sync-docs.
 
-Replace placeholders: `{DOC_DIR}`, `{TEST_CMD}`, `{LINT_CMD}`, `{TEST_COVER_CMD}`, `{RACE_FLAG}`
+Replace: `{DOC_DIR}`, `{TEST_CMD}`, `{LINT_CMD}`, `{TEST_COVER_CMD}`, `{RACE_FLAG}`
 
-**If skills directory exists:**
-1. List existing skills
-2. Warn about potential overwrites
-3. Wait for confirmation
+**If skills directory exists:** list existing, warn overwrites, wait for confirmation.
 
 ---
 
 ## Step 6: Verify & Report
 
-### Verification Checklist
-
-- [ ] All commands in CLAUDE.md execute successfully
+- [ ] Commands in CLAUDE.md execute successfully
 - [ ] Directory structure in ARCHITECTURE.md matches reality
-- [ ] Dependency list is complete (cross-check with lock files)
-- [ ] All DOC_DIR files are non-empty
-- [ ] All SKILL.md files have valid YAML frontmatter
-
-### Final Report
-
-Present to user:
+- [ ] All DOC_DIR files non-empty, all SKILL.md files have valid frontmatter
 
 ```
 ## Setup Complete
 
-**Project:** {name}
-**Language:** {LANG}
-**Files:** {count} source files
+Project: {name} | Language: {LANG} | Source files: {count}
+Coverage baseline: {coverage}%
+Issues: BUG {n} / OPT {n} / DEBT {n}
 
-### Test Coverage
-- Baseline: {coverage}%
-
-### Issues Found
-- BUG: {count}
-- OPT: {count}
-- DEBT: {count}
-
-### Generated Files
+Generated:
 - CLAUDE.md
 - .claude/skills/{plan,dev,dev-resume,test,test-resume,sync-docs}/SKILL.md
 - {DOC_DIR}/[README,ARCHITECTURE,CONVENTIONS,ROADMAP,TODO,TEST_PLAN,BACKLOG].md
 
-### Recommended Next Steps
-1. Review CLAUDE.md for accuracy
-2. Add requirements to {DOC_DIR}/BACKLOG.md
-3. Run /plan to break down requirements
-4. Run /test to improve coverage
+Next: review CLAUDE.md → add to BACKLOG.md → /plan → /test
 ```
 
 ---
@@ -196,9 +154,8 @@ Present to user:
 
 | Situation | Action |
 |-----------|--------|
-| Unknown language | Ask user for build/test/lint commands |
-| No tests found | Note 0% coverage, suggest /test |
-| No source files | Suggest this is a new project, recommend scaffolding tools |
-| Command fails | Report error, suggest manual intervention, continue with available info |
-| User rejects detection | Ask which commands to adjust, re-run detection |
-| User cancels setup | Clean up any partial files, exit gracefully |
+| Unknown language | Ask user for commands |
+| No tests | Note 0% coverage, suggest /test |
+| Command fails | Report, continue with available info |
+| User rejects detection | Ask which commands to adjust, re-detect |
+| User cancels | Clean up partial files, exit |
