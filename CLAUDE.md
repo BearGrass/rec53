@@ -68,9 +68,14 @@ Key states:
 ### IP Quality Tracking
 
 `server/ip_pool.go` tracks upstream nameserver latency for optimal server selection:
-- Initial latency: 1000ms, max: 10000ms
-- Best IP selected based on lowest latency
-- Background prefetch checks candidate servers
+- **IPQuality structure**: Each IP has `isInit` flag (measured vs. initial) and `latency` (in milliseconds)
+- **Initial state**: `isInit=true`, `latency=1000ms` (assumed value before measurement)
+- **Measured state**: `isInit=false`, `latency=actual RTT` (after prefetch verification)
+- **Best IP selection**: Via `getBestIPs()` returning highest-priority and second-best IP
+- **Quality improvement**: `UpIPsQuality()` reduces latency by 10% for well-performing IPs
+- **Background prefetch**: `PrefetchIPs()` measures candidate servers with semaphore-limited concurrency (max 10)
+- **Prefetch candidates**: `GetPrefetchIPs()` selects IPs with latency in range `[best × 0.9, best]`
+- **Graceful shutdown**: `Shutdown()` waits for all prefetch goroutines with context timeout
 
 ## Dependencies
 

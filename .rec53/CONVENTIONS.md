@@ -130,3 +130,40 @@ func TestWithMockServer(t *testing.T) {
 - [ ] State handlers return appropriate codes
 - [ ] Cache operations use copy functions to prevent mutation
 - [ ] Graceful shutdown context is properly propagated
+
+## IP Quality Tracking Conventions
+
+When working with `IPPool` and `IPQuality`:
+
+1. **State Management**:
+   - `isInit=true`: IP not yet measured (assumed latency 1000ms)
+   - `isInit=false`: IP has been measured via prefetch (actual RTT)
+   - Always check `IsInit()` before using IP for critical decisions
+
+2. **Latency Updates**:
+   - Use `SetLatency()` to update latency while preserving init state
+   - Use `SetLatencyAndState()` to update latency and mark as measured (`isInit=false`)
+   - Use atomic operations for concurrent access, not manual locking
+
+3. **Best IP Selection**:
+   - `getBestIPs()` returns two IPs: (best, secondBest)
+   - First return value has absolute lowest latency (regardless of measurement status)
+   - Second return value is the second-lowest latency IP
+   - Always use at least the returned best IP for queries
+
+4. **Prefetch Strategy**:
+   - `GetPrefetchIPs()` identifies candidates for background measurement
+   - Candidates are IPs with latency in range `[bestLatency × 0.9, bestLatency]`
+   - This range ensures discovering potentially better servers without overloading
+   - `PrefetchIPs()` uses semaphore to limit concurrency (default: 10 goroutines)
+
+5. **Quality Improvement**:
+   - `UpIPsQuality()` reduces latency by 10% for measured IPs only
+   - Called after successful DNS resolution to reward good performers
+   - Skips unmeasured IPs (isInit=true) to preserve baseline expectations
+
+6. **Concurrency Safety**:
+   - `IPQuality`: Use atomic operations only, no external locking needed
+   - `IPPool`: Use `GetIPQuality()` and `SetIPQuality()` for map access
+   - Do NOT access `pool` map directly; always use provided methods
+   - Prefetch goroutines respect context cancellation for shutdown

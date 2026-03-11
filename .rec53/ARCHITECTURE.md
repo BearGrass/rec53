@@ -99,9 +99,20 @@ DNS Response
 
 ### server.IPPool
 
-- **Responsibility**: Nameserver quality tracking and selection
-- **Interface**: `getBestIPs()`, `updateIPQuality()`, `PrefetchIPs()`
-- **Dependencies**: dns.Client for prefetch queries
+- **Responsibility**: Nameserver quality tracking, best IP selection, and background prefetch
+- **Data structure**:
+  - `IPQuality`: Atomic-based tracking with `isInit` flag (initialized before/after measurement) and `latency` (milliseconds)
+  - `IPPool`: Concurrent-safe pool with RWMutex, context-based shutdown, prefetch semaphore
+- **Core methods**:
+  - `getBestIPs(ips)`: Returns (best IP, second-best IP) based on lowest latency
+  - `UpIPsQuality(ips)`: Reduces latency by 10% for measured IPs to reward good performers
+  - `GetPrefetchIPs(bestIP)`: Identifies candidates in `[bestLatency × 0.9, bestLatency]` range
+  - `PrefetchIPs(ips)`: Asynchronously measures candidate IPs with concurrency limit (max 10)
+  - `updateIPQuality(ip, latency)`: Updates IP with actual measurement (sets `isInit=false`)
+- **State transitions**:
+  - New: `isInit=true, latency=1000ms` (assumed)
+  - Measured: `isInit=false, latency=actualRTT` (after prefetch)
+- **Dependencies**: dns.Client for prefetch queries, context for graceful shutdown
 
 ### server.Cache
 
@@ -127,3 +138,58 @@ DNS Response
 
 - DNSSEC validation not implemented
 - DoT/DoH not supported
+
+## IP Quality Management Lifecycle
+
+The IP quality tracking follows this lifecycle:
+
+```
+1. IP INITIALIZATION
+   ┌─────────────────────────────────────┐
+   │ New IP discovered from nameserver   │
+   │ isInit=true, latency=1000ms (assumed)│
+   └─────────────────────────────────────┘
+           │
+           ▼
+2. SELECTION & USAGE
+   ┌─────────────────────────────────────┐
+   │ getBestIPs(): Pick top 2 IPs by latency
+   │ Use best IP for iterative query     │
+   └─────────────────────────────────────┘
+           │
+           ▼
+3. PREFETCH DISCOVERY (Background)
+   ┌─────────────────────────────────────┐
+   │ GetPrefetchIPs(): Find candidates   │
+   │ in range [best×0.9, best]           │
+   │ PrefetchIPs(): Measure them async   │
+   │ (max 10 concurrent)                 │
+   └─────────────────────────────────────┘
+           │
+           ├─ Success ─→ updateIPQuality(ip, RTT)
+           │             isInit=false, latency=RTT
+           │
+           └─ Failure ─→ Retain original value
+                        Retry in future prefetch
+   
+4. QUALITY IMPROVEMENT
+   ┌─────────────────────────────────────┐
+   │ UpIPsQuality(): For measured IPs    │
+   │ latency *= 0.9 (10% reduction)      │
+   │ Rewards consistent good performers  │
+   └─────────────────────────────────────┘
+
+5. GRACEFUL SHUTDOWN
+   ┌─────────────────────────────────────┐
+   │ Shutdown(): Cancel context          │
+   │ Wait for all prefetch goroutines    │
+   │ (context timeout: configurable)     │
+   └─────────────────────────────────────┘
+```
+
+## Concurrent Access Patterns
+
+- **IPQuality**: Uses atomic operations (`atomic.Load/Store`) for lock-free reads/writes
+- **IPPool.pool**: Protected by `RWMutex` for safe concurrent map access
+- **Prefetch concurrency**: Semaphore-based with channel (max 10 concurrent goroutines)
+- **Shutdown coordination**: WaitGroup tracks all goroutines, context cancellation for graceful termination
