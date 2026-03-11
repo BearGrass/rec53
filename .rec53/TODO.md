@@ -14,7 +14,11 @@
   - [x] [F-003/3] Write unit tests for percentile calculations in server/ip_pool_test.go (Phase 1)
   - [x] [F-003/4] Implement `RecordFailure()` with exponential backoff in server/ip_pool.go (Phase 2)
   - [x] [F-003/5] Implement `ShouldProbe()` and `ResetForProbe()` in server/ip_pool.go (Phase 2)
-  - [ ] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 2)
+  - [~] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 2) — *deferred to Phase 4*
+  - [ ] [F-003/7] Write integration tests for fault recovery in server/ip_pool_test.go (Phase 2)
+  - [x] [F-003/8] Implement `GetScore()` method in server/ip_pool.go (Phase 3)
+  - [x] [F-003/9] Implement `GetBestIPsV2()` method in server/ip_pool.go (Phase 3)
+  - [x] [F-003/10] Write comparative tests for algorithm in server/ip_pool_test.go (Phase 3)
   - [ ] [F-003/7] Write integration tests for fault recovery in server/ip_pool_test.go (Phase 2)
   - [ ] [F-003/8] Implement `GetScore()` method in server/ip_pool.go (Phase 3)
   - [ ] [F-003/9] Implement `GetBestIPsV2()` method in server/ip_pool.go (Phase 3)

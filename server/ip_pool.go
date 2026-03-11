@@ -263,8 +263,44 @@ func (iq *IPQualityV2) GetConfidence() uint8 {
 	return iq.confidence
 }
 
+// GetScore returns a composite quality score for this IP
+// Lower score is better (like latency)
+// Formula: p50 × confidenceMult × stateWeight
+// Thread-safe via internal RWMutex
+func (iq *IPQualityV2) GetScore() float64 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+
+	// Base score: P50 latency
+	score := float64(iq.p50)
+
+	// Confidence multiplier: penalize low-confidence IPs to encourage sampling
+	// confidence=0 → mult=2.0 (2x penalty, eager to try)
+	// confidence=100 → mult=1.0 (no penalty, fully trusted)
+	confidenceMult := 1.0 + float64(100-iq.confidence)*0.01
+	score *= confidenceMult
+
+	// State weight: apply penalty based on health
+	stateWeights := []float64{
+		1.0,   // ACTIVE: trusted IP, no penalty
+		1.5,   // DEGRADED: underperforming, 50% penalty
+		100.0, // SUSPECT: avoid at all costs (basically infinite)
+		1.1,   // RECOVERED: just recovering, 10% penalty
+	}
+
+	// Clamp state index to valid range
+	stateIdx := iq.state
+	if stateIdx >= uint8(len(stateWeights)) {
+		stateIdx = IP_STATE_ACTIVE
+	}
+	score *= stateWeights[stateIdx]
+
+	return score
+}
+
 type IPPool struct {
 	pool      map[string]*IPQuality
+	poolV2    map[string]*IPQualityV2 // V2 pool with sliding window histogram
 	l         sync.RWMutex
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -279,6 +315,7 @@ func NewIPPool() *IPPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	ipp := &IPPool{
 		pool:   make(map[string]*IPQuality),
+		poolV2: make(map[string]*IPQualityV2),
 		l:      sync.RWMutex{},
 		ctx:    ctx,
 		cancel: cancel,
@@ -392,6 +429,85 @@ func (ipp *IPPool) getBestIPs(ips []string) (string, string) {
 		}
 	}
 	return bestIP, secondIP
+}
+
+// GetBestIPsV2 selects the best and second-best IPs using V2 scoring algorithm
+// Lower composite score is better (p50 * confidenceMult * stateWeight)
+// Creates or retrieves IPQualityV2 for each IP
+// Thread-safe via internal RWMutex protection
+func (ipp *IPPool) GetBestIPsV2(ips []string) (string, string) {
+	type scoreEntry struct {
+		ip    string
+		score float64
+	}
+
+	scores := make([]scoreEntry, 0, len(ips))
+
+	ipp.l.RLock()
+	for _, ip := range ips {
+		// Get or create IPQualityV2 for this IP
+		iqv2, ok := ipp.poolV2[ip]
+		if !ok {
+			// Release read lock before potentially creating new entries
+			ipp.l.RUnlock()
+			ipp.l.Lock()
+			// Check again in case another goroutine created it
+			if iqv2, ok := ipp.poolV2[ip]; ok {
+				ipp.l.Unlock()
+				ipp.l.RLock()
+				scores = append(scores, scoreEntry{
+					ip:    ip,
+					score: iqv2.GetScore(),
+				})
+			} else {
+				// Create new IPQualityV2
+				iqv2 = NewIPQualityV2()
+				ipp.poolV2[ip] = iqv2
+				ipp.l.Unlock()
+				ipp.l.RLock()
+				scores = append(scores, scoreEntry{
+					ip:    ip,
+					score: iqv2.GetScore(),
+				})
+			}
+			continue
+		}
+		scores = append(scores, scoreEntry{
+			ip:    ip,
+			score: iqv2.GetScore(),
+		})
+	}
+	ipp.l.RUnlock()
+
+	// Sort by score (lower is better)
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].score < scores[j].score
+	})
+
+	bestIP := ""
+	secondIP := ""
+	if len(scores) > 0 {
+		bestIP = scores[0].ip
+	}
+	if len(scores) > 1 {
+		secondIP = scores[1].ip
+	}
+
+	return bestIP, secondIP
+}
+
+// GetIPQualityV2 retrieves an IPQualityV2 object for a given IP
+func (ipp *IPPool) GetIPQualityV2(ip string) *IPQualityV2 {
+	ipp.l.RLock()
+	defer ipp.l.RUnlock()
+	return ipp.poolV2[ip]
+}
+
+// SetIPQualityV2 stores an IPQualityV2 object for a given IP
+func (ipp *IPPool) SetIPQualityV2(ip string, iqv2 *IPQualityV2) {
+	ipp.l.Lock()
+	defer ipp.l.Unlock()
+	ipp.poolV2[ip] = iqv2
 }
 
 func (ipp *IPPool) GetPrefetchIPs(bestIP string) []string {
