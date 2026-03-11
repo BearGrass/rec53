@@ -1,2 +1,54 @@
-.vscode
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.emacs.d
+*.sublime-project
+*.sublime-workspace
+
+# Build and Runtime Artifacts
+rec53
+*.o
+*.a
+*.so
+*.dylib
+dist/
+build/
+
+# Logs (project logs, keep doc logs)
+log/*.log
 *.log
+
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+
+# Go and Dependencies
+vendor/
+go.sum.bak
+*.test
+*.out
+
+# Temporary and Cache Files
+*.tmp
+*.temp
+*~
+.cache/
+.venv/
+venv/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+*.swp
+
+# Keep AI-related files for development
+# .claude/
+# .rec53/
+# skills/
