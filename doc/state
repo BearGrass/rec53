@@ -1,0 +1,255 @@
+S0: START
+输入： 客户端查询 QNAME / QTYPE / QCLASS
+
+动作：
+
+基本校验
+
+QDCOUNT = 1、QR = 0、OPCODE = QUERY
+不通过则直接返回 FORMERR → S16 DONE
+初始化 ResolveCtx
+
+current_name = qname
+original_qtype = qtype
+subquery_depth = 0
+total_query_budget（如 50）
+per_server_retry_limit（如 2）
+max_alias_depth（如 8）
+max_subquery_depth（如 5）
+tried_servers = {}
+bad_servers = {}
+referral_history = {}
+cname_visited = {}
+alias_chain = []
+转移： → S1 CHECK_LOCAL_DATA
+
+S1: CHECK_LOCAL_DATA
+动作： 依次检查本地可直接回答的数据：
+
+authoritative local zone（若本服务器兼有权威数据）
+RRset cache
+negative cache
+alias cache（CNAME）
+closest known delegation
+分支：
+
+命中最终答案
+缓存中已存在 current_name / qtype 的有效 RRset
+→ 写入 answer_rrset → S13 ASSEMBLE_SUCCESS
+
+命中缓存中的 CNAME
+
+若 original_qtype = CNAME： 该 CNAME 记录本身即为最终答案，写入 answer_rrset → S13 ASSEMBLE_SUCCESS
+否则：沿缓存中的 CNAME 链尽可能前进，更新 alias_chain、current_name，检查 loop / depth
+若链尾已命中 qtype 最终 RRset → S13 ASSEMBLE_SUCCESS
+否则 → S2 PICK_STARTING_NS
+命中 negative cache
+有效 NXDOMAIN / NODATA → S14 ASSEMBLE_NEGATIVE
+
+未命中答案，命中最近已知委派点 → S2 PICK_STARTING_NS
+
+都未命中 → S2 PICK_STARTING_NS
+
+S2: PICK_STARTING_NS
+动作：
+
+从 current_name 向上逐级查找缓存中最深的可用 NS RRset。
+
+例如对 www.a.example.com. 依次尝试：
+a.example.com. → example.com. → com. → .
+
+若完全找不到：ns_set = ROOT_HINTS，current_zone_cut = .
+否则：ns_set = cached deepest NS RRset，current_zone_cut = corresponding zone cut
+清理当前轮次的 tried_servers、bad_servers。
+
+转移： → S3 ENSURE_NS_ADDRESS
+
+S3: ENSURE_NS_ADDRESS
+目标： 确保 ns_set 中至少有可联系的 nameserver 地址。
+
+动作： 对 ns_set 中每个 NS 主机名：
+
+先查 ns_addr_cache，再查普通地址缓存（A / AAAA）
+若无地址，触发子查询（S11）解析该 NS 主机名
+分支：
+
+得到至少一个可用地址 → S4 SELECT_SERVER
+所有 NS 均无地址且子解析失败
+若可切换上层委派则切换
+否则 → S15 FAIL_SERVFAIL
+超过子解析深度限制 → S15 FAIL_SERVFAIL
+S4: SELECT_SERVER
+动作：
+
+从 ns_set 对应的可用地址中选择一个 server：
+
+跳过 tried_servers
+降权或跳过 bad_servers
+可按 RTT / 历史成功率 / 随机选择
+若无可选 server：
+
+若还能回退其他 NS / address 继续尝试
+否则 → S15 FAIL_SERVFAIL
+选定后：
+
+current_server = selected_server
+current_server_retries = per_server_retry_limit
+默认 transport = UDP
+转移： → S5 SEND_QUERY
+
+S5: SEND_QUERY
+动作：
+
+向 current_server 发送查询（QNAME = current_name，QTYPE，QCLASS）。
+
+消耗预算：
+
+total_query_budget -= 1
+current_server_retries -= 1
+若 total_query_budget ≤ 0 → S15 FAIL_SERVFAIL
+
+转移： → S6 RECEIVE_RESPONSE
+
+S6: RECEIVE_RESPONSE
+分支：
+
+超时 / 网络失败
+
+标记当前 server 降权
+若 current_server_retries > 0（如 UDP 丢包可重试）→ S5 SEND_QUERY
+否则 → S4 SELECT_SERVER
+收到响应 → 保存 current_response → S7 PRECHECK_RESPONSE
+
+S7: PRECHECK_RESPONSE
+动作： 对响应做前置检查。
+
+报文匹配校验
+若 response.ID ≠ query.ID 或 response.Question ≠ query.Question：
+丢弃该响应，回到 S6 RECEIVE_RESPONSE 继续等待（超时窗口内），
+超时后视为未收到响应 → S4 SELECT_SERVER
+
+TC = 1
+
+若当前 transport ≠ TCP：切换 TCP 重发 → S5 SEND_QUERY
+若已是 TCP 仍异常：标记 server failure → S4 SELECT_SERVER
+RCODE ∈ {SERVFAIL, REFUSED, FORMERR, NOTIMPL}
+标记 bad_servers[current_server] → S4 SELECT_SERVER
+
+其他可继续处理 → S8 EXTRACT_ALIAS_CHAIN
+
+S8: EXTRACT_ALIAS_CHAIN
+动作： 先于正 / 负判断，处理响应中的 alias 信息。
+
+前置判断：若 original_qtype = CNAME，则跳过 alias 跟踪，Answer 中匹配 current_name 的 CNAME 记录即为最终答案 → 写入 answer_rrset → S13 ASSEMBLE_SUCCESS（若 Answer 中无匹配则直接进入 S9）。
+
+常规处理：
+
+在 Answer 中按 current_name 提取连续 CNAME 链
+若存在 DNAME：做后缀替换并合成对应 CNAME，一并加入 alias_chain
+若 Answer 中有多级链，一次沿链走到尽头
+每前进一步都检查 alias loop（cname_visited）和 max_alias_depth
+分支：
+
+出现 alias loop 或 depth 超限 → S15 FAIL_SERVFAIL
+
+alias 链尾已直接带有目标类型 RRset
+抽取到 answer_rrset，缓存相关 RRset → S13 ASSEMBLE_SUCCESS
+
+存在 alias，但链尾没有目标 RRset
+更新 current_name = alias_tail
+
+若原始响应 RCODE = NXDOMAIN 且 Authority 中携带 SOA：
+说明权威服务器在本区内跟踪 CNAME 后发现目标名不存在。
+按 S12 逻辑缓存链尾的否定结果 → S14 ASSEMBLE_NEGATIVE（携带 alias chain）
+否则（RCODE = NOERROR）：
+为新名字重新检查本地数据 → S1 CHECK_LOCAL_DATA
+响应中无 alias → S9 CLASSIFY_RESPONSE
+
+S9: CLASSIFY_RESPONSE
+在 alias 处理完成后，对响应分类。
+
+情况 A：Final Positive Answer
+Answer 中存在与 current_name / qtype 匹配的最终 RRset：
+缓存 RRset，写入 answer_rrset → S13 ASSEMBLE_SUCCESS
+
+情况 B：Referral / Delegation
+Authority 中存在 NS RRset 且语义上构成委派：
+→ S10 HANDLE_DELEGATION
+
+情况 C：Negative Answer
+RCODE = NXDOMAIN，或 NODATA（名字存在但无该类型）：
+→ S12 HANDLE_NEGATIVE
+
+情况 D：空响应或不可分类异常
+标记当前 server 低质量 / 失败 → S4 SELECT_SERVER
+
+S10: HANDLE_DELEGATION
+动作：
+
+从 Authority 提取委派的 NS RRset
+更新 ns_set = delegated NS RRset，current_zone_cut = delegated child zone
+检测 referral loop：若 (current_name, current_zone_cut, ns_set) 等价签名已出现且无进展 → S15 FAIL_SERVFAIL
+从 Additional 提取 glue：仅接受通过 bailiwick 校验 的 A / AAAA，out-of-bailiwick glue 不纳入可信缓存
+缓存委派相关 NS RRset（按实现策略）
+转移： → S3 ENSURE_NS_ADDRESS
+
+S11: RESOLVE_NS_ADDRESS_SUBQUERY
+（S3 内部触发的子流程）
+
+动作：
+
+为 NS 主机名解析 A / AAAA：
+
+subquery_depth += 1
+若 subquery_depth > max_subquery_depth → 失败
+用同样的 resolver 逻辑递归解析
+成功后把地址写入 ns_addr_cache
+返回：
+
+成功 → 回 S3
+失败 → 回 S3 尝试其他 NS
+全部失败 → S15 FAIL_SERVFAIL
+S12: HANDLE_NEGATIVE
+动作：
+
+从 Authority 中提取 SOA
+若存在 SOA：neg_ttl = min(SOA.RR_TTL, SOA.MINIMUM)，按 RFC 2308 做 negative caching
+若无 SOA：不做标准否定缓存
+保存 negative_result，区分 NXDOMAIN / NODATA，保留 SOA 供组装
+转移： → S14 ASSEMBLE_NEGATIVE
+
+S13: ASSEMBLE_SUCCESS
+动作： 组装成功响应。
+
+Answer 段：
+
+从 original_qname 到 current_name 的完整 alias_chain
+最终 answer_rrset
+例如：
+
+stylus
+www.a.com    CNAME  x.b.net
+x.b.net      CNAME  y.c.org
+y.c.org      A      1.2.3.4
+
+Authority / Additional： 可按策略附带适当 RRset，不将不可信 glue 当作正式答案。
+
+转移： → S16 DONE
+
+S14: ASSEMBLE_NEGATIVE
+动作： 组装否定响应。
+
+若存在 alias_chain，Answer 中保留 CNAME 链，对链尾给出 negative 语义
+区分 NXDOMAIN（规范名不存在）/ NODATA（名字存在但该类型不存在）
+若有 SOA，放入 Authority 段
+转移： → S16 DONE
+
+S15: FAIL_SERVFAIL
+动作： 返回 SERVFAIL。
+
+适用情形：query budget 耗尽、alias loop、referral loop、subquery depth 超限、所有可用 NS 不可达、TCP fallback 后仍失败、协议异常。
+
+转移： → S16 DONE
+
+S16: DONE
+结束。

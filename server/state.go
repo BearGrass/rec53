@@ -14,6 +14,7 @@ const (
 const (
 	STATE_INIT_COMMON_ERROR = -1
 	STATE_INIT_NO_ERROR     = 0
+	STATE_INIT_FORMERR      = 1
 )
 
 const (

@@ -44,6 +44,7 @@ No git tags found. Version history derived from commit history.
 - Response policy zones (RPZ)
 - Custom forwarding rules
 - IPv6-only operation improvements
+- 不需要支持DNAME记录
 
 ## Future
 

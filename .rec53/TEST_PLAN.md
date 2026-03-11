@@ -4,14 +4,14 @@
 
 - Coverage baseline: 28.6% - 82.6% (varies by package)
 - Coverage target: 80%
-- Last updated: 2026-03-10
+- Last updated: 2026-03-11
 
 ### Current Coverage by Package
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | utils | 82.6% | ✅ Target met |
-| server | 76.8% | ⚠️ Near target |
+| server | 69.0% | ⚠️ Below target |
 | monitor | 58.1% | ❌ Below target |
 | cmd | 47.1% | ❌ Below target |
 | e2e | 28.6% | ❌ Integration tests |

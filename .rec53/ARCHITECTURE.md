@@ -62,7 +62,7 @@ DNS Query
 │                   └───────────┘          └─────────┘  │    │
 │                                                       │    │
 │  States:                                              │    │
-│  - STATE_INIT: Initialize response, set reply         │    │
+│  - STATE_INIT: Validate request (FORMERR if invalid), initialize response │    │
 │  - IN_CACHE: Check if answer is cached                │    │
 │  - CHECK_RESP: Determine if ANS/CNAME/NS referral     │    │
 │  - IN_GLUE: Get nameserver addresses from glue        │    │

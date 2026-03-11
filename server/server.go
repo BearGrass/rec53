@@ -30,6 +30,13 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	startTime := time.Now()
 	reply := &dns.Msg{}
 
+	// Guard against malformed requests with no question (QDCOUNT=0) to prevent panic
+	if len(r.Question) == 0 {
+		reply.SetRcode(r, dns.RcodeFormatError)
+		w.WriteMsg(reply)
+		return
+	}
+
 	// Save original question before any modifications by state machine
 	var originalQuestion dns.Question
 	if len(r.Question) > 0 {

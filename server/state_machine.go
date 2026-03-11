@@ -45,8 +45,11 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 	visitedDomains := make(map[string]bool)
 	iterations := 0
 
-	// Save original question for response
-	originalQuestion := stm.getRequest().Question[0]
+	// Save original question for response (may be empty for malformed requests)
+	var originalQuestion dns.Question
+	if len(stm.getRequest().Question) > 0 {
+		originalQuestion = stm.getRequest().Question[0]
+	}
 
 	// Accumulate CNAME records for RFC1034 compliant responses
 	// The CNAME chain must be included in the Answer section
@@ -60,13 +63,21 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 		}
 
 		st := stm.getCurrentState()
+		queryName := ""
+		if len(stm.getRequest().Question) > 0 {
+			queryName = stm.getRequest().Question[0].Name
+		}
 		monitor.Rec53Log.Debugf("[STATE_MACHINE] Iteration %d, current state: %d, query: %s",
-			iterations, st, stm.getRequest().Question[0].Name)
+			iterations, st, queryName)
 		switch st {
 		case STATE_INIT:
-			if _, err := stm.handle(stm.getRequest(), stm.getResponse()); err != nil {
+			ret, err := stm.handle(stm.getRequest(), stm.getResponse())
+			if err != nil {
 				monitor.Rec53Log.Errorf("Handle state error %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
+			}
+			if ret == STATE_INIT_FORMERR {
+				return stm.getResponse(), nil
 			}
 			inCache := newInCacheState(stm.getRequest(), stm.getResponse())
 			stm = inCache
