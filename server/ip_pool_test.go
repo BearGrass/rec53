@@ -541,3 +541,241 @@ func TestIPQualityV2_TimestampUpdate(t *testing.T) {
 		t.Error("lastUpdate should be more recent")
 	}
 }
+
+// ============================================================================
+// Phase 2 Tests: Fault Handling and Recovery
+// ============================================================================
+
+func TestIPQualityV2_RecordFailure_Phase1(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Record one successful sample first to establish baseline
+	iqv2.RecordLatency(100)
+	originalP50 := iqv2.p50
+
+	// Record 3 failures (Phase 1: DEGRADED state)
+	for i := 1; i <= 3; i++ {
+		iqv2.RecordFailure()
+
+		if iqv2.failCount != uint8(i) {
+			t.Errorf("failure %d: expected failCount=%d, got %d", i, i, iqv2.failCount)
+		}
+		if iqv2.state != IP_STATE_DEGRADED {
+			t.Errorf("failure %d: expected state=DEGRADED, got %d", i, iqv2.state)
+		}
+
+		// P50 should be increased by 20% for each failure
+		// Just verify it's greater than original
+		if iqv2.p50 <= originalP50 {
+			t.Errorf("failure %d: p50 should be increased from %d, got %d", i, originalP50, iqv2.p50)
+		}
+	}
+}
+
+func TestIPQualityV2_RecordFailure_Phase2(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	// Record 6 failures to enter Phase 2 (SUSPECT state)
+	for i := 1; i <= 6; i++ {
+		iqv2.RecordFailure()
+	}
+
+	if iqv2.failCount != 6 {
+		t.Errorf("expected failCount=6, got %d", iqv2.failCount)
+	}
+	if iqv2.state != IP_STATE_SUSPECT {
+		t.Errorf("expected state=SUSPECT, got %d", iqv2.state)
+	}
+	// All metrics should be MAX
+	if iqv2.p50 != int32(MAX_IP_LATENCY) {
+		t.Errorf("expected p50=MAX_IP_LATENCY, got %d", iqv2.p50)
+	}
+	if iqv2.p95 != int32(MAX_IP_LATENCY) {
+		t.Errorf("expected p95=MAX_IP_LATENCY, got %d", iqv2.p95)
+	}
+	if iqv2.p99 != int32(MAX_IP_LATENCY) {
+		t.Errorf("expected p99=MAX_IP_LATENCY, got %d", iqv2.p99)
+	}
+}
+
+func TestIPQualityV2_RecordFailure_Phase3(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	// Record 10 failures to enter Phase 3 (7+ failures)
+	for i := 1; i <= 10; i++ {
+		iqv2.RecordFailure()
+	}
+
+	if iqv2.failCount != 10 {
+		t.Errorf("expected failCount=10, got %d", iqv2.failCount)
+	}
+	// Should remain SUSPECT for periodic probing
+	if iqv2.state != IP_STATE_SUSPECT {
+		t.Errorf("expected state=SUSPECT in phase 3, got %d", iqv2.state)
+	}
+}
+
+func TestIPQualityV2_RecordFailure_UpdatesTimestamp(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	initialFailureTime := iqv2.lastFailure
+
+	time.Sleep(10 * time.Millisecond)
+	iqv2.RecordFailure()
+
+	if iqv2.lastFailure.Equal(initialFailureTime) {
+		t.Error("lastFailure should be updated")
+	}
+}
+
+func TestIPQualityV2_ResetForProbe(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	iqv2.RecordLatency(100)
+
+	// Create SUSPECT state
+	for i := 0; i < 8; i++ {
+		iqv2.RecordFailure()
+	}
+
+	if iqv2.state != IP_STATE_SUSPECT {
+		t.Errorf("setup: expected SUSPECT state, got %d", iqv2.state)
+	}
+
+	// Reset for probe (simulating successful probe)
+	iqv2.ResetForProbe()
+
+	if iqv2.failCount != 0 {
+		t.Errorf("after ResetForProbe: expected failCount=0, got %d", iqv2.failCount)
+	}
+	if iqv2.state != IP_STATE_RECOVERED {
+		t.Errorf("after ResetForProbe: expected state=RECOVERED, got %d", iqv2.state)
+	}
+}
+
+func TestIPQualityV2_ShouldProbe(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Active IP should not need probing
+	if iqv2.ShouldProbe() {
+		t.Error("ACTIVE IP should not need probing")
+	}
+
+	// DEGRADED IP should not need probing
+	iqv2.RecordLatency(100)
+	iqv2.RecordFailure()
+	if iqv2.ShouldProbe() {
+		t.Error("DEGRADED IP should not need probing")
+	}
+
+	// SUSPECT IP should need probing after throttle delay
+	for i := 0; i < 5; i++ {
+		iqv2.RecordFailure()
+	}
+	// Immediately after failure, should not probe due to throttle
+	if iqv2.ShouldProbe() {
+		t.Error("ShouldProbe should respect 5-second throttle")
+	}
+}
+
+func TestIPQualityV2_ShouldProbe_ThrottleRecent(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Create SUSPECT state
+	for i := 0; i < 8; i++ {
+		iqv2.RecordFailure()
+	}
+
+	// Should not probe immediately
+	if iqv2.ShouldProbe() {
+		t.Error("ShouldProbe should be false immediately after failure")
+	}
+}
+
+func TestIPQualityV2_GettersThreadSafe(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Record some data
+	for i := int32(1); i <= 10; i++ {
+		iqv2.RecordLatency(i * 10)
+	}
+	iqv2.RecordFailure()
+
+	// All getters should work concurrently
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = iqv2.GetP50Latency()
+			_ = iqv2.GetP95Latency()
+			_ = iqv2.GetP99Latency()
+			_ = iqv2.GetState()
+			_ = iqv2.GetConfidence()
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify values are valid
+	if iqv2.GetP50Latency() == 0 {
+		t.Error("P50 should be non-zero after samples")
+	}
+	if iqv2.GetState() != IP_STATE_DEGRADED {
+		t.Error("State should be DEGRADED after 1 failure")
+	}
+	if iqv2.GetConfidence() != 100 {
+		t.Error("Confidence should be 100 after 10 samples")
+	}
+}
+
+func TestIPQualityV2_FailureMaxLatencyBoundary(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+
+	// Set high starting latency near MAX
+	iqv2.p50 = int32(MAX_IP_LATENCY) - 1000
+
+	// First failure with 1.2x multiplier
+	iqv2.RecordFailure()
+
+	// Should not exceed MAX_IP_LATENCY
+	if iqv2.p50 > int32(MAX_IP_LATENCY) {
+		t.Errorf("p50 should not exceed MAX_IP_LATENCY, got %d", iqv2.p50)
+	}
+}
+
+func TestIPQualityV2_ConcurrentFailureAndSuccess(t *testing.T) {
+	iqv2 := NewIPQualityV2()
+	var wg sync.WaitGroup
+
+	// 20 goroutines: 10 recording latency, 10 recording failures
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				iqv2.RecordLatency(int32(100 + j*10))
+				time.Sleep(1 * time.Millisecond)
+			}
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				iqv2.RecordFailure()
+				time.Sleep(1 * time.Millisecond)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// IP should be in a valid state (likely DEGRADED or SUSPECT)
+	// Verify no panic occurred and state is valid
+	if iqv2.state > IP_STATE_RECOVERED {
+		t.Errorf("invalid state after concurrent ops: %d", iqv2.state)
+	}
+}

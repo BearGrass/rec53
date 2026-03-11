@@ -165,6 +165,104 @@ func (iq *IPQualityV2) updatePercentiles() {
 	iq.p99 = samples[idx99]
 }
 
+// RecordFailure records a failure and applies exponential backoff strategy
+// Thread-safe via internal RWMutex
+func (iq *IPQualityV2) RecordFailure() {
+	iq.mu.Lock()
+	defer iq.mu.Unlock()
+
+	iq.failCount++
+	iq.lastFailure = time.Now()
+
+	// Exponential backoff strategy with 3 phases
+	switch {
+	case iq.failCount <= 3:
+		// Phase 1 (1-3 failures): DEGRADED state with 20% latency penalty
+		iq.state = IP_STATE_DEGRADED
+		iq.p50 = int32(float64(iq.p50) * 1.2)
+		if iq.p50 > int32(MAX_IP_LATENCY) {
+			iq.p50 = int32(MAX_IP_LATENCY)
+		}
+
+	case iq.failCount <= 6:
+		// Phase 2 (4-6 failures): SUSPECT state, all metrics set to MAX
+		iq.state = IP_STATE_SUSPECT
+		iq.p50 = int32(MAX_IP_LATENCY)
+		iq.p95 = int32(MAX_IP_LATENCY)
+		iq.p99 = int32(MAX_IP_LATENCY)
+
+	default:
+		// Phase 3 (7+ failures): Remains SUSPECT, will be periodically probed
+		iq.state = IP_STATE_SUSPECT
+		// Keep marked for periodic probe recovery in background task
+	}
+}
+
+// ResetForProbe resets the IP state after a successful probe attempt
+// Used by periodic probe loop to mark recovery
+func (iq *IPQualityV2) ResetForProbe() {
+	iq.mu.Lock()
+	defer iq.mu.Unlock()
+
+	iq.failCount = 0
+	iq.state = IP_STATE_RECOVERED
+	iq.lastUpdate = time.Now()
+}
+
+// ShouldProbe returns whether this IP is a candidate for periodic probing
+// Returns true if IP is in SUSPECT state and has not been recently probed
+func (iq *IPQualityV2) ShouldProbe() bool {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+
+	// Only probe SUSPECT IPs
+	if iq.state != IP_STATE_SUSPECT {
+		return false
+	}
+
+	// Avoid probing too frequently - wait at least 5 seconds between probes
+	if !iq.lastFailure.IsZero() && time.Since(iq.lastFailure) < 5*time.Second {
+		return false
+	}
+
+	return true
+}
+
+// GetP50Latency returns the current P50 latency in a thread-safe manner
+func (iq *IPQualityV2) GetP50Latency() int32 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.p50
+}
+
+// GetP95Latency returns the current P95 latency in a thread-safe manner
+func (iq *IPQualityV2) GetP95Latency() int32 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.p95
+}
+
+// GetP99Latency returns the current P99 latency in a thread-safe manner
+func (iq *IPQualityV2) GetP99Latency() int32 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.p99
+}
+
+// GetState returns the current IP state in a thread-safe manner
+func (iq *IPQualityV2) GetState() uint8 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.state
+}
+
+// GetConfidence returns the current confidence level (0-100) in a thread-safe manner
+func (iq *IPQualityV2) GetConfidence() uint8 {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.confidence
+}
+
 type IPPool struct {
 	pool      map[string]*IPQuality
 	l         sync.RWMutex
