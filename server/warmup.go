@@ -48,6 +48,14 @@ func WarmupNSRecords(ctx context.Context, cfg WarmupConfig) WarmupStats {
 		go func(d string) {
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore slot
+			defer func() {
+				if r := recover(); r != nil {
+					monitor.Rec53Log.Debugf("Panic during warmup query for %s (non-fatal): %v", d, r)
+					mu.Lock()
+					failureCount++
+					mu.Unlock()
+				}
+			}()
 
 			// Create context with timeout for this query
 			queryCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
@@ -85,6 +93,7 @@ func WarmupNSRecords(ctx context.Context, cfg WarmupConfig) WarmupStats {
 // Returns true if the query succeeded, false otherwise.
 // This creates a synthetic DNS query and processes it through the state machine,
 // which automatically caches results and records IP quality metrics.
+// The provided context allows warmup deadlines to propagate through the resolution.
 func queryNSRecords(ctx context.Context, domain string) bool {
 	// Create a synthetic NS query
 	queryMsg := &dns.Msg{}
@@ -94,8 +103,8 @@ func queryNSRecords(ctx context.Context, domain string) bool {
 	// Create reply message
 	reply := &dns.Msg{}
 
-	// Process through state machine
-	stm := newStateInitState(queryMsg, reply)
+	// Process through state machine with context
+	stm := newStateInitStateWithContext(queryMsg, reply, ctx)
 	result, err := Change(stm)
 	if err != nil {
 		monitor.Rec53Log.Debugf("Warmup query for %s failed: %v", domain, err)
