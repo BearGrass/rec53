@@ -13,16 +13,30 @@ import (
 )
 
 type server struct {
-	listen  string
-	udpSrv  *dns.Server
-	tcpSrv  *dns.Server
-	wg      sync.WaitGroup
-	errChan chan error
+	listen    string
+	warmupCfg WarmupConfig
+	udpSrv    *dns.Server
+	tcpSrv    *dns.Server
+	wg        sync.WaitGroup
+	errChan   chan error
 }
 
 func NewServer(listen string) *server {
+	// Disable warmup by default for test compatibility
+	// Tests that need warmup can use NewServerWithConfig
+	warmupCfg := DefaultWarmupConfig
+	warmupCfg.Enabled = false
 	return &server{
-		listen: listen,
+		listen:    listen,
+		warmupCfg: warmupCfg,
+	}
+}
+
+// NewServerWithConfig creates a new server with both listen address and warmup config
+func NewServerWithConfig(listen string, warmupCfg WarmupConfig) *server {
+	return &server{
+		listen:    listen,
+		warmupCfg: warmupCfg,
 	}
 }
 
@@ -131,6 +145,7 @@ func truncateResponse(reply, request *dns.Msg, maxSize int) *dns.Msg {
 // Run starts the DNS server listeners and returns an error channel.
 // Errors during startup or runtime are sent to the returned channel.
 // The channel is closed when both UDP and TCP servers have stopped.
+// If warmup is enabled, it runs in the background without blocking startup.
 func (s *server) Run() <-chan error {
 	// Create servers before starting goroutines to avoid race with Shutdown()
 	s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
@@ -138,6 +153,11 @@ func (s *server) Run() <-chan error {
 
 	// Start background IP probe loop for fault recovery
 	globalIPPool.StartProbeLoop()
+
+	// Start background NS warmup if enabled (non-blocking)
+	if s.warmupCfg.Enabled {
+		go s.warmupNSOnStartup()
+	}
 
 	s.errChan = make(chan error, 2)
 	s.wg.Add(2)
@@ -163,6 +183,18 @@ func (s *server) Run() <-chan error {
 	}()
 
 	return s.errChan
+}
+
+// warmupNSOnStartup runs NS warmup in the background on startup.
+// It does not block server startup or query handling.
+func (s *server) warmupNSOnStartup() {
+	// Create a context with 60s timeout for entire warmup
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	monitor.Rec53Log.Infof("Starting NS warmup with %d TLDs...", len(s.warmupCfg.TLDs))
+	WarmupNSRecords(ctx, s.warmupCfg)
+	// Stats are logged inside WarmupNSRecords()
 }
 
 // Shutdown gracefully shuts down the DNS server

@@ -26,6 +26,7 @@ log/*.log
 .env
 .env.local
 .env.*.local
+config.yaml
 
 # Go and Dependencies
 vendor/
