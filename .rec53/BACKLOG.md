@@ -20,12 +20,7 @@ Use these prefixes:
 
 ## Planned
 
-### [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试
-Priority: Medium
-Description: ITER 收到 SERVFAIL、REFUSED、FORMERR、NOTIMPL 时直接返回 ITER_COMMON_ERROR，未标记 bad server 并换其他 NS 重试，单个故障服务器即导致查询失败（doc S7 要求换 server）。
-Acceptance criteria:
-- [ ] 上述 Rcode 时标记当前服务器为 bad 并尝试备用服务器
-- [ ] 所有可用服务器均失败后才返回 SERVFAIL
+## Unplanned
 
 ### [B-014] Glue 无 bailiwick 校验（安全风险）
 Priority: Medium
@@ -197,6 +192,23 @@ Acceptance criteria:
 
 ## Completed
 
+### [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试 (completed 2026-03-12)
+Priority: Medium
+Description: ITER 收到 SERVFAIL、REFUSED、FORMERR、NOTIMPL 时直接返回 ITER_COMMON_ERROR，未标记 bad server 并换其他 NS 重试，单个故障服务器即导致查询失败（doc S7 要求换 server）。
+
+**Completion Summary**:
+- Detected bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) in iterState.handle()
+- Added failure tracking via globalIPPool.GetIPQualityV2(ip).RecordFailure()
+- Implemented retry logic with secondary IP for bad Rcodes
+- Records latency metrics from successful secondary IP retries
+- Returns SERVFAIL only if both primary and secondary IPs fail
+- Added TestBadRcodeDetection E2E test in e2e/error_test.go
+- All tests pass (no new regressions)
+
+Acceptance criteria:
+- [x] 上述 Rcode 时标记当前服务器为 bad 并尝试备用服务器
+- [x] 所有可用服务器均失败后才返回 SERVFAIL
+
 ### [B-017] NS 递归解析栈溢出：遗漏 break 导致后续崩溃 (completed 2026-03-11)
 Priority: Critical
 Description: www.qq.com 查询能正确返回结果给客户端，但之后 rec53 进程因栈溢出而崩溃。根本原因：resolveNSIPsRecursively() 函数在成功解析一个 NS 的 A 记录后，仍继续循环遍历剩余的 NS 名字，导致不必要的深层递归调用。
@@ -266,10 +278,6 @@ Description: When querying a domain with CNAME chain, the resolver returns SERVF
 Acceptance criteria:
 - [x] Query CNAME chain domains returns complete chain and final A records
 - [x] No regression on normal queries
-
----
-
-## Completed
 
 ### [B-012] NXDOMAIN / NODATA 响应码不传递给客户端 (completed 2026-03-12)
 Priority: High

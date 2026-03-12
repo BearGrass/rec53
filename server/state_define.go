@@ -503,8 +503,75 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			return ITER_NO_ERROR, nil
 		case dns.RcodeSuccess:
 			return ITER_NO_ERROR, nil
+		case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeFormatError, dns.RcodeNotImplemented:
+			// B-013: Bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) should trigger server switch
+			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with secondary IP",
+				dns.RcodeToString[newResponse.Rcode], theBestIP)
+
+			// Record failure in IP quality tracking
+			iqv2 := globalIPPool.GetIPQualityV2(theBestIP)
+			if iqv2 != nil {
+				iqv2.RecordFailure()
+				monitor.Rec53Log.Debugf("[ITER] Recorded failure for IP %s", theBestIP)
+			}
+
+			// Try secondary IP if available
+			if secondAddr == "" {
+				monitor.Rec53Log.Debugf("[ITER] No secondary IP available for retry, returning bad Rcode")
+				return ITER_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no secondary IP",
+					dns.RcodeToString[newResponse.Rcode])
+			}
+
+			monitor.Rec53Log.Debugf("[ITER] Retrying with secondary IP %s for bad Rcode %s",
+				secondAddr, dns.RcodeToString[newResponse.Rcode])
+
+			// Retry query with secondary IP
+			newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":"+port)
+			if err != nil {
+				monitor.Rec53Log.Debugf("[ITER] Query to secondary IP %s failed: %v", secondAddr, err)
+				// Record failure for secondary IP
+				iqv2 = globalIPPool.GetIPQualityV2(secondAddr)
+				if iqv2 != nil {
+					iqv2.RecordFailure()
+				}
+				return ITER_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, secondary IP also failed: %v",
+					dns.RcodeToString[newResponse.Rcode], err)
+			}
+
+			// Secondary IP succeeded, update tracking
+			theBestIP = secondAddr
+			monitor.Rec53Log.Debugf("[ITER] Secondary IP %s succeeded after bad Rcode from primary", secondAddr)
+
+			// Record latency for secondary IP
+			iqv2 = globalIPPool.GetIPQualityV2(theBestIP)
+			if iqv2 != nil {
+				iqv2.RecordLatency(int32(rtt / time.Millisecond))
+				// Export V2 percentile metrics to Prometheus
+				monitor.Rec53Metric.IPQualityV2GaugeSet(theBestIP,
+					float64(iqv2.GetP50Latency()),
+					float64(iqv2.GetP95Latency()),
+					float64(iqv2.GetP99Latency()),
+				)
+			}
+
+			// After successful secondary IP retry, check its response code
+			s.response.Rcode = newResponse.Rcode
+			s.response.Ns = newResponse.Ns
+
+			// If secondary IP also returned bad Rcode, give up
+			if newResponse.Rcode != dns.RcodeSuccess {
+				if newResponse.Rcode == dns.RcodeNameError {
+					monitor.Rec53Log.Debugf("[ITER] Secondary IP returned NXDOMAIN")
+					return ITER_NO_ERROR, nil
+				}
+				monitor.Rec53Log.Debugf("[ITER] Secondary IP also returned bad Rcode: %s",
+					dns.RcodeToString[newResponse.Rcode])
+				return ITER_COMMON_ERROR, fmt.Errorf("both primary and secondary IPs returned bad rcode: %s",
+					dns.RcodeToString[newResponse.Rcode])
+			}
+			// Secondary IP succeeded, continue to process response
 		default:
-			// Other errors (REFUSED, SERVFAIL, etc.) - return as error
+			// Other unknown errors - return as error
 			monitor.Rec53Log.Debugf("[ITER] Non-success Rcode: %s", dns.RcodeToString[newResponse.Rcode])
 			return ITER_COMMON_ERROR, fmt.Errorf("response rcode: %s",
 				dns.RcodeToString[newResponse.Rcode])

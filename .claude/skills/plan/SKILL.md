@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Requirement Planning
 
 1. Read: CLAUDE.md, .rec53/BACKLOG.md, .rec53/ARCHITECTURE.md, .rec53/TODO.md
-2. Find "Unplanned" items (or filter by $ARGUMENTS if specified)
+2. Find "Unplanned" items or filter by $ARGUMENTS if specified
 3. For each item, analyze: files to modify, new files needed, external deps, architecture conflicts, complexity (S/M/L), suggested order
 4. **Present analysis. Wait for confirmation.**
 5. After confirmation: move items to "Planned" in BACKLOG.md, write tasks to TODO.md, update ARCHITECTURE.md/CLAUDE.md if affected
