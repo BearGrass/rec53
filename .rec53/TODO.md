@@ -4,25 +4,26 @@
 
 ## Backlog
 
+### Bug Fixes (from BACKLOG.md)
+
 ### Feature Tasks (from BACKLOG.md)
 
-- [ ] [F-003] IP Pool Maintenance Algorithm Improvement (Phases 1-3 completed, Phase 4 in progress)
-  - [x] [F-003/1] Create `IPQualityV2` struct in server/ip_pool.go (Phase 1 foundation)
-  - [x] [F-003/2] Implement `RecordLatency()` and `updatePercentiles()` in server/ip_pool.go (Phase 1)
-  - [x] [F-003/3] Write unit tests for percentile calculations in server/ip_pool_test.go (Phase 1)
-  - [x] [F-003/4] Implement `RecordFailure()` with exponential backoff in server/ip_pool.go (Phase 2)
-  - [x] [F-003/5] Implement `ShouldProbe()` and `ResetForProbe()` in server/ip_pool.go (Phase 2)
-  - [ ] [F-003/7] Write integration tests for fault recovery in server/ip_pool_test.go (Phase 2)
-  - [x] [F-003/8] Implement `GetScore()` method in server/ip_pool.go (Phase 3)
-  - [x] [F-003/9] Implement `GetBestIPsV2()` method in server/ip_pool.go (Phase 3)
-  - [x] [F-003/10] Write comparative tests for algorithm in server/ip_pool_test.go (Phase 3)
 ### Technical Debt
 
 - [ ] [D-001] Add test cases for state machine (server/state_machine_test.go:29)
 
 ## Completed
 
-- [x] [F-003] IP Pool Phase 4: Integration & Migration (completed 2026-03-11)
+- [x] [F-003] IP Pool Maintenance Algorithm Improvement (completed 2026-03-12)
+  - [x] [F-003/1] Create `IPQualityV2` struct in server/ip_pool.go (Phase 1 foundation)
+  - [x] [F-003/2] Implement `RecordLatency()` and `updatePercentiles()` in server/ip_pool.go (Phase 1)
+  - [x] [F-003/3] Write unit tests for percentile calculations in server/ip_pool_test.go (Phase 1)
+  - [x] [F-003/4] Implement `RecordFailure()` with exponential backoff in server/ip_pool.go (Phase 2)
+  - [x] [F-003/5] Implement `ShouldProbe()` and `ResetForProbe()` in server/ip_pool.go (Phase 2)
+  - [x] [F-003/7] Write integration tests for fault recovery in server/ip_pool_integration_test.go (Phase 2, 9 tests)
+  - [x] [F-003/8] Implement `GetScore()` method in server/ip_pool.go (Phase 3)
+  - [x] [F-003/9] Implement `GetBestIPsV2()` method in server/ip_pool.go (Phase 3)
+  - [x] [F-003/10] Write comparative tests for algorithm in server/ip_pool_test.go (Phase 3)
   - [x] [F-003/6] Add background probe loop startup in server/ip_pool.go (Phase 4)
     - [x] [F-003/6a] Implement `StartProbeLoop()` method in server/ip_pool.go
     - [x] [F-003/6b] Implement `periodicProbeLoop()` method in server/ip_pool.go
@@ -34,6 +35,17 @@
   - [x] [F-003/13] Run performance benchmark for 1000 IPs in server/ip_pool_test.go (Phase 4)
   - [x] [F-003/14] Add E2E integration tests in e2e/dns_test.go (Phase 4)
   - Skipped: [F-003/15] Feature flag support (optional)
+- [x] [B-012] NXDOMAIN / NODATA 响应码不传递给客户端 (completed 2026-03-12)
+  - [x] [B-012/1] Update server/state.go — add CHECK_RESP_GET_NEGATIVE constant
+  - [x] [B-012/2] Update server/state_define.go — add DefaultNegativeCacheTTL constant (60s) with TODO for future configuration
+  - [x] [B-012/3] Update server/state_define.go — add extractSOAFromAuthority() helper function
+  - [x] [B-012/4] Update server/state_define.go — add hasSOAInAuthority() helper function
+  - [x] [B-012/5] Update server/state_define.go — modify checkRespState.handle() to detect negative responses with smart caching
+  - [x] [B-012/6] Update server/state_machine.go — add CHECK_RESP_GET_NEGATIVE case in Change() function
+  - [x] [B-012/7] Update e2e/authority_test.go — remove t.Skip() from TestAuthorityNXDOMAIN (line 333)
+  - [x] [B-012/8] Update e2e/authority_test.go — remove t.Skip() from TestAuthorityNODATA (line 375)
+  - [x] [B-012/9] Run tests — verify go test ./e2e/... -v passes
+  - [x] [B-012/10] Run tests — verify go test ./server/... -v passes
 - [x] [B-017] NS 递归解析栈溢出（fixed 2026-03-11）
   - Fix: Added break statement in resolveNSIPsRecursively() at line 319
   - Verification: E2E test pass, all regression tests pass

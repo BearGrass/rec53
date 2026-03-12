@@ -278,28 +278,30 @@ Acceptance criteria:
 
 ## Completed
 
-### [F-003] IP Pool Maintenance Algorithm Improvement (completed 2026-03-11)
+### [F-003] IP Pool Maintenance Algorithm Improvement (completed 2026-03-12)
 Priority: High
 Description: Implement sliding window histogram-based IP pool quality tracking with automatic fault recovery. Current algorithm lacks fault recovery (IPs marked MAX_LATENCY never recover), lacks confidence-based selection, and has no exponential backoff. This leads to permanent performance degradation from transient network faults. Proposed solution uses 64-sample ring buffer with P50/P95/P99 metrics, exponential backoff for failures, and periodic background probing for recovery.
 
-**Completion Summary**: All 4 phases complete. Phase 4 delivered:
+**Completion Summary**: All 4 phases complete. Phase 2 & Phase 4 delivered:
 - Background probe loop: StartProbeLoop(), periodicProbeLoop(), probeAllSuspiciousIPs() ✅
+- Integration tests (F-003/7): 9 comprehensive tests in server/ip_pool_integration_test.go covering full fault recovery lifecycle ✅
 - Migration: state_define.go updated to GetBestIPsV2() with latency/failure recording ✅
 - Prometheus metrics: P50/P95/P99 latency export via IPQualityV2GaugeSet() ✅
 - Performance: Benchmark verified (94-98 µs for 1000 IPs, 10x under 1ms target) ✅
-- E2E tests: 8 comprehensive integration tests (latency, scoring, recovery, metrics, concurrency, confidence, throttling) ✅
+- E2E tests: 8 comprehensive E2E tests (latency, scoring, recovery, metrics, concurrency, confidence, throttling) ✅
 
 Implementation Phases:
 - `Phase 1` ✅ Complete: IPQualityV2 struct with ring buffer, percentile calculations (8 tests)
-- `Phase 2` ✅ Complete: Fault handling with exponential backoff, ShouldProbe/ResetForProbe (8 tests)
+- `Phase 2` ✅ Complete: Fault handling with exponential backoff, ShouldProbe/ResetForProbe (8 tests + 9 integration tests)
 - `Phase 3` ✅ Complete: Composite scoring with GetScore() and GetBestIPsV2() (8 tests)
 - `Phase 4` ✅ Complete: Integration, metrics, benchmarks, background probing (5 tests)
 
 Overall Success Criteria Met:
 - ✅ Fault recovery time: 30-60 seconds for SUSPECT IPs (via periodicProbeLoop)
-- ✅ Unit test coverage: 65+ tests in server/ip_pool_test.go, 12 in monitor/metric_test.go
+- ✅ Unit test coverage: 65+ tests in server/ip_pool_test.go, 9 in server/ip_pool_integration_test.go, 12 in monitor/metric_test.go
 - ✅ Performance: 94-98 µs per IP selection for 1000 IPs (10x under 1ms target)
 - ✅ E2E integration: 8 comprehensive tests covering full resolution flow
+- ✅ Integration tests (F-003/7): 9 tests covering fault recovery lifecycle (ACTIVE→DEGRADED→SUSPECT→RECOVERED→ACTIVE)
 - ✅ Prometheus metrics: P50/P95/P99 latency per IP, updated via RecordLatency()
 - ✅ Zero regressions: All existing tests pass, no functionality degraded
 - Skipped: F-003/15 (feature flag support) - deemed optional for production
