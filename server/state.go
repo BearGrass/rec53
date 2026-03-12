@@ -28,6 +28,7 @@ const (
 	CHECK_RESP_GET_ANS      = 0
 	CHECK_RESP_GET_CNAME    = 1
 	CHECK_RESP_GET_NS       = 2
+	CHECK_RESP_GET_NEGATIVE = 3
 )
 
 const (

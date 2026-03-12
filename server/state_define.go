@@ -10,6 +10,38 @@ import (
 	"github.com/miekg/dns"
 )
 
+// DefaultNegativeCacheTTL is the default TTL for negative responses (NXDOMAIN/NODATA)
+// when SOA minimum is not available or is zero.
+// TODO: make this configurable via config file or command-line flag
+const DefaultNegativeCacheTTL = 60
+
+// extractSOAFromAuthority extracts the SOA record from the Authority section.
+// Returns the SOA record and its TTL (or DefaultNegativeCacheTTL if SOA.Minttl is 0).
+// Returns nil, 0 if no SOA is found.
+func extractSOAFromAuthority(response *dns.Msg) (*dns.SOA, uint32) {
+	for _, rr := range response.Ns {
+		if soa, ok := rr.(*dns.SOA); ok {
+			ttl := soa.Minttl
+			if ttl == 0 {
+				ttl = DefaultNegativeCacheTTL
+			}
+			return soa, ttl
+		}
+	}
+	return nil, 0
+}
+
+// hasSOAInAuthority checks if the Authority section contains a SOA record.
+// This is used to identify negative responses (NXDOMAIN/NODATA).
+func hasSOAInAuthority(response *dns.Msg) bool {
+	for _, rr := range response.Ns {
+		if _, ok := rr.(*dns.SOA); ok {
+			return true
+		}
+	}
+	return false
+}
+
 type stateInitState struct {
 	request  *dns.Msg
 	response *dns.Msg
@@ -124,17 +156,43 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	}
 
 	qtype := request.Question[0].Qtype
-	monitor.Rec53Log.Debugf("[CHECK_RESP] Checking response for %s (type: %s), Answers: %d, Ns: %d, Extra: %d",
-		request.Question[0].Name, dns.TypeToString[qtype], len(response.Answer), len(response.Ns), len(response.Extra))
+	qname := request.Question[0].Name
+	monitor.Rec53Log.Debugf("[CHECK_RESP] Checking response for %s (type: %s), Rcode: %s, Answers: %d, Ns: %d, Extra: %d",
+		qname, dns.TypeToString[qtype], dns.RcodeToString[response.Rcode], len(response.Answer), len(response.Ns), len(response.Extra))
 
-	// Check if we have any answers
+	// Priority 1: Check for negative responses (NXDOMAIN or NODATA)
+	// These are authoritative responses from upstream that must be passed to the client
+	if len(response.Answer) == 0 && hasSOAInAuthority(response) {
+		// Negative response detected: empty Answer + SOA in Authority
+		if response.Rcode == dns.RcodeNameError {
+			// NXDOMAIN: domain does not exist
+			monitor.Rec53Log.Debugf("[CHECK_RESP] NXDOMAIN detected for %s, returning negative response", qname)
+			// Cache the negative response
+			if soa, ttl := extractSOAFromAuthority(response); soa != nil {
+				setCacheCopyByType(qname, qtype, response, ttl)
+				monitor.Rec53Log.Debugf("[CHECK_RESP] Cached NXDOMAIN for %s (type: %s) with TTL: %d", qname, dns.TypeToString[qtype], ttl)
+			}
+			return CHECK_RESP_GET_NEGATIVE, nil
+		} else if response.Rcode == dns.RcodeSuccess {
+			// NODATA: domain exists but has no records of the requested type
+			monitor.Rec53Log.Debugf("[CHECK_RESP] NODATA detected for %s (type: %s), returning negative response", qname, dns.TypeToString[qtype])
+			// Cache the negative response
+			if soa, ttl := extractSOAFromAuthority(response); soa != nil {
+				setCacheCopyByType(qname, qtype, response, ttl)
+				monitor.Rec53Log.Debugf("[CHECK_RESP] Cached NODATA for %s (type: %s) with TTL: %d", qname, dns.TypeToString[qtype], ttl)
+			}
+			return CHECK_RESP_GET_NEGATIVE, nil
+		}
+	}
+
+	// Priority 2: Check if we have any answers
 	if len(response.Answer) == 0 {
-		// No answers, need to continue iteration
-		monitor.Rec53Log.Debugf("[CHECK_RESP] No answers, continuing to IN_GLUE")
+		// No answers and no SOA (not a negative response), need to continue iteration
+		monitor.Rec53Log.Debugf("[CHECK_RESP] No answers (and no SOA), continuing to IN_GLUE")
 		return CHECK_RESP_GET_NS, nil
 	}
 
-	// Check if we have a matching record type in the answers
+	// Priority 3: Check if we have a matching record type in the answers
 	for _, rr := range response.Answer {
 		if rr.Header().Rrtype == qtype {
 			// Found a matching record type, return the answer
@@ -143,7 +201,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 		}
 	}
 
-	// Check if we have a CNAME record that needs to be followed
+	// Priority 4: Check if we have a CNAME record that needs to be followed
 	// A CNAME can only exist when querying for A, AAAA, or other types that CNAME points to
 	if qtype != dns.TypeCNAME {
 		for _, rr := range response.Answer {
@@ -155,7 +213,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 		}
 	}
 
-	// We have answers but none match the requested type and no CNAME found
+	// Priority 5: We have answers but none match the requested type and no CNAME found
 	// This could happen when:
 	// - Querying for a type that doesn't exist (but other types do)
 	// - The server returned a partial answer

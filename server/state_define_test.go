@@ -512,3 +512,245 @@ func TestIterState_Integration_Failover(t *testing.T) {
 	}
 	t.Skip("Requires DNS server on port 53 - run with -tags=integration")
 }
+
+// =============================================================================
+// extractSOAFromAuthority Tests
+// =============================================================================
+
+// TestExtractSOAFromAuthority tests the extractSOAFromAuthority helper function
+func TestExtractSOAFromAuthority(t *testing.T) {
+	t.Run("returns SOA and its minttl", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  600, // Negative cache TTL
+			},
+		}
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa == nil {
+			t.Fatal("expected SOA record, got nil")
+		}
+		if ttl != 600 {
+			t.Errorf("expected TTL 600, got %d", ttl)
+		}
+	})
+
+	t.Run("returns DefaultNegativeCacheTTL when SOA minttl is 0", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  0, // Zero minttl
+			},
+		}
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa == nil {
+			t.Fatal("expected SOA record, got nil")
+		}
+		if ttl != DefaultNegativeCacheTTL {
+			t.Errorf("expected TTL %d (default), got %d", DefaultNegativeCacheTTL, ttl)
+		}
+	})
+
+	t.Run("returns nil when no SOA in authority", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeNS,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns: "ns1.example.com.",
+			},
+		}
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa != nil {
+			t.Errorf("expected nil SOA, got %v", soa)
+		}
+		if ttl != 0 {
+			t.Errorf("expected TTL 0, got %d", ttl)
+		}
+	})
+
+	t.Run("returns nil when authority section is empty", func(t *testing.T) {
+		response := new(dns.Msg)
+		// Empty Ns section
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa != nil {
+			t.Errorf("expected nil SOA, got %v", soa)
+		}
+		if ttl != 0 {
+			t.Errorf("expected TTL 0, got %d", ttl)
+		}
+	})
+
+	t.Run("returns first SOA when multiple SOAs present", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  100, // First SOA
+			},
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns2.example.com.",
+				Mbox:    "admin2.example.com.",
+				Serial:  2021010102,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  200, // Second SOA
+			},
+		}
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa == nil {
+			t.Fatal("expected SOA record, got nil")
+		}
+		if ttl != 100 {
+			t.Errorf("expected TTL 100 (first SOA), got %d", ttl)
+		}
+		if soa.Ns != "ns1.example.com." {
+			t.Errorf("expected first SOA's NS, got %s", soa.Ns)
+		}
+	})
+}
+
+// =============================================================================
+// hasSOAInAuthority Tests
+// =============================================================================
+
+// TestHasSOAInAuthority tests the hasSOAInAuthority helper function
+func TestHasSOAInAuthority(t *testing.T) {
+	t.Run("returns true when SOA present", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  600,
+			},
+		}
+
+		if !hasSOAInAuthority(response) {
+			t.Error("expected true when SOA present, got false")
+		}
+	})
+
+	t.Run("returns false when no SOA", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeNS,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns: "ns1.example.com.",
+			},
+		}
+
+		if hasSOAInAuthority(response) {
+			t.Error("expected false when no SOA, got true")
+		}
+	})
+
+	t.Run("returns false when authority section empty", func(t *testing.T) {
+		response := new(dns.Msg)
+		// Empty Ns section
+
+		if hasSOAInAuthority(response) {
+			t.Error("expected false when authority empty, got true")
+		}
+	})
+
+	t.Run("returns true when SOA mixed with other records", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeNS,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns: "ns1.example.com.",
+			},
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  600,
+			},
+		}
+
+		if !hasSOAInAuthority(response) {
+			t.Error("expected true when SOA mixed with other records, got false")
+		}
+	})
+}
