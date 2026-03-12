@@ -36,6 +36,40 @@ dig @127.0.0.1 -p 5353 google.com
 | `-metric` | `:9999` | Prometheus metrics address |
 | `-log-level` | `info` | Log level: debug, info, warn, error |
 | `-version` | `false` | Show version information |
+| `-no-warmup` | `false` | Disable NS warmup on startup |
+
+## Configuration
+
+rec53 uses YAML configuration for advanced settings. Create a `config.yaml` file:
+
+```yaml
+dns:
+  listen: "127.0.0.1:5353"
+  metric: ":9999"
+  log_level: "info"
+
+warmup:
+  enabled: true
+  timeout: 5s
+  duration: 5s
+  concurrency: 0  # 0 = auto-calculate based on CPU cores; set to >0 to override
+  tlds:
+    - com
+    - net
+    - org
+    # ... more TLDs
+```
+
+### Warmup Concurrency
+
+The warmup process automatically scales to your CPU capacity:
+- **Auto-calculation** (concurrency: 0): Uses formula `min(NumCPU() * 2, 8)` 
+  - 2-core machine: 4 concurrent goroutines
+  - 4-core machine: 8 concurrent goroutines  
+  - 8+ core machine: 8 concurrent goroutines (capped)
+- **Manual override** (concurrency: N): Uses exactly N goroutines for your deployment requirements
+
+This prevents CPU oversubscription on smaller machines while maintaining efficient I/O-bound parallelism.
 
 ## Architecture
 

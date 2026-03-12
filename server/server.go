@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -187,12 +188,21 @@ func (s *server) Run() <-chan error {
 
 // warmupNSOnStartup runs NS warmup in the background on startup.
 // It does not block server startup or query handling.
+// The warmup process runs for at most s.warmupCfg.Duration, and all goroutines
+// are cancelled when the deadline is reached.
+// Panics during warmup are caught and logged to prevent server crashes.
 func (s *server) warmupNSOnStartup() {
-	// Create a context with 60s timeout for entire warmup
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer func() {
+		if r := recover(); r != nil {
+			monitor.Rec53Log.Warnf("Panic during NS warmup (non-fatal): %v", r)
+		}
+	}()
+
+	// Create a context with the configured duration as the hard deadline
+	ctx, cancel := context.WithTimeout(context.Background(), s.warmupCfg.Duration)
 	defer cancel()
 
-	monitor.Rec53Log.Infof("Starting NS warmup with %d TLDs...", len(s.warmupCfg.TLDs))
+	monitor.Rec53Log.Infof("Starting NS warmup with %d TLDs, concurrency: %d (CPU cores: %d)...", len(s.warmupCfg.TLDs), s.warmupCfg.Concurrency, runtime.NumCPU())
 	WarmupNSRecords(ctx, s.warmupCfg)
 	// Stats are logged inside WarmupNSRecords()
 }

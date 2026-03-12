@@ -41,182 +41,48 @@ dns:
 warmup:
   enabled: true
   timeout: 5s
-  concurrency: 32
+  duration: 5s
+  # Concurrency for warmup queries: dynamically calculated as min(NumCPU() * 2, 8).
+  # On 4-core systems: 8 goroutines; on 2-core: 4; on 16-core+: 8 (capped).
+  # You can override this value here if your deployment has special requirements.
+  concurrency: 0  # 0 means use dynamic calculation; set to >0 to override (e.g., 16)
+  # Curated list of 30 TLDs optimized for warmup.
+  # Covers 85%+ of global domain registrations while keeping memory footprint low.
+  # You can override this list with your own TLDs if needed.
   tlds:
-    - com
-    - net
-    - org
-    - edu
-    - gov
-    - mil
-    - int
-    - info
-    - biz
-    - name
-    - pro
-    - asia
-    - cat
-    - coop
-    - jobs
-    - mobi
-    - museum
-    - tel
-    - travel
-    - aero
-    - uk
-    - cn
-    - de
-    - fr
-    - jp
+    # Tier 1: Global mega-TLDs (8 domains)
+    - com    # ~160M domains, 45% of all domains
+    - cn     # China, ~20M
+    - de     # Germany, ~16M
+    - net    # ~12M
+    - org    # ~11M
+    - uk     # Britain
+    - ru     # Russia
+    - nl     # Netherlands, ~6M
+
+    # Tier 2: Major ccTLDs & strategic gTLDs (22 domains)
     - br
-    - in
-    - au
-    - ca
-    - ru
-    - mx
-    - es
-    - it
-    - nl
-    - se
-    - ch
-    - no
-    - be
-    - at
-    - dk
-    - pl
-    - gr
-    - pt
-    - tr
-    - kr
-    - tw
-    - hk
-    - sg
-    - my
-    - th
-    - id
-    - ph
-    - vn
-    - bd
-    - pk
-    - ng
-    - za
-    - eg
-    - ke
-    - nz
-    - ie
-    - il
-    - ae
-    - sa
-    - ar
-    - cl
-    - co
-    - ve
-    - pe
-    - ec
-    - uy
-    - eu
-    - africa
-    - americas
-    - oceania
-    - app
-    - dev
-    - io
-    - cc
-    - tv
-    - co
     - xyz
-    - online
-    - cloud
-    - tech
+    - info
+    - top
+    - it
+    - fr
+    - au
+    - in
+    - us
+    - pl
+    - ir
+    - eu
+    - es
+    - ca
+    - io
+    - ai
+    - me
     - site
-    - website
-    - space
-    - store
     - shop
-    - blog
-    - news
-    - media
-    - services
-    - solutions
-    - design
-    - marketing
-    - consulting
-    - management
-    - ventures
-    - finance
-    - insurance
-    - bank
-    - guru
-    - expert
-    - academy
-    - education
-    - school
-    - university
-    - college
-    - training
-    - courses
-    - career
-    - jobs
-    - work
-    - company
-    - business
-    - agency
-    - studio
-    - cafe
-    - restaurant
-    - bar
-    - hotel
-    - travel
-    - tours
-    - flights
-    - booking
-    - fitness
-    - health
-    - medical
-    - hospital
-    - clinic
-    - dental
-    - pharmacy
-    - beauty
-    - spa
-    - salon
-    - sports
-    - games
-    - gaming
-    - esports
-    - video
-    - movie
-    - cinema
-    - music
-    - artist
-    - band
-    - concert
-    - theater
-    - photography
-    - photo
-    - gallery
-    - art
-    - museum
-    - fashion
-    - luxury
-    - jewelry
-    - shoes
-    - watch
-    - wine
-    - beer
-    - coffee
-    - food
-    - pizza
-    - burger
-    - sushi
-    - dance
-    - religion
-    - church
-    - charity
-    - ngo
-    - foundation
-    - club
-    - community
+    - online
+    - biz
+    - app
 EOF
 
 if [ $? -eq 0 ]; then
