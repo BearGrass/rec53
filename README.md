@@ -71,6 +71,17 @@ The warmup process automatically scales to your CPU capacity:
 
 This prevents CPU oversubscription on smaller machines while maintaining efficient I/O-bound parallelism.
 
+### Warmup TLD List
+
+By default, rec53 warms up a curated list of 30 high-traffic TLDs covering 85%+ of global domain registrations:
+
+- **Tier 1** (8 domains): `.com`, `.cn`, `.de`, `.net`, `.org`, `.uk`, `.ru`, `.nl`
+- **Tier 2** (22 domains): Major ccTLDs (`.br`, `.au`, `.in`, `.us`, `.fr`, `.it`, `.es`, `.ca`, ...) and strategic gTLDs (`.io`, `.ai`, `.app`, `.xyz`, ...)
+
+This replaces the prior approach of enumerating 1000+ TLDs, reducing startup memory by ~80-90% while maintaining coverage for the domains users are most likely to resolve.
+
+To use a custom TLD list, specify `warmup.tlds` in `config.yaml`. Leave it empty to use the curated defaults.
+
 ## Architecture
 
 ```

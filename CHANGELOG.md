@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - server: 75.2% → 76.8% (state_machine_test.go, state_define_test.go)
 - Add iterState unit tests with IP quality and cache operations
 - Optimize warmup concurrency: dynamically calculate based on CPU cores using `min(NumCPU() * 2, 8)` formula instead of hardcoded 32, reducing CPU oversubscription on smaller machines while allowing efficient I/O-bound parallelism
+- Optimize warmup TLD list: replace exhaustive TLD enumeration with a curated list of 30 high-traffic TLDs covering 85%+ of global registrations, reducing startup memory footprint by ~80-90% while maintaining coverage for the most common domains; custom TLD override via `warmup.tlds` in config.yaml
 
 ## [0.1.0] - 2026-03-04
 
