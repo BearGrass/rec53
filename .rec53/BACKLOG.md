@@ -20,14 +20,6 @@ Use these prefixes:
 
 ## Planned
 
-### [B-012] NXDOMAIN / NODATA 响应码不传递给客户端
-Priority: High
-Description: ITER 收到 NXDOMAIN 后设置 response.Rcode，但随后 CHECK_RESP 发现 Answer 为空继续迭代 IN_GLUE，导致所有 NXDOMAIN 和 NODATA 最终以 SERVFAIL 返回客户端，与 O-005（缓存）是两个独立问题。
-Acceptance criteria:
-- [ ] ITER 收到 NXDOMAIN 时，CHECK_RESP / 状态机能识别并直接组装负响应
-- [ ] RCODE=NOERROR + 空 Answer + Authority 含 SOA 的 NODATA 场景正确返回 NOERROR+空Answer
-- [ ] E2E 测试验证 NXDOMAIN 和 NODATA 正确到达客户端
-
 ### [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试
 Priority: Medium
 Description: ITER 收到 SERVFAIL、REFUSED、FORMERR、NOTIMPL 时直接返回 ITER_COMMON_ERROR，未标记 bad server 并换其他 NS 重试，单个故障服务器即导致查询失败（doc S7 要求换 server）。
@@ -94,17 +86,18 @@ Acceptance criteria:
 根据 doc/example 中25个场景的测试覆盖分析（当前覆盖率64%），以下为补充测试开发计划。
 详细分析见：`.rec53/TEST_COVERAGE_ANALYSIS.md`
 
-### [T-002] Fix B-012: Enable NODATA/NXDOMAIN Tests
+### [T-002] Fix B-012: Enable NODATA/NXDOMAIN Tests (completed 2026-03-12)
 Priority: High
-Related issues: B-012
+Related issues: B-012 (completed)
 Description: 移除 TestAuthorityNODATA 和 TestAuthorityNXDOMAIN 上的 SKIP 标记，通过修复状态机响应分类逻辑使其通过。对应 doc/example 中的例9和例10。
 Acceptance criteria:
-- [ ] 分析 checkRespState.handle() 的响应分类逻辑
-- [ ] 修改 S9(CLASSIFY_RESPONSE) 正确识别情况C（负响应：Authority+SOA）
-- [ ] 确保 Authority+SOA 响应被路由到 S12(HANDLE_NEGATIVE) 而非 S10(HANDLE_DELEGATION)
-- [ ] 移除 TestAuthorityNODATA 和 TestAuthorityNXDOMAIN 的 SKIP 标记
-- [ ] 运行 go test ./e2e/... -v 验证两个测试通过
-- [ ] 运行完整测试套件验证无回归
+- [x] 分析 checkRespState.handle() 的响应分类逻辑
+- [x] 修改 S9(CLASSIFY_RESPONSE) 正确识别情况C（负响应：Authority+SOA）
+- [x] 确保 Authority+SOA 响应被路由到 S12(HANDLE_NEGATIVE) 而非 S10(HANDLE_DELEGATION)
+- [x] 移除 TestAuthorityNODATA 和 TestAuthorityNXDOMAIN 的 SKIP 标记
+- [x] 运行 go test ./e2e/... -v 验证两个测试通过
+- [x] 运行完整测试套件验证无回归
+Status: Completed with B-012 fix (2026-03-12)
 
 ### [T-003] Implement Negative Cache E2E Test
 Priority: High
@@ -277,6 +270,28 @@ Acceptance criteria:
 ---
 
 ## Completed
+
+### [B-012] NXDOMAIN / NODATA 响应码不传递给客户端 (completed 2026-03-12)
+Priority: High
+Description: ITER 收到 NXDOMAIN 后设置 response.Rcode，但随后 CHECK_RESP 发现 Answer 为空继续迭代 IN_GLUE，导致所有 NXDOMAIN 和 NODATA 最终以 SERVFAIL 返回客户端。需要修改状态机正确识别和缓存负响应。
+
+**Completion Summary**:
+- Added CHECK_RESP_GET_NEGATIVE state constant in server/state.go
+- Implemented extractSOAFromAuthority() and hasSOAInAuthority() helpers in server/state_define.go
+- Added DefaultNegativeCacheTTL constant (60s) with TODO for future configuration
+- Modified checkRespState.handle() to detect negative responses (NXDOMAIN and NODATA)
+- Implemented smart negative caching with SOA-based TTL (fallback to 60s)
+- Updated state_machine.go to handle CHECK_RESP_GET_NEGATIVE case
+- Enabled TestAuthorityNXDOMAIN and TestAuthorityNODATA in e2e/authority_test.go
+- All acceptance criteria met ✅
+
+Acceptance criteria:
+- [x] ITER 收到 NXDOMAIN 时，CHECK_RESP / 状态机能识别并直接组装负响应
+- [x] RCODE=NOERROR + 空 Answer + Authority 含 SOA 的 NODATA 场景正确返回 NOERROR+空Answer
+- [x] E2E 测试验证 NXDOMAIN 和 NODATA 正确到达客户端
+
+Related tasks:
+- [x] T-002: Fix B-012: Enable NODATA/NXDOMAIN Tests (completed 2026-03-12)
 
 ### [F-003] IP Pool Maintenance Algorithm Improvement (completed 2026-03-12)
 Priority: High
