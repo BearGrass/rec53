@@ -6,6 +6,16 @@
 
 ### Bug Fixes (from BACKLOG.md)
 
+- [ ] [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试
+  - [ ] [B-013/1] Modify server/state_define.go — detect SERVFAIL/REFUSED/FORMERR/NOTIMPL response codes in iterState.handle()
+  - [ ] [B-013/2] Modify server/state_define.go — add failure tracking and server-switch logic in ITER response handling
+  - [ ] [B-013/3] Modify server/state_define.go — implement retry with secondary IP for bad Rcodes
+  - [ ] [B-013/4] Update server/state_machine.go — ensure state machine handles ITER retries correctly
+  - [ ] [B-013/5] Create e2e/error_test.go or extend existing — TestServfailAndServerSwitch test
+  - [ ] [B-013/6] Run tests — verify go test ./e2e/... passes
+  - [ ] [B-013/7] Run tests — verify go test ./server/... passes
+  - [ ] [B-013/8] Run full test suite — verify go test -race ./... passes
+
 ### Feature Tasks (from BACKLOG.md)
 
 ### Technical Debt
