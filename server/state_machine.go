@@ -115,6 +115,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return stm.getResponse(), nil
 			case CHECK_RESP_GET_ANS:
 				stm = newRetRespState(stm.getRequest(), stm.getResponse())
+			case CHECK_RESP_GET_NEGATIVE:
+				// Negative response (NXDOMAIN/NODATA) - return directly to client
+				stm = newRetRespState(stm.getRequest(), stm.getResponse())
 			case CHECK_RESP_GET_CNAME:
 				// Find the CNAME record in the answer
 				var cnameTarget string

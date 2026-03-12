@@ -326,12 +326,7 @@ func TestAuthorityNSOnlyResponse(t *testing.T) {
 
 // TestAuthorityNXDOMAIN verifies that when the authoritative server returns
 // NXDOMAIN (name does not exist), the resolver returns NXDOMAIN to the client.
-//
-// SKIP: B-012 — NXDOMAIN responses currently cause the state machine to loop
-// (CHECK_RESP sees no Answer, goes to IN_GLUE) and ultimately return SERVFAIL.
 func TestAuthorityNXDOMAIN(t *testing.T) {
-	t.Skip("B-012: NXDOMAIN responses incorrectly return SERVFAIL — state machine loops on empty Answer")
-
 	hierarchy := BuildStandardHierarchy("com.", "example.com.", map[uint16][]dns.RR{
 		// Zone has some records, but not for the queried name
 		dns.TypeA: {
@@ -368,12 +363,7 @@ func TestAuthorityNXDOMAIN(t *testing.T) {
 // TestAuthorityNODATA verifies that when the authoritative server returns
 // NOERROR with an empty Answer section and a SOA in Authority (NODATA),
 // the resolver returns NOERROR with the SOA to the client.
-//
-// SKIP: B-012 — NODATA responses currently cause the state machine to loop
-// (CHECK_RESP sees no Answer, goes to IN_GLUE) and ultimately return SERVFAIL.
 func TestAuthorityNODATA(t *testing.T) {
-	t.Skip("B-012: NODATA responses incorrectly return SERVFAIL — state machine loops on empty Answer")
-
 	hierarchy := BuildStandardHierarchy("com.", "example.com.", map[uint16][]dns.RR{
 		// Zone has A records, but we will query for AAAA (which doesn't exist)
 		dns.TypeA: {
