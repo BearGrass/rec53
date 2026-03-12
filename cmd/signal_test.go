@@ -212,14 +212,17 @@ func TestSignalHandling_SIGINT(t *testing.T) {
 	}
 	defer os.Remove(binaryPath)
 
-	// Find available port
+	// Find available ports
 	port := getAvailablePort(t)
 	metricPort := getAvailablePort(t)
 
-	// Start the process
+	// Create config file
+	configPath := createTestConfigFile(t, fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf(":%d", metricPort))
+	defer os.Remove(configPath)
+
+	// Start the process with config flag
 	cmd := exec.Command(binaryPath,
-		"-listen", fmt.Sprintf("127.0.0.1:%d", port),
-		"-metric", fmt.Sprintf(":%d", metricPort),
+		"-config", configPath,
 		"-log-level", "error",
 	)
 
@@ -279,14 +282,17 @@ func TestSignalHandling_SIGTERM(t *testing.T) {
 	}
 	defer os.Remove(binaryPath)
 
-	// Find available port
+	// Find available ports
 	port := getAvailablePort(t)
 	metricPort := getAvailablePort(t)
 
-	// Start the process
+	// Create config file
+	configPath := createTestConfigFile(t, fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf(":%d", metricPort))
+	defer os.Remove(configPath)
+
+	// Start the process with config flag
 	cmd := exec.Command(binaryPath,
-		"-listen", fmt.Sprintf("127.0.0.1:%d", port),
-		"-metric", fmt.Sprintf(":%d", metricPort),
+		"-config", configPath,
 		"-log-level", "error",
 	)
 
@@ -346,14 +352,17 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 	defer os.Remove(binaryPath)
 
-	// Find available port
+	// Find available ports
 	port := getAvailablePort(t)
 	metricPort := getAvailablePort(t)
 
-	// Start the process
+	// Create config file
+	configPath := createTestConfigFile(t, fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf(":%d", metricPort))
+	defer os.Remove(configPath)
+
+	// Start the process with config flag
 	cmd := exec.Command(binaryPath,
-		"-listen", fmt.Sprintf("127.0.0.1:%d", port),
-		"-metric", fmt.Sprintf(":%d", metricPort),
+		"-config", configPath,
 		"-log-level", "error",
 	)
 
@@ -449,14 +458,17 @@ func TestLogLevelFlag(t *testing.T) {
 	}
 	defer os.Remove(binaryPath)
 
-	// Find available port
+	// Find available ports
 	port := getAvailablePort(t)
 	metricPort := getAvailablePort(t)
 
+	// Create config file
+	configPath := createTestConfigFile(t, fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf(":%d", metricPort))
+	defer os.Remove(configPath)
+
 	// Start with invalid log level (should default to info)
 	cmd := exec.Command(binaryPath,
-		"-listen", fmt.Sprintf("127.0.0.1:%d", port),
-		"-metric", fmt.Sprintf(":%d", metricPort),
+		"-config", configPath,
 		"-log-level", "invalid",
 	)
 
@@ -526,6 +538,38 @@ func isPortInUse(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+// createTestConfigFile creates a temporary YAML config file for testing
+// Returns the path to the created config file
+func createTestConfigFile(t *testing.T, listen, metric string) string {
+	// Create temp config file
+	tmpFile, err := os.CreateTemp("", "rec53_test_*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config file: %v", err)
+	}
+	defer tmpFile.Close()
+
+	configContent := fmt.Sprintf(`dns:
+  listen: "%s"
+  metric: "%s"
+  log_level: "error"
+
+warmup:
+  enabled: false
+  timeout: 5s
+  concurrency: 32
+  tlds:
+    - com
+    - org
+    - net
+`, listen, metric)
+
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	return tmpFile.Name()
 }
 
 // TestGracefulShutdownWithContext tests context-based shutdown behavior

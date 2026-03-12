@@ -8,11 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build
 go build -o rec53 ./cmd
 
-# Run (DNS on :5353, metrics on :9999)
-./rec53
+# Generate default config (required on first run)
+./generate-config.sh
 
-# Run with custom config
-./rec53 -listen 0.0.0.0:53 -metric :9099 -log-level debug
+# Run with config (DNS on :5353, metrics on :9999)
+./rec53 --config ./config.yaml
+
+# Run with warmup disabled
+./rec53 --config ./config.yaml --no-warmup
+
+# Override config settings with flags
+./rec53 --config ./config.yaml -listen 0.0.0.0:53 -metric :9099 -log-level debug
 ```
 
 ## Testing
@@ -137,6 +143,58 @@ Updated on every successful latency recording via `IPQualityV2GaugeSet()` call.
 - **Benchmarks**: BenchmarkGetBestIPsV2_1000IPs validates performance requirement
 - All tests pass with `-race` flag (no concurrency issues)
 
+### NS Warmup on Startup (O-025)
+
+**Configuration-driven approach** that pre-warms root and TLD NS records on startup for improved cache hit rate:
+
+#### Configuration (server/warmup_defaults.go)
+- `WarmupConfig` struct with Enabled, Timeout, Concurrency, TLDs fields
+- `DefaultWarmupConfig`: warmup disabled by default in NewServer() for test compatibility
+- `DefaultTLDs`: 100+ pre-configured TLDs (generic, country codes, regional, new gTLDs)
+
+#### Core Implementation (server/warmup.go)
+- `WarmupNSRecords()`: Concurrent warmup using semaphore pattern (default 32 concurrent queries)
+  - Queries root (".") + all configured TLDs
+  - Per-query 5s timeout prevents hanging
+  - Returns WarmupStats (total, succeeded, failed, duration)
+- `queryNSRecords()`: Creates synthetic NS queries processed through state machine
+  - Reuses existing cache and IP pool infrastructure
+  - Metrics automatically recorded via state machine
+
+#### Server Integration (server/server.go)
+- `NewServerWithConfig()`: Creates server with warmup config
+- `warmupNSOnStartup()`: Background goroutine launched in Run()
+  - Non-blocking: doesn't delay server startup
+  - 60s overall timeout with per-query 5s timeout
+  - Logs completion stats
+
+#### Configuration File (cmd/rec53.go)
+- `--config` flag: Required path to YAML config file (no automatic path checking)
+- `--no-warmup` flag: Disables warmup even if enabled in config
+- Command-line flags override config file values
+- Error messages guide users to `./generate-config.sh`
+
+#### Config File Generation (./generate-config.sh)
+- Shell script auto-generates `./config.yaml` with 100+ pre-configured TLDs
+- Usage: `./generate-config.sh` or `./generate-config.sh -o /path/to/config.yaml`
+- YAML structure:
+  ```yaml
+  dns:
+    listen: "127.0.0.1:5353"
+    metric: ":9999"
+    log_level: "info"
+  warmup:
+    enabled: true
+    timeout: 5s
+    concurrency: 32
+    tlds: [com, net, org, ...]
+  ```
+
+#### Testing
+- **Unit tests** (e2e/warmup_test.go): 6 tests covering basic warmup, concurrency, timeouts, cache population, statistics
+- Tests use mock DNS hierarchy or skip slow real-server queries
+- All tests complete within timeout limits
+
 ## Dependencies
 
 - `github.com/miekg/dns` - DNS protocol implementation
@@ -144,6 +202,7 @@ Updated on every successful latency recording via `IPQualityV2GaugeSet()` call.
 - `github.com/prometheus/client_golang` - Metrics export
 - `go.uber.org/zap` - Structured logging
 - `gopkg.in/natefinch/lumberjack.v2` - Log rotation
+- `gopkg.in/yaml.v2` - YAML config parsing
 
 ## Conventions
 
