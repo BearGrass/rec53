@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - monitor: 3.2% → 58.1% (metric_test.go)
   - server: 75.2% → 76.8% (state_machine_test.go, state_define_test.go)
 - Add iterState unit tests with IP quality and cache operations
+- Optimize warmup concurrency: dynamically calculate based on CPU cores using `min(NumCPU() * 2, 8)` formula instead of hardcoded 32, reducing CPU oversubscription on smaller machines while allowing efficient I/O-bound parallelism
 
 ## [0.1.0] - 2026-03-04
 
