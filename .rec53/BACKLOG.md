@@ -20,6 +20,18 @@ Use these prefixes:
 
 ## Planned
 
+### [O-024] 并发查询NS的IP（快速回源）
+Priority: Medium
+Description: 当需要解析 NS 名字到 IP 时，并发查询多个 NS（最多 5 个），使用首个成功响应，后台更新缓存。加快回源速度，提升查询延迟。
+Acceptance criteria:
+- [ ] 实现并发查询 NS IPs 的辅助函数（最多 5 个并发）
+- [ ] 首个成功响应立即返回，不阻塞查询
+- [ ] 后台 goroutine 更新剩余 NS IPs 到缓存
+- [ ] 无 goroutine 泄漏，context 正确取消
+- [ ] 默认并发数 5（TODO：后续变为可配置参数）
+- [ ] E2E 测试验证并发场景正确性
+- [ ] 性能基准测试验证无回退
+
 ## Unplanned
 
 ### [B-014] Glue 无 bailiwick 校验（安全风险）

@@ -14,6 +14,16 @@
 
 ## Completed
 
+- [x] [O-024] 并发查询NS的IP（快速回源） (completed 2026-03-12)
+  - [x] [O-024/1] Read and analyze resolveNSIPsRecursively() in server/state_define.go
+  - [x] [O-024/2] Design concurrent NS IP resolution with context cancellation
+  - [x] [O-024/3] Create resolveNSIPsConcurrently() helper function in server/state_define.go
+  - [x] [O-024/4] Implement context-based cancellation on first response
+  - [x] [O-024/5] Add background cache update logic for remaining NS IPs
+  - [x] [O-024/6] Integrate into resolveNSIPsRecursively() call site
+  - [x] [O-024/7] Add E2E test in e2e/concurrent_ns_test.go for concurrent NS resolution scenarios
+  - [x] [O-024/8] Run tests — verify go test ./e2e/... -v passes and no regressions
+
 - [x] [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试 (completed 2026-03-12)
   - [x] [B-013/1] Modify server/state_define.go — detect SERVFAIL/REFUSED/FORMERR/NOTIMPL response codes in iterState.handle()
   - [x] [B-013/2] Modify server/state_define.go — add failure tracking and server-switch logic in ITER response handling

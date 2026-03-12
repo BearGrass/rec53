@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"net"
+	"sync"
 	"time"
 
 	"rec53/monitor"
@@ -344,41 +347,154 @@ func resolveNSIPs(nsNames []string) []string {
 	return ipList
 }
 
+// nsResult holds the result of resolving a single NS name
+type nsResult struct {
+	nsName string
+	ips    []string
+}
+
 // resolveNSIPsRecursively resolves NS names using the state machine recursively.
 // This is the correct approach for a recursive resolver - we use the same
 // resolution mechanism to resolve NS names as we do for any other query.
 func resolveNSIPsRecursively(nsNames []string) []string {
-	var ipList []string
+	return resolveNSIPsConcurrently(nsNames)
+}
 
+// resolveNSIPsConcurrently resolves multiple NS names in parallel with a configurable
+// concurrency limit (default 5). Returns the first successful response immediately
+// while background goroutine updates cache for remaining IPs.
+const maxConcurrentNSQueries = 5
+
+func resolveNSIPsConcurrently(nsNames []string) []string {
+	if len(nsNames) == 0 {
+		return nil
+	}
+
+	// Use context for cancellation on first successful response
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Channel to collect successful IPs
+	resultChan := make(chan nsResult, len(nsNames))
+	var wg sync.WaitGroup
+
+	// Limit concurrency with semaphore pattern
+	semaphore := make(chan struct{}, maxConcurrentNSQueries)
+	defer close(semaphore)
+
+	// Launch goroutines for each NS name
 	for _, nsName := range nsNames {
-		// Create a new query for NS A record
-		req := new(dns.Msg)
-		req.SetQuestion(nsName, dns.TypeA)
-		req.RecursionDesired = false
-		resp := new(dns.Msg)
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
 
-		// Use the state machine to resolve the NS name recursively
-		stm := newStateInitState(req, resp)
-		result, err := Change(stm)
-		if err != nil {
-			monitor.Rec53Log.Debugf("[ITER] Failed to resolve NS %s: %v", nsName, err)
-			continue
-		}
+			// Acquire semaphore slot
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 
-		// Extract IP addresses from the result
-		for _, ans := range result.Answer {
-			if a, ok := ans.(*dns.A); ok {
-				ipList = append(ipList, a.A.String())
+			// Check if context is already cancelled (first response succeeded)
+			select {
+			case <-ctx.Done():
+				monitor.Rec53Log.Debugf("[ITER] Concurrent NS resolution cancelled for %s (first response already received)", name)
+				return
+			default:
 			}
-		}
 
-		if len(ipList) > 0 {
-			monitor.Rec53Log.Debugf("[ITER] Resolved NS %s to IPs: %v", nsName, ipList)
-			break // Only need one NS IP to continue iteration, avoid unnecessary recursion
+			// Create a new query for NS A record
+			req := new(dns.Msg)
+			req.SetQuestion(name, dns.TypeA)
+			req.RecursionDesired = false
+			resp := new(dns.Msg)
+
+			// Use the state machine to resolve the NS name
+			stm := newStateInitState(req, resp)
+			result, err := Change(stm)
+			if err != nil {
+				monitor.Rec53Log.Debugf("[ITER] Failed to resolve NS %s: %v", name, err)
+				return
+			}
+
+			// Extract IP addresses from the result
+			var ips []string
+			for _, ans := range result.Answer {
+				if a, ok := ans.(*dns.A); ok {
+					ips = append(ips, a.A.String())
+				}
+			}
+
+			if len(ips) > 0 {
+				monitor.Rec53Log.Debugf("[ITER] Resolved NS %s to IPs: %v", name, ips)
+				// Send result (non-blocking)
+				select {
+				case resultChan <- nsResult{nsName: name, ips: ips}:
+				case <-ctx.Done():
+					// Context cancelled, don't block
+					return
+				}
+			}
+		}(nsName)
+	}
+
+	// Goroutine to close result channel after all workers finish
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results: return first successful response, background-update cache for rest
+	var firstIPs []string
+	var bgResults []nsResult
+
+	for result := range resultChan {
+		if firstIPs == nil {
+			// First successful response
+			firstIPs = result.ips
+			monitor.Rec53Log.Debugf("[ITER] First NS resolved: %s -> %v", result.nsName, firstIPs)
+			cancel() // Cancel remaining goroutines
+
+			// Collect remaining results for background cache update
+			go func() {
+				for r := range resultChan {
+					bgResults = append(bgResults, r)
+				}
+				// Background cache update
+				updateNSIPsCache(bgResults)
+			}()
 		}
 	}
 
-	return ipList
+	// Wait for remaining channel processing
+	wg.Wait()
+
+	return firstIPs
+}
+
+// updateNSIPsCache is a helper function that caches resolved NS IPs in the background.
+// Called after first response is returned to avoid blocking the main query path.
+func updateNSIPsCache(results []nsResult) {
+	for _, result := range results {
+		// Create cache entry for this NS
+		cacheMsg := new(dns.Msg)
+		cacheMsg.SetQuestion(result.nsName, dns.TypeA)
+		cacheMsg.Response = true
+
+		// Add A records to Answer section
+		for _, ip := range result.ips {
+			a := new(dns.A)
+			a.Hdr = dns.RR_Header{
+				Name:   result.nsName,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+				Ttl:    300, // Standard 5-minute TTL for NS IPs
+			}
+			a.A = net.ParseIP(ip)
+			cacheMsg.Answer = append(cacheMsg.Answer, a)
+		}
+
+		// Store in cache with 5-minute TTL
+		setCacheCopyByType(result.nsName, dns.TypeA, cacheMsg, 300)
+		monitor.Rec53Log.Debugf("[ITER] Updated NS IP cache for %s: %v", result.nsName, result.ips)
+	}
 }
 
 func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
