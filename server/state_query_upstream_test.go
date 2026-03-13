@@ -2065,3 +2065,137 @@ func TestQueryHappyEyeballs_SecondWinsWhenFirstSlow(t *testing.T) {
 		t.Error("expected IPQualityV2 entry for 127.0.0.2 after failure")
 	}
 }
+
+// TestQueryUpstreamState_GluelessNSCached verifies that QUERY_UPSTREAM caches a
+// glueless NS referral (Ns non-empty, Extra empty) so that LOOKUP_NS_CACHE can
+// hit it on subsequent queries and avoid re-delegating from root.
+func TestQueryUpstreamState_GluelessNSCached(t *testing.T) {
+	FlushCacheForTest()
+	ResetIPPoolForTest()
+	defer func() { FlushCacheForTest(); ResetIPPoolForTest() }()
+
+	nsZone := "glueless.example."
+	nsName := "ns1.glueless.example."
+
+	// Mock upstream that returns a glueless NS referral (Ns present, Extra absent).
+	started := make(chan struct{})
+	srv := &dns.Server{
+		Addr: "127.0.0.1:0",
+		Net:  "udp",
+		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+			resp := new(dns.Msg)
+			resp.SetReply(r)
+			resp.Authoritative = false
+			resp.RecursionAvailable = false
+			resp.Ns = []dns.RR{
+				&dns.NS{
+					Hdr: dns.RR_Header{
+						Name:   nsZone,
+						Rrtype: dns.TypeNS,
+						Class:  dns.ClassINET,
+						Ttl:    3600,
+					},
+					Ns: nsName,
+				},
+			}
+			// No Extra / glue records — this is the glueless case.
+			w.WriteMsg(resp) //nolint:errcheck
+		}),
+		NotifyStartedFunc: func() { close(started) },
+	}
+	go func() { srv.ListenAndServe() }() //nolint:errcheck
+	<-started
+	t.Cleanup(func() { srv.Shutdown() })
+	_, port, _ := net.SplitHostPort(srv.PacketConn.LocalAddr().String())
+	SetIterPort(port)
+	defer ResetIterPort()
+
+	req, resp := makeQueryUpstreamReq("www.glueless.example.", "127.0.0.1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	state := newQueryUpstreamState(req, resp, ctx)
+	// We don't assert the return code because NS resolution may fail in test env;
+	// what matters is that the glueless NS entry was written to cache.
+	state.handle(req, resp) //nolint:errcheck
+
+	// The glueless NS referral must be in cache under its zone name.
+	cached, ok := getCacheCopy(nsZone)
+	if !ok {
+		t.Fatalf("expected glueless NS referral for zone %q to be cached, but got none", nsZone)
+	}
+	if len(cached.Ns) == 0 {
+		t.Fatalf("cached entry for %q has no Ns records", nsZone)
+	}
+	nsRR, ok := cached.Ns[0].(*dns.NS)
+	if !ok {
+		t.Fatalf("expected *dns.NS record in cached Ns, got %T", cached.Ns[0])
+	}
+	if nsRR.Ns != nsName {
+		t.Errorf("cached NS name: got %q, want %q", nsRR.Ns, nsName)
+	}
+}
+
+// TestQueryUpstreamState_SOANotCachedAsNS verifies that a NODATA/NXDOMAIN response
+// with a SOA in the Ns section is NOT cached under the zone name as if it were
+// a delegation, which would otherwise poison LOOKUP_NS_CACHE lookups.
+func TestQueryUpstreamState_SOANotCachedAsNS(t *testing.T) {
+	FlushCacheForTest()
+	ResetIPPoolForTest()
+	defer func() { FlushCacheForTest(); ResetIPPoolForTest() }()
+
+	soaZone := "soa-nodata.example."
+
+	// Mock upstream returns a NODATA response: SOA in Ns, empty Answer and Extra.
+	started := make(chan struct{})
+	srv := &dns.Server{
+		Addr: "127.0.0.1:0",
+		Net:  "udp",
+		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+			resp := new(dns.Msg)
+			resp.SetReply(r)
+			resp.Authoritative = true
+			resp.Rcode = dns.RcodeSuccess
+			resp.Ns = []dns.RR{
+				&dns.SOA{
+					Hdr: dns.RR_Header{
+						Name:   soaZone,
+						Rrtype: dns.TypeSOA,
+						Class:  dns.ClassINET,
+						Ttl:    300,
+					},
+					Ns:      "ns1.soa-nodata.example.",
+					Mbox:    "hostmaster.soa-nodata.example.",
+					Serial:  1,
+					Refresh: 3600,
+					Retry:   900,
+					Expire:  604800,
+					Minttl:  300,
+				},
+			}
+			w.WriteMsg(resp) //nolint:errcheck
+		}),
+		NotifyStartedFunc: func() { close(started) },
+	}
+	go func() { srv.ListenAndServe() }() //nolint:errcheck
+	<-started
+	t.Cleanup(func() { srv.Shutdown() })
+	_, port, _ := net.SplitHostPort(srv.PacketConn.LocalAddr().String())
+	SetIterPort(port)
+	defer ResetIterPort()
+
+	req, resp := makeQueryUpstreamReq("www.soa-nodata.example.", "127.0.0.1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	state := newQueryUpstreamState(req, resp, ctx)
+	state.handle(req, resp) //nolint:errcheck
+
+	// The SOA-containing response must NOT be cached under the zone name.
+	_, ok := getCacheCopy(soaZone)
+	if ok {
+		t.Errorf("SOA NODATA response must not be cached under zone name %q, but was", soaZone)
+	}
+}

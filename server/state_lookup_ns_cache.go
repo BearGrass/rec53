@@ -37,10 +37,17 @@ func (s *lookupNSCacheState) handle(request *dns.Msg, response *dns.Msg) (int, e
 		// Use getCacheCopy to avoid modifying cached message
 		if msgInCache, ok := getCacheCopy(zone); ok {
 			monitor.Rec53Log.Debug("get cache: ", zone, " in lookupNSCacheState")
-			if len(msgInCache.Ns) != 0 && len(msgInCache.Extra) != 0 {
-				s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
-				s.response.Extra = append(s.response.Extra, msgInCache.Extra...)
-				return LOOKUP_NS_CACHE_HIT, nil
+			// Accept both glued (Ns + Extra) and glueless (Ns only, no Extra) NS referrals.
+			// Only hit when the Ns section contains actual NS delegation records; other
+			// types (e.g. SOA from NODATA responses) must be ignored to avoid poisoning
+			// the delegation lookup with non-delegation data.
+			// EXTRACT_GLUE + QUERY_UPSTREAM will handle NS IP resolution when Extra is absent.
+			if len(msgInCache.Ns) != 0 {
+				if _, isNS := msgInCache.Ns[0].(*dns.NS); isNS {
+					s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
+					s.response.Extra = append(s.response.Extra, msgInCache.Extra...)
+					return LOOKUP_NS_CACHE_HIT, nil
+				}
 			}
 		}
 	}

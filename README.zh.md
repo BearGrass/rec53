@@ -92,17 +92,19 @@ warmup:
 
 ### 首包解析延迟（真实网络，3 次均值）
 
-以下三个场景展示了从最差到最优的解析路径。
-数据反映了 **Happy Eyeballs** 优化（双上游并发竞速）和 **1.5 s 上游超时**（从 5 s 降低）的效果：
+以下四个场景展示了从最差到最优的解析路径：
 
-| 域名 | 冷启动（无 warmup） | 首包（warmup 后） | 缓存命中 |
-|------|-------------------|-----------------|---------|
-| `www.qq.com` | ~826 ms | ~717 ms | ~0.12 ms |
-| `www.baidu.com` | ~423 ms | ~488 ms | ~0.10 ms |
-| `www.taobao.com` | ~563 ms | ~610 ms | ~0.06 ms |
+| 域名 | 冷启动 | 仅 IPPool† | 完整 warmup | 缓存命中 |
+|------|-------|-----------|------------|---------|
+| `www.qq.com` | ~818 ms | ~663 ms | ~324 ms | ~0.05 ms |
+| `www.baidu.com` | ~651 ms | ~465 ms | ~189 ms | ~0.06 ms |
+| `www.taobao.com` | ~602 ms | ~680 ms | ~429 ms | ~0.15 ms |
 
-- **冷启动** — IP 池为空，解析器对所有 NS 无任何延迟先验数据，是绝对最差情况。`www.qq.com` 冷启动延迟从上个版本的 ~2,500 ms 降至 ~826 ms，主要得益于 Happy Eyeballs 双路并发机制。
-- **warmup 后首包** — 默认 warmup 为 `.com` 顶级域 NS 预填充 RTT 数据，使 NS 选择更精准。
+† 仅 IPPool：warmup 完成后 zone 缓存已被清空——此状态在生产中不存在，仅用于量化 IPPool 单独的贡献。
+
+- **冷启动** — IP 池为空，zone 缓存为空，解析器对所有 NS 无任何延迟先验数据，是绝对最差情况。
+- **仅 IPPool†** — IP 池包含 warmup 实测的 RTT 数据，NS 选择更精准，但 zone 缓存为空，仍需从根服务器开始查询。此状态为人工构造（warmup 必然同时填充 zone 缓存），仅用于隔离 IPPool 的单独贡献。
+- **完整 warmup** — IP 池预热 AND zone 缓存含有 TLD 级 NS 信息（`.com`、`.net` 等）。这是生产稳态：服务器已完成 warmup，TLD 缓存已热，但目标域名本身从未被查询过。
 - **缓存命中** — 已解析过的域名从内存直接返回，延迟降至 **< 0.2 ms**，比迭代解析快 1,000–10,000 倍。
 
 ### 缓存容量估算（每条约 450 字节，单 A record）
@@ -148,10 +150,10 @@ REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
     go test -v -run='^$' -bench='BenchmarkFirstPacket' \
     -benchtime=5x -timeout=300s ./e2e/...
 
-# 一次性输出三场景对比表（冷启动 / warmup 后 / 缓存命中）
+# 一次性输出四场景对比表（冷启动 / 仅 IPPool / 完整 warmup / 缓存命中）
 REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
     go test -v -run='^$' -bench=BenchmarkFirstPacketComparison \
-    -benchtime=1x -timeout=120s ./e2e/...
+    -benchtime=1x -timeout=180s ./e2e/...
 ```
 
 `REC53_BENCH_DOMAINS` 接受逗号分隔的域名列表，结尾的 `.` 会自动添加，域名间用逗号分隔，不加空格。

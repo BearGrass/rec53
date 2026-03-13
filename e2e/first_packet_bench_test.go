@@ -1,14 +1,20 @@
 package e2e
 
 // BenchmarkFirstPacket measures real-world first-packet DNS resolution latency
-// for popular Chinese domains under three scenarios:
+// for popular Chinese domains under four scenarios:
 //
-//  1. NoWarmup  — cold start: IP pool is empty, no prior latency data for any NS.
-//  2. WithWarmup — IP pool is pre-seeded with .com TLD nameserver latencies via the
-//     default warmup process; only the domain-level cache is flushed so that each
-//     query still requires a full iterative resolution but benefits from informed NS
-//     selection.
-//  3. CacheHit  — the domain was already resolved on a prior query; the result is
+//  1. NoWarmup    — cold start: IP pool is empty, no prior latency data for any NS,
+//     zone cache is empty. Worst-case first-packet scenario.
+//  2. IPPoolOnly  — IP pool is pre-seeded with .com TLD nameserver latencies via the
+//     default warmup process, but zone cache is flushed after warmup so each query
+//     still requires root → TLD traversal. NOTE: this state does not exist in
+//     production (warmup always populates zone cache); it isolates the contribution
+//     of IP pool data to NS selection.
+//  3. WithWarmup  — IP pool is pre-seeded AND zone cache is retained from warmup,
+//     reflecting the typical steady-state first-packet scenario in production: the
+//     server has been running long enough for warmup to finish but the queried domain
+//     has not been seen before.
+//  4. CacheHit    — the domain was already resolved on a prior query; the result is
 //     served entirely from the in-memory cache (baseline comparison).
 //
 // # Default domain list
@@ -157,13 +163,16 @@ func BenchmarkFirstPacketNoWarmup(b *testing.B) {
 }
 
 // BenchmarkFirstPacketWithWarmup measures iterative resolution latency after
-// the default warmup has completed. The IP pool contains real RTT measurements
-// for .com TLD nameservers so NS selection is informed, but the domain cache is
-// flushed before each query so a full iterative lookup is still performed.
+// the default warmup has completed with zone cache retained. Each iteration:
+//  1. Flushes all caches and resets the IP pool (clean slate).
+//  2. Runs the server with warmup enabled and waits for warmup to finish.
+//     Warmup populates IP pool latency data AND fills TLD-level zone cache
+//     (.com, .net, etc.) as a side effect.
+//  3. Measures the first query for the target domain (not queried during warmup).
 //
-// This represents the typical steady-state first-packet scenario in production:
-// the server has been running long enough for warmup to finish but the queried
-// domain has not been seen before.
+// This matches the production steady-state first-packet scenario: zone cache
+// is warm at the TLD level, IP pool contains real RTT data, but the specific
+// domain has never been queried before.
 func BenchmarkFirstPacketWithWarmup(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
@@ -177,7 +186,66 @@ func BenchmarkFirstPacketWithWarmup(b *testing.B) {
 			var totalRTT time.Duration
 
 			for i := 0; i < b.N; i++ {
-				// Reset IP pool so warmup effect is measured fresh each iteration.
+				// Full clean slate: flush caches and reset IP pool so each iteration
+				// starts identically. Warmup will re-populate TLD zone cache and IP pool.
+				server.FlushCacheForTest()
+				server.ResetIPPoolForTest()
+
+				warmupCfg := server.DefaultWarmupConfig // Enabled=true
+				s := server.NewServerWithConfig("127.0.0.1:0", warmupCfg)
+				s.Run()
+
+				// Warmup runs as a background goroutine bounded by Duration (5 s).
+				// Wait Duration + 2 s to ensure it has finished before measuring.
+				// After this point: IP pool has real latency data, TLD zone cache is warm,
+				// but the target domain itself has not been queried.
+				time.Sleep(warmupCfg.Duration + 2*time.Second)
+
+				addr := s.UDPAddr()
+
+				b.ResetTimer()
+				rtt := fpQueryOnce(b, client, addr, domain)
+				b.StopTimer()
+
+				totalRTT += rtt
+
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				s.Shutdown(shutdownCtx) //nolint:errcheck
+				cancel()
+			}
+
+			b.ReportMetric(msPerQuery(totalRTT, b.N), "ms/query")
+			b.ReportMetric(0, "ns/op")
+		})
+	}
+}
+
+// BenchmarkFirstPacketIPPoolOnly measures iterative resolution latency after
+// the default warmup has completed, but with zone cache flushed immediately
+// after warmup. The IP pool contains real RTT measurements for nameservers so
+// NS selection is informed, yet every query must re-traverse root → TLD → domain.
+//
+// NOTE: This state does not exist in production. Warmup always populates zone
+// cache as a side effect; this benchmark exists solely to isolate the
+// contribution of IP pool latency data to NS selection performance. The
+// difference between IPPoolOnly and NoWarmup reflects IP pool benefit alone;
+// the difference between WithWarmup and IPPoolOnly reflects zone cache benefit.
+func BenchmarkFirstPacketIPPoolOnly(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping network benchmark in short mode")
+	}
+
+	client := newFirstPacketClient()
+
+	for _, domain := range firstPacketDomains() {
+		domain := domain
+		b.Run(domain, func(b *testing.B) {
+			var totalRTT time.Duration
+
+			for i := 0; i < b.N; i++ {
+				// Full clean slate: flush caches and reset IP pool so each iteration
+				// starts identically.
+				server.FlushCacheForTest()
 				server.ResetIPPoolForTest()
 
 				warmupCfg := server.DefaultWarmupConfig // Enabled=true
@@ -188,7 +256,8 @@ func BenchmarkFirstPacketWithWarmup(b *testing.B) {
 				// Wait Duration + 2 s to ensure it has finished before measuring.
 				time.Sleep(warmupCfg.Duration + 2*time.Second)
 
-				// Flush only domain cache; retain IP pool data built by warmup.
+				// Flush zone cache to isolate IP pool contribution.
+				// This creates an artificial state not seen in production.
 				server.FlushCacheForTest()
 
 				addr := s.UDPAddr()
@@ -259,12 +328,12 @@ func BenchmarkFirstPacketCacheHit(b *testing.B) {
 	}
 }
 
-// BenchmarkFirstPacketComparison runs all three scenarios sequentially for
+// BenchmarkFirstPacketComparison runs all four scenarios sequentially for
 // each domain and emits a human-readable comparison table via b.Log.
 // Intended for quick one-shot reporting on a specific machine.
 //
 //	go test -v -run='^$' -bench=BenchmarkFirstPacketComparison \
-//	    -benchtime=1x -timeout=120s ./e2e/...
+//	    -benchtime=1x -timeout=180s ./e2e/...
 func BenchmarkFirstPacketComparison(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
@@ -276,9 +345,9 @@ func BenchmarkFirstPacketComparison(b *testing.B) {
 	client := newFirstPacketClient()
 
 	domains := firstPacketDomains()
-	results := make([]string, 0, len(domains)*3+1)
-	results = append(results, fmt.Sprintf("\n%-30s  %-20s  %-20s  %-20s",
-		"domain", "cold (no warmup)", "first-pkt (warmup)", "cache hit"))
+	results := make([]string, 0, len(domains)*4+1)
+	results = append(results, fmt.Sprintf("\n%-30s  %-22s  %-22s  %-22s  %-20s",
+		"domain", "cold (no warmup)", "ippool-only", "first-pkt (warmup)", "cache hit"))
 
 	for _, domain := range domains {
 		// Scenario 1: cold start
@@ -293,36 +362,53 @@ func BenchmarkFirstPacketComparison(b *testing.B) {
 			s1.Shutdown(ctx) //nolint:errcheck
 		}()
 
-		// Scenario 2: after warmup
+		// Scenario 2: IPPoolOnly — warmup completes, then zone cache is flushed.
+		// This isolates the IP pool contribution and does NOT reflect production state.
 		server.ResetIPPoolForTest()
 		warmupCfg := server.DefaultWarmupConfig
 		s2 := server.NewServerWithConfig("127.0.0.1:0", warmupCfg)
 		s2.Run()
 		time.Sleep(warmupCfg.Duration + 2*time.Second)
-		server.FlushCacheForTest()
-		withWarmup := fpQueryOnce(b, client, s2.UDPAddr(), domain)
+		server.FlushCacheForTest() // flush zone cache to isolate IP pool
+		ipPoolOnly := fpQueryOnce(b, client, s2.UDPAddr(), domain)
 		func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			s2.Shutdown(ctx) //nolint:errcheck
 		}()
 
-		// Scenario 3: cache hit (reuse s2 state — IP pool still warm, prime cache)
+		// Scenario 3: WithWarmup — clean start, warmup completes, zone cache retained.
+		// This reflects production steady-state first-packet latency.
 		server.FlushCacheForTest()
 		server.ResetIPPoolForTest()
-		s3 := server.NewServerWithConfig("127.0.0.1:0", noWarmup)
+		s3 := server.NewServerWithConfig("127.0.0.1:0", warmupCfg)
 		s3.Run()
-		fpQueryOnce(b, client, s3.UDPAddr(), domain) // prime
-		cacheHit := fpQueryOnce(b, client, s3.UDPAddr(), domain)
+		time.Sleep(warmupCfg.Duration + 2*time.Second)
+		// Do NOT flush zone cache: warmup-populated TLD entries remain, mirroring production.
+		withWarmup := fpQueryOnce(b, client, s3.UDPAddr(), domain)
 		func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			s3.Shutdown(ctx) //nolint:errcheck
 		}()
 
-		results = append(results, fmt.Sprintf("%-30s  %-20s  %-20s  %-20s",
+		// Scenario 4: cache hit
+		server.FlushCacheForTest()
+		server.ResetIPPoolForTest()
+		s4 := server.NewServerWithConfig("127.0.0.1:0", noWarmup)
+		s4.Run()
+		fpQueryOnce(b, client, s4.UDPAddr(), domain) // prime
+		cacheHit := fpQueryOnce(b, client, s4.UDPAddr(), domain)
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s4.Shutdown(ctx) //nolint:errcheck
+		}()
+
+		results = append(results, fmt.Sprintf("%-30s  %-22s  %-22s  %-22s  %-20s",
 			domain,
 			cold.Round(time.Millisecond).String(),
+			ipPoolOnly.Round(time.Millisecond).String(),
 			withWarmup.Round(time.Millisecond).String(),
 			cacheHit.Round(time.Microsecond).String(),
 		))
