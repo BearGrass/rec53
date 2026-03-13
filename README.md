@@ -93,22 +93,29 @@ To use a custom list, specify `warmup.tlds`. Leave empty for the curated default
 
 ### First-Packet Resolution Latency (real network, 3-run average)
 
-The three scenarios below show the progression from worst-case to best-case.
+The four scenarios below show the progression from worst-case to best-case.
 Results reflect the **Happy Eyeballs** optimization (concurrent dual-upstream
-queries) and the **1.5 s upstream timeout** (down from 5 s):
+queries) and the **glueless NS delegation caching**:
 
-| Domain | Cold start (no warmup) | First packet (after warmup) | Cache hit |
-|--------|----------------------|----------------------------|-----------|
-| `www.qq.com` | ~826 ms | ~717 ms | ~0.12 ms |
-| `www.baidu.com` | ~423 ms | ~488 ms | ~0.10 ms |
-| `www.taobao.com` | ~563 ms | ~610 ms | ~0.06 ms |
+| Domain | Cold start | IPPool only† | Full warmup | Cache hit |
+|--------|-----------|-------------|-------------|-----------|
+| `www.qq.com` | ~818 ms | ~663 ms | ~324 ms | ~0.05 ms |
+| `www.baidu.com` | ~651 ms | ~465 ms | ~189 ms | ~0.06 ms |
+| `www.taobao.com` | ~602 ms | ~680 ms | ~429 ms | ~0.15 ms |
 
-- **Cold start** — IP pool is empty; the resolver has no prior RTT measurements for
-  any nameserver. This is the absolute worst case. Cold-start latency for
-  `www.qq.com` has dropped from ~2,500 ms to ~826 ms compared to the previous
-  release, primarily due to the Happy Eyeballs dual-upstream race.
-- **After warmup** — The default warmup pre-seeds the IP pool with RTT data for
-  `.com` TLD nameservers, enabling better NS selection.
+† IPPool only: IP pool pre-seeded by warmup but zone cache flushed — this state
+does not exist in production; included to isolate IP pool vs zone cache contributions.
+
+- **Cold start** — IP pool is empty and zone cache is empty; the resolver has no
+  prior RTT measurements or TLD NS information. This is the absolute worst case.
+- **IPPool only†** — IP pool contains real RTT data from warmup, enabling better
+  NS selection, but zone cache is empty so root → TLD traversal still required.
+  This state is artificial (warmup always fills zone cache) and exists only to
+  isolate the IP pool contribution.
+- **Full warmup** — IP pool is pre-seeded AND zone cache contains TLD-level NS
+  information (`.com`, `.net`, etc.) from warmup. This is the production
+  steady-state: the server has been running long enough for warmup to complete,
+  but the specific domain has not been queried before.
 - **Cache hit** — A previously resolved domain is served entirely from memory.
   Latency drops to **< 0.2 ms**, a 1,000–10,000× improvement over iterative resolution.
 
@@ -157,10 +164,10 @@ REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
     go test -v -run='^$' -bench='BenchmarkFirstPacket' \
     -benchtime=5x -timeout=300s ./e2e/...
 
-# Quick one-shot comparison table (cold / warmup / cache-hit side by side)
+# Quick one-shot comparison table (all four scenarios side by side)
 REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
     go test -v -run='^$' -bench=BenchmarkFirstPacketComparison \
-    -benchtime=1x -timeout=120s ./e2e/...
+    -benchtime=1x -timeout=180s ./e2e/...
 ```
 
 `REC53_BENCH_DOMAINS` accepts a comma-separated list of hostnames. The trailing

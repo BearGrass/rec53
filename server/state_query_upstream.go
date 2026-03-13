@@ -569,10 +569,17 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 		setCacheCopyByType(q.Name, q.Qtype, newResponse, newResponse.Answer[0].Header().Ttl)
 		monitor.Rec53Log.Debug("set cache: ", q.Name, " type:", dns.TypeToString[q.Qtype], " ttl:", newResponse.Answer[0].Header().Ttl)
 	}
-	if len(newResponse.Ns) != 0 && len(newResponse.Extra) != 0 {
-		// Use setCacheCopy to store a copy of the message
-		setCacheCopy(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
-		monitor.Rec53Log.Debug("set cache: ", newResponse.Ns[0].Header().Name, newResponse.Ns[0].Header().Ttl)
+	if len(newResponse.Ns) != 0 {
+		// Only cache when the Ns section contains actual NS delegation records.
+		// Other record types (e.g. SOA in NODATA/NXDOMAIN responses) must not be
+		// cached under the zone name, as they would poison LOOKUP_NS_CACHE lookups
+		// with non-delegation data.
+		// Cache both glued (Extra present) and glueless (Extra absent) NS referrals so
+		// LOOKUP_NS_CACHE can hit them on subsequent queries without re-delegating from root.
+		if _, isNS := newResponse.Ns[0].(*dns.NS); isNS {
+			setCacheCopy(newResponse.Ns[0].Header().Name, newResponse, newResponse.Ns[0].Header().Ttl)
+			monitor.Rec53Log.Debug("set cache: ", newResponse.Ns[0].Header().Name, newResponse.Ns[0].Header().Ttl)
+		}
 	}
 	s.response.Answer = append(s.response.Answer, newResponse.Answer...)
 	s.response.Ns = newResponse.Ns
