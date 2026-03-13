@@ -1,5 +1,7 @@
 # rec53
 
+English | [中文](README.zh.md)
+
 A recursive DNS resolver implemented in Go with state machine architecture, IP quality tracking, and Prometheus metrics.
 
 ## Features
@@ -185,7 +187,7 @@ type stateMachine interface {
 
 ### Transition Diagram
 
-三条循环路径贯穿整个状态机：
+Three loop paths run through the state machine:
 
 ```
                       ┌─────────────────────────────────────────────────┐
@@ -232,20 +234,18 @@ type stateMachine interface {
            │ error → SERVFAIL (terminal)
 ```
 
-**Loop A — 迭代下钻**（主循环，最多 50 次迭代）
+**Loop A — iterative delegation** (main loop, up to 50 iterations)
 
-每次 QUERY_UPSTREAM 从上游权威服务器拿到 NS referral（有 Ns + Extra，但没有 Answer），
-CLASSIFY_RESP 识别为 NS referral 并转到 EXTRACT_GLUE，循环继续，直到某一层服务器返回最终答案。
+Each time `QUERY_UPSTREAM` receives an NS referral from an upstream authoritative server (Ns + Extra present, no Answer), `CLASSIFY_RESP` recognises it as an NS referral and transitions to `EXTRACT_GLUE`. The loop continues until a server at some level returns a final answer.
 
 ```
 EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP →(NS referral)→ EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP → …
    (root)         (root)           (TLD NS)         (TLD)           (TLD)         (auth)             (answer!)
 ```
 
-**Loop B — CNAME 链追踪**（每个 CNAME target 触发一次完整解析）
+**Loop B — CNAME chain tracking** (each CNAME target triggers a full resolution pass)
 
-CLASSIFY_RESP 发现 CNAME 时，把 CNAME record 追加到 `cnameChain`，修改 Question 为 target，
-转回 CACHE_LOOKUP 重新走完整解析流程，直到拿到非 CNAME 记录。
+When `CLASSIFY_RESP` detects a CNAME, it appends the CNAME record to `cnameChain`, updates the Question to the target, and transitions back to `CACHE_LOOKUP` to re-run the full resolution pipeline until a non-CNAME record is obtained.
 
 ```
 CLASSIFY_RESP →(CNAME a→b)→ CACHE_LOOKUP →(miss)→ EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP
@@ -253,10 +253,9 @@ CLASSIFY_RESP →(CNAME a→b)→ CACHE_LOOKUP →(miss)→ EXTRACT_GLUE → QUE
                →(answer c)→  RETURN_RESP  (prepend cnameChain: [a→b, b→c] + answer)
 ```
 
-**LOOKUP_NS_CACHE 回退路径**（Loop A 的分支，非独立循环）
+**`LOOKUP_NS_CACHE` fallback path** (branch of Loop A, not an independent loop)
 
-EXTRACT_GLUE 发现无 glue 记录时，LOOKUP_NS_CACHE 从缓存中查找父级 zone 的 NS+glue，
-或退回 root servers。cache hit / miss 均进入 QUERY_UPSTREAM 继续 Loop A。
+When `EXTRACT_GLUE` finds no glue records, `LOOKUP_NS_CACHE` looks up the parent zone's NS + glue in cache, or falls back to root servers. Both cache hit and miss proceed to `QUERY_UPSTREAM` to continue Loop A.
 
 ```
 EXTRACT_GLUE →(no glue)→ LOOKUP_NS_CACHE →(hit: cached zone)→ QUERY_UPSTREAM
