@@ -238,6 +238,52 @@ func TestIPPoolUpIPsQuality(t *testing.T) {
 	}
 }
 
+// TestIPPoolUpIPsQuality_NilIPQuality verifies that UpIPsQuality initialises a
+// new IPQuality entry when the IP is not yet in the pool.
+func TestIPPoolUpIPsQuality_NilIPQuality(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	ip := "10.0.0.7"
+	// IP is not in the pool yet → GetIPQuality returns nil → UpIPsQuality
+	// must create and store a new entry without panicking.
+	ipp.UpIPsQuality([]string{ip})
+
+	ipq := ipp.GetIPQuality(ip)
+	if ipq == nil {
+		t.Fatal("expected IPQuality to be created for new IP")
+	}
+	if !ipq.IsInit() {
+		t.Error("expected newly-created IPQuality to have IsInit() == true")
+	}
+}
+
+// TestIPPoolUpIPsQuality_NotInitSkipped verifies that UpIPsQuality skips IPs
+// whose quality has been updated via SetLatencyAndState (IsInit() == false).
+func TestIPPoolUpIPsQuality_NotInitSkipped(t *testing.T) {
+	ipp := NewIPPool()
+	defer ipp.Shutdown(context.Background())
+
+	ip := "10.0.0.5"
+	ipq := NewIPQuality()
+	// Drive IsInit() to false by recording an actual latency measurement.
+	ipq.SetLatencyAndState(50)
+	if ipq.IsInit() {
+		t.Fatal("precondition: expected IsInit() == false after SetLatencyAndState")
+	}
+	ipp.SetIPQuality(ip, ipq)
+
+	latencyBefore := ipq.GetLatency()
+	ipp.UpIPsQuality([]string{ip})
+	latencyAfter := ipq.GetLatency()
+
+	// The !ipq.IsInit() continue branch was hit; latency must be unchanged.
+	if latencyAfter != latencyBefore {
+		t.Errorf("latency changed from %d to %d; expected continue branch to skip the IP",
+			latencyBefore, latencyAfter)
+	}
+}
+
 func TestIPPoolShutdown(t *testing.T) {
 	ipp := NewIPPool()
 
