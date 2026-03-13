@@ -47,14 +47,16 @@ func NewMockAuthorityServer(t *testing.T, zone *Zone) *MockAuthorityServer {
 		Handler: dns.HandlerFunc(m.handleDNS),
 	}
 
+	started := make(chan struct{})
+	m.server.NotifyStartedFunc = func() { close(started) }
 	go func() {
 		if err := m.server.ListenAndServe(); err != nil {
 			t.Logf("mock server stopped: %v", err)
 		}
 	}()
 
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to bind the socket (happens-before guarantee)
+	<-started
 
 	// Get actual address
 	if m.server.PacketConn != nil {
@@ -354,6 +356,8 @@ func NewTestResolver(handler dns.Handler) (*TestResolver, error) {
 	}
 
 	errChan := make(chan error, 1)
+	started := make(chan struct{})
+	tr.server.NotifyStartedFunc = func() { close(started) }
 	go func() {
 		if err := tr.server.ListenAndServe(); err != nil {
 			select {
@@ -363,8 +367,8 @@ func NewTestResolver(handler dns.Handler) (*TestResolver, error) {
 		}
 	}()
 
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to bind the socket (happens-before guarantee)
+	<-started
 
 	if tr.server.PacketConn != nil {
 		tr.addr = tr.server.PacketConn.LocalAddr().String()
@@ -482,14 +486,16 @@ func NewMultiZoneMockServer(t *testing.T, zones []*MockZone) *MultiZoneMockServe
 		Handler: dns.HandlerFunc(m.handleDNS),
 	}
 
+	started := make(chan struct{})
+	m.server.NotifyStartedFunc = func() { close(started) }
 	go func() {
 		if err := m.server.ListenAndServe(); err != nil {
 			t.Logf("multi-zone mock server stopped: %v", err)
 		}
 	}()
 
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to bind the socket (happens-before guarantee)
+	<-started
 
 	if m.server.PacketConn != nil {
 		m.addr = m.server.PacketConn.LocalAddr().String()
@@ -753,10 +759,9 @@ func setupResolverWithMockRoot(t *testing.T, mockSrv *MultiZoneMockServer, rootG
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
-	// Start rec53 server
+	// Start rec53 server — Run() blocks until UDP is ready, so UDPAddr() is safe immediately
 	srv := server.NewServer("127.0.0.1:0")
 	errChan := srv.Run()
-	time.Sleep(100 * time.Millisecond)
 
 	addr := srv.UDPAddr()
 	if addr == "" {

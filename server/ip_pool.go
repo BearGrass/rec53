@@ -299,14 +299,15 @@ func (iq *IPQualityV2) GetScore() float64 {
 }
 
 type IPPool struct {
-	pool      map[string]*IPQuality
-	poolV2    map[string]*IPQualityV2 // V2 pool with sliding window histogram
-	l         sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	sem       chan struct{} // semaphore for concurrency limit
-	dnsClient *dns.Client
+	pool          map[string]*IPQuality
+	poolV2        map[string]*IPQualityV2 // V2 pool with sliding window histogram
+	l             sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	sem           chan struct{} // semaphore for concurrency limit
+	dnsClient     *dns.Client
+	probeLoopOnce sync.Once // ensures StartProbeLoop starts exactly one goroutine
 }
 
 var globalIPPool = NewIPPool()
@@ -345,11 +346,14 @@ func (ipp *IPPool) Shutdown(ctx context.Context) error {
 }
 
 // StartProbeLoop initializes and launches the background probe goroutine
-// for periodic SUSPECT IP recovery attempts
+// for periodic SUSPECT IP recovery attempts.
+// Safe to call multiple times — only one goroutine is ever started (sync.Once).
 func (ipp *IPPool) StartProbeLoop() {
-	ipp.wg.Add(1)
-	go ipp.periodicProbeLoop()
-	monitor.Rec53Log.Debugf("IP pool probe loop started")
+	ipp.probeLoopOnce.Do(func() {
+		ipp.wg.Add(1)
+		go ipp.periodicProbeLoop()
+		monitor.Rec53Log.Debugf("IP pool probe loop started")
+	})
 }
 
 // periodicProbeLoop runs periodically every 30 seconds to probe SUSPECT IPs
@@ -396,13 +400,15 @@ func (ipp *IPPool) probeAllSuspiciousIPs() {
 		req := new(dns.Msg)
 		req.SetQuestion(".", dns.TypeA)
 
-		// Probe with 3-second timeout
+		// Probe with 3-second timeout, but respect pool context cancellation
+		// so that Shutdown() is not delayed by in-flight probe requests.
 		client := &dns.Client{
 			Timeout: 3 * time.Second,
 			Net:     "udp",
 		}
-
-		_, _, err := client.Exchange(req, ip+":53")
+		probeCtx, probeCancel := context.WithTimeout(ipp.ctx, 3*time.Second)
+		_, _, err := client.ExchangeContext(probeCtx, req, ip+":53")
+		probeCancel()
 
 		// Check IP quality tracker
 		iqv2 := ipp.GetIPQualityV2(ip)

@@ -6,13 +6,7 @@ import (
 
 	"rec53/monitor"
 	"rec53/server"
-
-	"go.uber.org/zap"
 )
-
-func init() {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-}
 
 // TestIPPoolV2_LatencyRecording tests that V2 records latency during DNS queries
 // This verifies F-003/11 integration point
@@ -23,8 +17,7 @@ func TestIPPoolV2_LatencyRecording(t *testing.T) {
 
 	// Initialize IP pool and metrics
 	pool := server.NewIPPool()
-	monitor.InitMetric()
-	defer monitor.ShutdownMetric(nil)
+	monitor.InitMetricForTest()
 
 	// Simulate resolving with multiple authoritative nameservers
 	testIPs := []string{
@@ -226,8 +219,8 @@ func TestIPPoolV2_ConcurrentSelection(t *testing.T) {
 	}
 
 	// Concurrent selections - should not panic or race
-	done := make(chan bool)
-	errorChan := make(chan error)
+	done := make(chan bool, 10)
+	errorChan := make(chan error, 10*100)
 
 	for i := 0; i < 10; i++ {
 		go func(id int) {

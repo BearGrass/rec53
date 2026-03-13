@@ -77,3 +77,11 @@ func ShutdownMetric(ctx context.Context) error {
 	}
 	return nil
 }
+
+// InitMetricForTest initializes a minimal Metric instance suitable for use in
+// tests. It does not register any Prometheus collectors or bind an HTTP
+// listener, so it is safe to call from TestMain or individual test functions
+// without causing duplicate-registration panics.
+func InitMetricForTest() {
+	Rec53Metric = &Metric{}
+}

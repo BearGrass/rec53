@@ -6,16 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"rec53/monitor"
 	"rec53/server"
 
 	"github.com/miekg/dns"
-	"go.uber.org/zap"
 )
-
-func init() {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-}
 
 // TestResolverIntegration tests the resolver with real DNS queries.
 func TestResolverIntegration(t *testing.T) {
@@ -80,9 +74,9 @@ func TestResolverIntegration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096, // Enable EDNS for large responses
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096, // Enable EDNS for large responses
 			}
 
 			msg := new(dns.Msg)
@@ -156,9 +150,9 @@ func TestCNAMEResolution(t *testing.T) {
 	for _, domain := range cnameDomains {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			msg := new(dns.Msg)
@@ -230,9 +224,9 @@ func TestCNAMEChainWithValidNSDelegation(t *testing.T) {
 	for _, tt := range testDomains {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  15 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 15 * time.Second,
+				UDPSize: 4096,
 			}
 
 			msg := new(dns.Msg)
@@ -314,9 +308,9 @@ func TestNonExistentDomain(t *testing.T) {
 	for _, domain := range nonExistent {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			msg := new(dns.Msg)
@@ -377,9 +371,9 @@ func TestMultipleRecordTypes(t *testing.T) {
 
 	for _, qtype := range recordTypes {
 		client := &dns.Client{
-			Net:      "udp",
-			Timeout:  10 * time.Second,
-			UDPSize:  4096,
+			Net:     "udp",
+			Timeout: 10 * time.Second,
+			UDPSize: 4096,
 		}
 
 		msg := new(dns.Msg)
@@ -443,9 +437,9 @@ func TestLargeResponse(t *testing.T) {
 		t.Run(domain, func(t *testing.T) {
 			// Test UDP with EDNS
 			udpClient := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			msg := new(dns.Msg)
@@ -540,17 +534,17 @@ func TestIDNResolution(t *testing.T) {
 
 	// IDN domains (Punycode encoded)
 	idnDomains := []string{
-		"xn--wgbl.example.",     // Arabic
-		"xn--fiqs8s.example.",   // Chinese
-		"xn--fiqz9s.example.",   // Chinese
+		"xn--wgbl.example.",   // Arabic
+		"xn--fiqs8s.example.", // Chinese
+		"xn--fiqz9s.example.", // Chinese
 	}
 
 	for _, domain := range idnDomains {
 		t.Run(domain, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  5 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 5 * time.Second,
+				UDPSize: 4096,
 			}
 
 			msg := new(dns.Msg)
@@ -602,9 +596,9 @@ func TestReverseDNS(t *testing.T) {
 	for _, tt := range ptrQueries {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			// Create PTR query

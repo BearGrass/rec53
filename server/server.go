@@ -14,12 +14,17 @@ import (
 )
 
 type server struct {
-	listen    string
-	warmupCfg WarmupConfig
-	udpSrv    *dns.Server
-	tcpSrv    *dns.Server
-	wg        sync.WaitGroup
-	errChan   chan error
+	listen       string
+	warmupCfg    WarmupConfig
+	udpSrv       *dns.Server
+	tcpSrv       *dns.Server
+	wg           sync.WaitGroup
+	errChan      chan error
+	udpReady     chan struct{}      // closed when UDP server has started listening
+	tcpReady     chan struct{}      // closed when TCP server has started listening
+	udpAddr      string             // set once UDP server is ready; safe to read after Run() returns
+	tcpAddr      string             // set once TCP server is ready; safe to read after Run() returns
+	warmupCancel context.CancelFunc // cancels the warmup goroutine; nil if warmup disabled
 }
 
 func NewServer(listen string) *server {
@@ -149,15 +154,42 @@ func truncateResponse(reply, request *dns.Msg, maxSize int) *dns.Msg {
 // If warmup is enabled, it runs in the background without blocking startup.
 func (s *server) Run() <-chan error {
 	// Create servers before starting goroutines to avoid race with Shutdown()
+	s.udpReady = make(chan struct{})
+	s.tcpReady = make(chan struct{})
 	s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
 	s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
+
+	// Notify udpReady when UDP server has bound the socket
+	s.udpSrv.NotifyStartedFunc = func() {
+		// Store the address before closing the channel so callers see it immediately
+		if s.udpSrv.PacketConn != nil {
+			s.udpAddr = s.udpSrv.PacketConn.LocalAddr().String()
+		}
+		close(s.udpReady)
+	}
+
+	// Notify tcpReady when TCP server has bound the socket
+	s.tcpSrv.NotifyStartedFunc = func() {
+		if s.tcpSrv.Listener != nil {
+			s.tcpAddr = s.tcpSrv.Listener.Addr().String()
+		}
+		close(s.tcpReady)
+	}
 
 	// Start background IP probe loop for fault recovery
 	globalIPPool.StartProbeLoop()
 
-	// Start background NS warmup if enabled (non-blocking)
+	// Start background NS warmup if enabled (non-blocking).
+	// warmupCancel lets Shutdown() stop warmup immediately without waiting for
+	// the per-query or overall Duration deadline to expire.
 	if s.warmupCfg.Enabled {
-		go s.warmupNSOnStartup()
+		warmupCtx, warmupCancel := context.WithCancel(context.Background())
+		s.warmupCancel = warmupCancel
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.warmupNSOnStartup(warmupCtx)
+		}()
 	}
 
 	s.errChan = make(chan error, 2)
@@ -183,23 +215,28 @@ func (s *server) Run() <-chan error {
 		close(s.errChan)
 	}()
 
+	// Wait for both UDP and TCP servers to be ready before returning.
+	// This ensures UDPAddr() and TCPAddr() are safe to call immediately after Run().
+	<-s.udpReady
+	<-s.tcpReady
+
 	return s.errChan
 }
 
 // warmupNSOnStartup runs NS warmup in the background on startup.
 // It does not block server startup or query handling.
-// The warmup process runs for at most s.warmupCfg.Duration, and all goroutines
-// are cancelled when the deadline is reached.
+// ctx is derived from the server lifecycle — cancelling it (via Shutdown) stops warmup immediately.
+// The warmup process also applies s.warmupCfg.Duration as a hard per-warmup deadline.
 // Panics during warmup are caught and logged to prevent server crashes.
-func (s *server) warmupNSOnStartup() {
+func (s *server) warmupNSOnStartup(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			monitor.Rec53Log.Warnf("Panic during NS warmup (non-fatal): %v", r)
 		}
 	}()
 
-	// Create a context with the configured duration as the hard deadline
-	ctx, cancel := context.WithTimeout(context.Background(), s.warmupCfg.Duration)
+	// Apply the configured Duration as the hard deadline, but respect external cancellation too.
+	ctx, cancel := context.WithTimeout(ctx, s.warmupCfg.Duration)
 	defer cancel()
 
 	monitor.Rec53Log.Infof("Starting NS warmup with %d TLDs, concurrency: %d (CPU cores: %d)...", len(s.warmupCfg.TLDs), s.warmupCfg.Concurrency, runtime.NumCPU())
@@ -209,6 +246,12 @@ func (s *server) warmupNSOnStartup() {
 
 // Shutdown gracefully shuts down the DNS server
 func (s *server) Shutdown(ctx context.Context) error {
+	// Cancel warmup goroutine first so it stops issuing DNS queries before
+	// we tear down the IP pool.
+	if s.warmupCancel != nil {
+		s.warmupCancel()
+	}
+
 	var errs []error
 
 	if s.udpSrv != nil {
@@ -237,18 +280,21 @@ func (s *server) Shutdown(ctx context.Context) error {
 
 // UDPAddr returns the UDP server's listening address.
 // Returns empty string if server is not running.
+// Safe to call immediately after Run() returns.
 func (s *server) UDPAddr() string {
-	if s.udpSrv != nil && s.udpSrv.PacketConn != nil {
-		return s.udpSrv.PacketConn.LocalAddr().String()
-	}
-	return ""
+	return s.udpAddr
+}
+
+// WaitUntilReady blocks until the UDP server has started listening.
+// Run() already calls this internally, so this is only needed if you
+// need to synchronize with the server from a separate goroutine.
+func (s *server) WaitUntilReady() {
+	<-s.udpReady
 }
 
 // TCPAddr returns the TCP server's listening address.
 // Returns empty string if server is not running.
+// Safe to call immediately after Run() returns.
 func (s *server) TCPAddr() string {
-	if s.tcpSrv != nil && s.tcpSrv.Listener != nil {
-		return s.tcpSrv.Listener.Addr().String()
-	}
-	return ""
+	return s.tcpAddr
 }

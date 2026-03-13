@@ -13,6 +13,17 @@ import (
 	"github.com/miekg/dns"
 )
 
+// contextKeyType is the type for context keys
+type contextKeyType string
+
+// contextKeyWarmupDeadline is the context key for storing the warmup deadline
+const contextKeyWarmupDeadline contextKeyType = "warmupDeadline"
+
+// contextKeyNSResolutionDepth tracks recursive NS resolution depth to prevent deadlock.
+// When resolveNSIPsConcurrently is resolving NS names, this key is set so that
+// nested iterState.handle calls know not to recursively resolve NS names again.
+const contextKeyNSResolutionDepth contextKeyType = "nsResolutionDepth"
+
 // DefaultNegativeCacheTTL is the default TTL for negative responses (NXDOMAIN/NODATA)
 // when SOA minimum is not available or is zero.
 // TODO: make this configurable via config file or command-line flag
@@ -48,12 +59,26 @@ func hasSOAInAuthority(response *dns.Msg) bool {
 type stateInitState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newStateInitState(req, resp *dns.Msg) *stateInitState {
 	return &stateInitState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newStateInitStateWithContext creates a stateInitState with a specific context
+func newStateInitStateWithContext(req, resp *dns.Msg, ctx context.Context) *stateInitState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &stateInitState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -68,6 +93,13 @@ func (s *stateInitState) getRequest() *dns.Msg {
 
 func (s *stateInitState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *stateInitState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *stateInitState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
@@ -89,12 +121,26 @@ func (s *stateInitState) handle(request *dns.Msg, response *dns.Msg) (int, error
 type inCacheState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newInCacheState(req, resp *dns.Msg) *inCacheState {
 	return &inCacheState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newInCacheStateWithContext creates an inCacheState with a specific context
+func newInCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *inCacheState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &inCacheState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -109,6 +155,13 @@ func (s *inCacheState) getRequest() *dns.Msg {
 
 func (s *inCacheState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *inCacheState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
@@ -131,12 +184,26 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 type checkRespState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newCheckRespState(req, resp *dns.Msg) *checkRespState {
 	return &checkRespState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newCheckRespStateWithContext creates a checkRespState with a specific context
+func newCheckRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *checkRespState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &checkRespState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -151,6 +218,13 @@ func (s *checkRespState) getRequest() *dns.Msg {
 
 func (s *checkRespState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *checkRespState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
@@ -228,12 +302,26 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 type inGlueState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newInGlueState(req, resp *dns.Msg) *inGlueState {
 	return &inGlueState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newInGlueStateWithContext creates an inGlueState with a specific context
+func newInGlueStateWithContext(req, resp *dns.Msg, ctx context.Context) *inGlueState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &inGlueState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -250,14 +338,30 @@ func (s *inGlueState) getResponse() *dns.Msg {
 	return s.response
 }
 
+func (s *inGlueState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
+}
+
 func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
 		return IN_GLUE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	if len(response.Ns) != 0 && len(response.Extra) != 0 {
-		//We got glue from cache or iterater
-		//get zone list
-		return IN_GLUE_EXIST, nil
+		// We got glue from cache or iterator.
+		// Validate that the NS zone is relevant to the current query domain.
+		// If the NS zone is not an ancestor of the query domain, the glue belongs
+		// to a different delegation zone (e.g., a prior CNAME hop) and must not be used.
+		nsZone := response.Ns[0].Header().Name
+		queryName := request.Question[0].Name
+		if dns.IsSubDomain(nsZone, queryName) {
+			return IN_GLUE_EXIST, nil
+		}
+		// NS zone is unrelated to query domain; clear stale glue and re-delegate.
+		response.Ns = nil
+		response.Extra = nil
 	}
 	return IN_GLUE_NOT_EXIST, nil
 }
@@ -288,12 +392,26 @@ func getIterPort() string {
 type iterState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newIterState(req, resp *dns.Msg) *iterState {
 	return &iterState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newIterStateWithContext creates an iterState with a specific context
+func newIterStateWithContext(req, resp *dns.Msg, ctx context.Context) *iterState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &iterState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -308,6 +426,13 @@ func (s *iterState) getRequest() *dns.Msg {
 
 func (s *iterState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *iterState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func getIPListFromResponse(response *dns.Msg) []string {
@@ -356,22 +481,42 @@ type nsResult struct {
 // resolveNSIPsRecursively resolves NS names using the state machine recursively.
 // This is the correct approach for a recursive resolver - we use the same
 // resolution mechanism to resolve NS names as we do for any other query.
-func resolveNSIPsRecursively(nsNames []string) []string {
-	return resolveNSIPsConcurrently(nsNames)
+// The provided context allows warmup deadlines to propagate to nested resolutions.
+func resolveNSIPsRecursively(ctx context.Context, nsNames []string) []string {
+	return resolveNSIPsConcurrently(ctx, nsNames)
 }
 
 // resolveNSIPsConcurrently resolves multiple NS names in parallel with a configurable
 // concurrency limit (default 5). Returns the first successful response immediately
 // while background goroutine updates cache for remaining IPs.
+// The provided context allows warmup deadlines to propagate and cancel all nested goroutines.
 const maxConcurrentNSQueries = 5
 
-func resolveNSIPsConcurrently(nsNames []string) []string {
+func resolveNSIPsConcurrently(ctx context.Context, nsNames []string) []string {
 	if len(nsNames) == 0 {
 		return nil
 	}
 
-	// Use context for cancellation on first successful response
-	ctx, cancel := context.WithCancel(context.Background())
+	// Detect recursive NS resolution to prevent deadlock (B2 fix).
+	// When iterState.handle resolves NS names recursively, it calls resolveNSIPsConcurrently.
+	// If the nested state machine then encounters another NS without glue, it would call
+	// resolveNSIPsConcurrently again — but the semaphore slots are already held by the outer
+	// layer, causing a deadlock. We break the cycle by marking depth in context.
+	currentDepth := 0
+	if d, ok := ctx.Value(contextKeyNSResolutionDepth).(int); ok {
+		currentDepth = d
+	}
+	if currentDepth > 0 {
+		// Already inside NS resolution — do not recurse further to avoid deadlock.
+		monitor.Rec53Log.Debugf("[ITER] resolveNSIPsConcurrently: skipping recursive NS resolution (depth=%d)", currentDepth)
+		return nil
+	}
+	ctx = context.WithValue(ctx, contextKeyNSResolutionDepth, currentDepth+1)
+	monitor.Rec53Log.Debugf("[ITER] resolveNSIPsConcurrently: starting NS resolution (depth=%d, names=%v)", currentDepth+1, nsNames)
+
+	// Use context with cancellation on first successful response
+	// If ctx has a deadline (e.g., warmup timeout), it will be preserved
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Channel to collect successful IPs
@@ -379,8 +524,9 @@ func resolveNSIPsConcurrently(nsNames []string) []string {
 	var wg sync.WaitGroup
 
 	// Limit concurrency with semaphore pattern
+	// NOTE: do NOT close(semaphore) here. The channel is GC'd when all goroutines
+	// have released it. Closing while goroutines may still be sending causes panic.
 	semaphore := make(chan struct{}, maxConcurrentNSQueries)
-	defer close(semaphore)
 
 	// Launch goroutines for each NS name
 	for _, nsName := range nsNames {
@@ -388,17 +534,16 @@ func resolveNSIPsConcurrently(nsNames []string) []string {
 		go func(name string) {
 			defer wg.Done()
 
-			// Acquire semaphore slot
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			// Check if context is already cancelled (first response succeeded)
+			// Acquire semaphore slot — must be context-aware so that a cancelled
+			// context (deadline or first-result cancel) doesn't leave goroutines
+			// blocked here indefinitely, which would prevent wg.Wait() from returning.
 			select {
+			case semaphore <- struct{}{}:
 			case <-ctx.Done():
-				monitor.Rec53Log.Debugf("[ITER] Concurrent NS resolution cancelled for %s (first response already received)", name)
+				monitor.Rec53Log.Debugf("[ITER] Concurrent NS resolution cancelled for %s (deadline or first response)", name)
 				return
-			default:
 			}
+			defer func() { <-semaphore }()
 
 			// Create a new query for NS A record
 			req := new(dns.Msg)
@@ -407,7 +552,8 @@ func resolveNSIPsConcurrently(nsNames []string) []string {
 			resp := new(dns.Msg)
 
 			// Use the state machine to resolve the NS name
-			stm := newStateInitState(req, resp)
+			// Pass context through to nested resolutions
+			stm := newStateInitStateWithContext(req, resp, ctx)
 			result, err := Change(stm)
 			if err != nil {
 				monitor.Rec53Log.Debugf("[ITER] Failed to resolve NS %s: %v", name, err)
@@ -435,38 +581,38 @@ func resolveNSIPsConcurrently(nsNames []string) []string {
 		}(nsName)
 	}
 
-	// Goroutine to close result channel after all workers finish
+	// Close resultChan after all workers finish.
+	// This is the only place resultChan is closed, ensuring the range below terminates.
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Collect results: return first successful response, background-update cache for rest
-	var firstIPs []string
-	var bgResults []nsResult
-
+	// Single consumer: collect all results that arrive before the channel closes.
+	// Calling cancel() after the first result signals remaining workers to exit early,
+	// which causes them to either skip sending or return without sending to resultChan.
+	// Workers that already sent before cancel() is called may still appear in allResults.
+	var allResults []nsResult
 	for result := range resultChan {
-		if firstIPs == nil {
-			// First successful response
-			firstIPs = result.ips
-			monitor.Rec53Log.Debugf("[ITER] First NS resolved: %s -> %v", result.nsName, firstIPs)
-			cancel() // Cancel remaining goroutines
-
-			// Collect remaining results for background cache update
-			go func() {
-				for r := range resultChan {
-					bgResults = append(bgResults, r)
-				}
-				// Background cache update
-				updateNSIPsCache(bgResults)
-			}()
+		allResults = append(allResults, result)
+		if len(allResults) == 1 {
+			// Got the first usable IP set — cancel all remaining NS queries.
+			monitor.Rec53Log.Debugf("[ITER] First NS resolved: %s -> %v", result.nsName, result.ips)
+			cancel()
 		}
 	}
 
-	// Wait for remaining channel processing
-	wg.Wait()
+	if len(allResults) == 0 {
+		return nil
+	}
 
-	return firstIPs
+	// Background-update cache with any additional results that arrived after the first.
+	// fire-and-forget: cache writes are idempotent and safe to skip on shutdown.
+	if len(allResults) > 1 {
+		go updateNSIPsCache(allResults[1:])
+	}
+
+	return allResults[0].ips
 }
 
 // updateNSIPsCache is a helper function that caches resolved NS IPs in the background.
@@ -514,6 +660,12 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		return ITER_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 
+	// Check context before doing any work — exit early if already cancelled
+	if err := s.ctx.Err(); err != nil {
+		monitor.Rec53Log.Debugf("[ITER] Context cancelled before query for %s: %v", request.Question[0].Name, err)
+		return ITER_COMMON_ERROR, err
+	}
+
 	monitor.Rec53Log.Debugf("[ITER] Querying: %s (type: %s)", request.Question[0].Name, dns.TypeToString[request.Question[0].Qtype])
 
 	newQuery := new(dns.Msg)
@@ -546,7 +698,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		// If still no IPs, resolve NS names using recursive state machine
 		if len(ipList) == 0 {
 			monitor.Rec53Log.Debugf("[ITER] Resolving NS names recursively: %v", nsNames)
-			ipList = resolveNSIPsRecursively(nsNames)
+			ipList = resolveNSIPsRecursively(s.ctx, nsNames)
 			monitor.Rec53Log.Debugf("[ITER] Resolved NS IPs: %v", ipList)
 		}
 	}
@@ -561,7 +713,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
 	port := getIterPort()
 	monitor.Rec53Log.Debugf("[ITER] Sending query to %s:%s for %s", bestAddr, port, request.Question[0].Name)
-	newResponse, rtt, err := dnsClient.Exchange(newQuery, bestAddr+":"+port)
+	newResponse, rtt, err := dnsClient.ExchangeContext(s.ctx, newQuery, bestAddr+":"+port)
 	if err != nil {
 		monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
 		// Record failure in V2 only (V1 deprecated)
@@ -575,7 +727,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			return ITER_COMMON_ERROR, err
 		}
 		monitor.Rec53Log.Debugf("[ITER] Retrying with second IP: %s", secondAddr)
-		newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":"+port)
+		newResponse, rtt, err = dnsClient.ExchangeContext(s.ctx, newQuery, secondAddr+":"+port)
 		if err != nil {
 			monitor.Rec53Log.Debugf("[ITER] Query to second IP %s also failed: %v", secondAddr, err)
 			// Record failure in V2 only (V1 deprecated)
@@ -642,7 +794,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 				secondAddr, dns.RcodeToString[newResponse.Rcode])
 
 			// Retry query with secondary IP
-			newResponse, rtt, err = dnsClient.Exchange(newQuery, secondAddr+":"+port)
+			newResponse, rtt, err = dnsClient.ExchangeContext(s.ctx, newQuery, secondAddr+":"+port)
 			if err != nil {
 				monitor.Rec53Log.Debugf("[ITER] Query to secondary IP %s failed: %v", secondAddr, err)
 				// Record failure for secondary IP
@@ -725,12 +877,26 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 type inGlueCacheState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newInGlueCacheState(req, resp *dns.Msg) *inGlueCacheState {
 	return &inGlueCacheState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newInGlueCacheStateWithContext creates an inGlueCacheState with a specific context
+func newInGlueCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *inGlueCacheState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &inGlueCacheState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -745,6 +911,13 @@ func (s *inGlueCacheState) getRequest() *dns.Msg {
 
 func (s *inGlueCacheState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *inGlueCacheState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
@@ -772,12 +945,26 @@ func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, err
 type retRespState struct {
 	request  *dns.Msg
 	response *dns.Msg
+	ctx      context.Context
 }
 
 func newRetRespState(req, resp *dns.Msg) *retRespState {
 	return &retRespState{
 		request:  req,
 		response: resp,
+		ctx:      context.Background(),
+	}
+}
+
+// newRetRespStateWithContext creates a retRespState with a specific context
+func newRetRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *retRespState {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &retRespState{
+		request:  req,
+		response: resp,
+		ctx:      ctx,
 	}
 }
 
@@ -792,6 +979,13 @@ func (s *retRespState) getRequest() *dns.Msg {
 
 func (s *retRespState) getResponse() *dns.Msg {
 	return s.response
+}
+
+func (s *retRespState) getContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *retRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {

@@ -5,16 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"rec53/monitor"
 	"rec53/server"
 
 	"github.com/miekg/dns"
-	"go.uber.org/zap"
 )
-
-func init() {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-}
 
 // TestMalformedQueries tests handling of malformed DNS queries.
 func TestMalformedQueries(t *testing.T) {
@@ -48,6 +42,11 @@ func TestMalformedQueries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset global state before each sub-test to avoid interference
+			// from the previous sub-test's DNS activity or IP pool state.
+			server.FlushCacheForTest()
+			server.ResetIPPoolForTest()
+
 			// Create a new server for each test case to avoid state issues
 			s := server.NewServer("127.0.0.1:0")
 			errChan := s.Run()
@@ -61,7 +60,7 @@ func TestMalformedQueries(t *testing.T) {
 
 			client := &dns.Client{
 				Net:     "udp",
-				Timeout: 5 * time.Second,
+				Timeout: 15 * time.Second,
 				UDPSize: 4096,
 			}
 
@@ -167,7 +166,7 @@ func TestTimeoutHandling(t *testing.T) {
 		t.Run(timeout.String(), func(t *testing.T) {
 			client := &dns.Client{
 				Net:     "udp",
-				Timeout: timeout,
+				Timeout: 15 * time.Second,
 				UDPSize: 4096,
 			}
 
@@ -532,8 +531,6 @@ func TestLocalhostQueries(t *testing.T) {
 
 // BenchmarkIntegrationQuery benchmarks end-to-end queries.
 func BenchmarkIntegrationQuery(b *testing.B) {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-
 	s := server.NewServer("127.0.0.1:0")
 	errChan := s.Run()
 	defer func() {

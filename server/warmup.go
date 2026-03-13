@@ -26,9 +26,14 @@ func WarmupNSRecords(ctx context.Context, cfg WarmupConfig) WarmupStats {
 	startTime := time.Now()
 	stats := WarmupStats{}
 
-	// Build domain list: root + TLDs
+	// Build domain list: root + TLDs.
+	// Ensure every TLD is a fully-qualified domain name (FQDN) — i.e. ends with a ".".
+	// Non-FQDN names (e.g. "com" instead of "com.") cause GetZoneList to loop forever
+	// because strings.Index returns -1, and the slice expression domain[0:] is a no-op.
 	domains := []string{"."}
-	domains = append(domains, cfg.TLDs...)
+	for _, tld := range cfg.TLDs {
+		domains = append(domains, dns.Fqdn(tld))
+	}
 	stats.Total = len(domains)
 
 	// Create a semaphore to limit concurrent queries
@@ -38,12 +43,25 @@ func WarmupNSRecords(ctx context.Context, cfg WarmupConfig) WarmupStats {
 	successCount := 0
 	failureCount := 0
 
-	// Query each domain concurrently
+	// Query each domain concurrently.
+	// The semaphore acquire uses select so that a context cancellation (e.g., Duration
+	// deadline reached) immediately stops the loop instead of blocking indefinitely.
 	for _, domain := range domains {
 		wg.Add(1)
 
-		// Acquire semaphore slot
-		sem <- struct{}{}
+		// Acquire semaphore slot — respect ctx cancellation so the loop exits promptly
+		// when the overall warmup deadline fires.
+		select {
+		case sem <- struct{}{}:
+			// Got a slot; launch the query goroutine.
+		case <-ctx.Done():
+			// Context cancelled before we could get a slot — count as failure and skip.
+			wg.Done()
+			mu.Lock()
+			failureCount++
+			mu.Unlock()
+			continue
+		}
 
 		go func(d string) {
 			defer wg.Done()
