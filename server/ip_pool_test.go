@@ -889,6 +889,25 @@ func BenchmarkGetScore(b *testing.B) {
 	b.Logf("Average time per GetScore(): %.2f µs", avgTime)
 }
 
+// BenchmarkRecordFailure measures IPQualityV2.RecordFailure across state transitions
+// (healthy → degraded → failed). Uses a local instance to avoid global pool mutations.
+func BenchmarkRecordFailure(b *testing.B) {
+	iqv2 := NewIPQualityV2()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		iqv2.RecordFailure()
+	}
+	b.StopTimer()
+
+	if b.N >= 1000 {
+		avgNs := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+		if avgNs > 5000 {
+			b.Errorf("regression: %.2f ns/op > 5000 ns threshold", avgNs)
+		}
+	}
+}
+
 // ============================================================================
 // F-003/6: Background Probe Loop Tests
 // ============================================================================
