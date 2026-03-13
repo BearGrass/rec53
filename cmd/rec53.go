@@ -36,9 +36,10 @@ type Config struct {
 
 // DNSConfig represents DNS server configuration
 type DNSConfig struct {
-	Listen   string `yaml:"listen"`
-	Metric   string `yaml:"metric"`
-	LogLevel string `yaml:"log_level"`
+	Listen          string        `yaml:"listen"`
+	Metric          string        `yaml:"metric"`
+	LogLevel        string        `yaml:"log_level"`
+	UpstreamTimeout time.Duration `yaml:"upstream_timeout"`
 }
 
 // loadConfig loads configuration from a YAML file.
@@ -77,6 +78,9 @@ func loadConfig(configPath string) (*Config, error) {
 	if cfg.Warmup.Concurrency == 0 {
 		cfg.Warmup.Concurrency = server.DefaultWarmupConfig.Concurrency
 	}
+
+	// Apply upstream timeout: if not set (0), keep the server package default (1.5s).
+	// If explicitly set, it will be applied via server.SetUpstreamTimeout after validation.
 
 	return &cfg, nil
 }
@@ -125,6 +129,11 @@ func validateConfig(cfg *Config) error {
 	// Validate warmup config exists
 	if cfg.Warmup.Timeout > 0 && cfg.Warmup.Timeout < 100*time.Millisecond {
 		return fmt.Errorf("warmup.timeout must be at least 100ms, got %v", cfg.Warmup.Timeout)
+	}
+
+	// Validate upstream timeout: if set, must be at least 100ms
+	if cfg.DNS.UpstreamTimeout > 0 && cfg.DNS.UpstreamTimeout < 100*time.Millisecond {
+		return fmt.Errorf("dns.upstream_timeout must be at least 100ms, got %v", cfg.DNS.UpstreamTimeout)
 	}
 
 	return nil
@@ -212,6 +221,11 @@ func main() {
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "configuration error: %s\n", err.Error())
 		os.Exit(1)
+	}
+
+	// Apply upstream timeout from config (0 means use the default 1.5s in the server package).
+	if cfg.DNS.UpstreamTimeout > 0 {
+		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
 
 	// Initialize logger. All subsequent log output uses monitor.Rec53Log.

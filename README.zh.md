@@ -84,6 +84,79 @@ warmup:
 
 ---
 
+## 规格指标
+
+> 以下延迟数据均在 Intel i7-1165G7 @ 2.80GHz / Linux 上实测。
+> 网络 benchmark 基于中国大陆家庭/办公室网络环境下的真实迭代解析结果。
+> 你的硬件和网络条件不同，结果会有差异 —— 参见[自定义 benchmark](#自定义-benchmark)自行复现。
+
+### 首包解析延迟（真实网络，3 次均值）
+
+以下三个场景展示了从最差到最优的解析路径：
+
+| 域名 | 冷启动（无 warmup） | 首包（warmup 后） | 缓存命中 |
+|------|-------------------|-----------------|---------|
+| `www.qq.com` | ~2,539 ms | ~774 ms | ~0.17 ms |
+| `www.baidu.com` | ~467 ms | ~498 ms | ~0.20 ms |
+| `www.taobao.com` | ~593 ms | ~590 ms | ~0.13 ms |
+
+- **冷启动** — IP 池为空，解析器对所有 NS 无任何延迟先验数据，是绝对最差情况。
+- **warmup 后首包** — 默认 warmup 为 `.com` 顶级域 NS 预填充 RTT 数据，使 NS 选择更精准。`www.qq.com` 改善约 70%，因为其委托链经过 warmup 已测量过的 `.com` NS。不在 warmup TLD 覆盖范围内的域名改善不明显。
+- **缓存命中** — 已解析过的域名从内存直接返回，延迟降至 **< 0.2 ms**，比迭代解析快 1,000–10,000 倍。
+
+### 缓存容量估算（每条约 450 字节，单 A record）
+
+| 可用内存 | 估算最大缓存域名数 |
+|---------|-----------------|
+| 128 MB | ~280,000 |
+| 256 MB | ~570,000 |
+| 512 MB | ~1,130,000 |
+| 1 GB | ~2,270,000 |
+
+含 CNAME 链或多条 RR 的复杂响应每条占用更多内存。
+
+### 缓存命中 QPS（单核，进程内 benchmark）
+
+| 场景 | 吞吐量 |
+|------|-------|
+| 端到端缓存命中（STATE_INIT → RETURN_RESP） | ~520,000 QPS |
+| 缓存层读取（命中） | ~1,500,000 QPS |
+| 8 核并发混合读写 | ~12,000,000 ops/s |
+
+以上为 CPU 密集型进程内测量值；实际网络 QPS 受连接处理和操作系统网络栈开销限制。
+
+### IP 池容量（每个 NS IP 约 400 字节）
+
+| 可用内存 | 可追踪 NS IP 数 |
+|---------|----------------|
+| 10 MB | ~25,000 |
+| 50 MB | ~125,000 |
+| 100 MB | ~250,000 |
+
+### 自定义 benchmark
+
+使用内置 benchmark 在你自己的服务器上测量与实际业务相关域名的首包延迟：
+
+```bash
+# 使用默认域名列表（www.qq.com、www.baidu.com、www.taobao.com）
+go test -v -run='^$' -bench='BenchmarkFirstPacket' \
+    -benchtime=5x -timeout=300s ./e2e/...
+
+# 使用自定义域名
+REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
+    go test -v -run='^$' -bench='BenchmarkFirstPacket' \
+    -benchtime=5x -timeout=300s ./e2e/...
+
+# 一次性输出三场景对比表（冷启动 / warmup 后 / 缓存命中）
+REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
+    go test -v -run='^$' -bench=BenchmarkFirstPacketComparison \
+    -benchtime=1x -timeout=120s ./e2e/...
+```
+
+`REC53_BENCH_DOMAINS` 接受逗号分隔的域名列表，结尾的 `.` 会自动添加，域名间用逗号分隔，不加空格。
+
+---
+
 ## 系统设计
 
 ### 目录结构

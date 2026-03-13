@@ -37,6 +37,10 @@ dns:
   listen: "127.0.0.1:5353"
   metric: ":9999"
   log_level: "info"
+  # upstream_timeout controls the per-query timeout when forwarding to authoritative NS servers.
+  # Default: 1.5s (fast-fail; Happy Eyeballs concurrent queries absorb most reliability risk).
+  # Increase to 3s-5s on high-latency networks; minimum allowed value is 100ms.
+  # upstream_timeout: 1500ms
 
 warmup:
   enabled: true

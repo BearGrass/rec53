@@ -35,6 +35,118 @@ func getIterPort() string {
 	return "53"
 }
 
+// DEFAULT_UPSTREAM_TIMEOUT is the default timeout for upstream DNS queries.
+// Reduced from 5s to 1.5s to minimize first-packet latency when a server is slow or
+// unreachable; the Happy Eyeballs concurrent-query strategy absorbs most of the risk.
+const DEFAULT_UPSTREAM_TIMEOUT = 1500 * time.Millisecond
+
+// globalUpstreamTimeout is the per-query timeout for upstream DNS requests.
+// Initialized to DEFAULT_UPSTREAM_TIMEOUT; override via SetUpstreamTimeout.
+var globalUpstreamTimeout = DEFAULT_UPSTREAM_TIMEOUT
+
+// SetUpstreamTimeout sets the upstream DNS query timeout globally.
+// Intended to be called once during server initialization from config.
+// Values below 100ms are rejected and the default is kept.
+func SetUpstreamTimeout(d time.Duration) {
+	if d < 100*time.Millisecond {
+		return
+	}
+	globalUpstreamTimeout = d
+}
+
+// GetUpstreamTimeout returns the currently configured upstream DNS query timeout.
+func GetUpstreamTimeout() time.Duration {
+	return globalUpstreamTimeout
+}
+
+// happyEyeballsResult holds the outcome of a single upstream DNS attempt.
+type happyEyeballsResult struct {
+	addr     string
+	response *dns.Msg
+	rtt      time.Duration
+	err      error
+}
+
+// newDNSClient creates a fresh dns.Client for a single upstream query.
+// Each call returns an independent client with its own connection and singleflight
+// group, so concurrent Happy Eyeballs goroutines never share state.
+// SingleInflight is intentionally omitted: the Happy Eyeballs race sends the same
+// question to two different servers simultaneously, and singleflight (keyed by
+// question name/type/class, not by server address) would collapse the two into one,
+// defeating the purpose.
+func newDNSClient() *dns.Client {
+	return &dns.Client{
+		Net:     "udp",
+		Timeout: GetUpstreamTimeout(),
+		UDPSize: 4096,
+	}
+}
+
+// queryHappyEyeballs sends the same DNS query concurrently to bestAddr and (if non-empty)
+// secondAddr, returns the first successful response and cancels the other goroutine.
+// If secondAddr is empty, falls back to a single query to bestAddr.
+// On failure the losing IP's failure is recorded in the IP pool.
+func queryHappyEyeballs(ctx context.Context, query *dns.Msg, bestAddr, secondAddr, port string) (*happyEyeballsResult, error) {
+	// Single-path fast lane — no second address available.
+	if secondAddr == "" {
+		monitor.Rec53Log.Debugf("[ITER] Sending query to %s:%s (no second IP)", bestAddr, port)
+		resp, rtt, err := newDNSClient().ExchangeContext(ctx, query, bestAddr+":"+port)
+		if err != nil {
+			monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
+			iqv2 := globalIPPool.GetIPQualityV2(bestAddr)
+			if iqv2 != nil {
+				iqv2.RecordFailure()
+			}
+			return nil, err
+		}
+		return &happyEyeballsResult{addr: bestAddr, response: resp, rtt: rtt}, nil
+	}
+
+	// Two-path Happy Eyeballs: race bestAddr vs secondAddr.
+	// Buffer size 2 ensures both goroutines can always send without blocking,
+	// preventing goroutine leaks when the winner is already selected.
+	resultCh := make(chan *happyEyeballsResult, 2)
+
+	// Inner context so we can cancel the losing goroutine.
+	raceCtx, cancelRace := context.WithCancel(ctx)
+	defer cancelRace()
+
+	// Each goroutine uses its own dns.Client (independent connection + singleflight group)
+	// and its own copy of the query message (ExchangeContext mutates msg.Id).
+	launch := func(addr string, q *dns.Msg) {
+		monitor.Rec53Log.Debugf("[ITER] Happy Eyeballs: sending query to %s:%s", addr, port)
+		resp, rtt, err := newDNSClient().ExchangeContext(raceCtx, q, addr+":"+port)
+		resultCh <- &happyEyeballsResult{addr: addr, response: resp, rtt: rtt, err: err}
+	}
+
+	go launch(bestAddr, query.Copy())
+	go launch(secondAddr, query.Copy())
+
+	var firstErr error
+	// Collect up to 2 results; return on first success.
+	for i := 0; i < 2; i++ {
+		r := <-resultCh
+		if r.err == nil {
+			// Winner found — cancel the race context so the loser stops ASAP.
+			cancelRace()
+			monitor.Rec53Log.Debugf("[ITER] Happy Eyeballs: winner is %s (attempt %d)", r.addr, i+1)
+			return r, nil
+		}
+		// This IP failed; record failure and keep waiting for the other.
+		monitor.Rec53Log.Debugf("[ITER] Happy Eyeballs: %s failed: %v", r.addr, r.err)
+		iqv2 := globalIPPool.GetIPQualityV2(r.addr)
+		if iqv2 != nil {
+			iqv2.RecordFailure()
+		}
+		if firstErr == nil {
+			firstErr = r.err
+		}
+	}
+
+	// Both failed.
+	return nil, fmt.Errorf("all upstream IPs failed: %v", firstErr)
+}
+
 type queryUpstreamState struct {
 	baseState
 }
@@ -289,13 +401,6 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 	// Set EDNS0 with larger buffer size to handle larger responses
 	newQuery.SetEdns0(4096, false)
 
-	dnsClient := &dns.Client{
-		Net:            "udp",
-		Timeout:        5 * time.Second,
-		SingleInflight: true,
-		UDPSize:        4096, // Set larger UDP buffer size for EDNS
-	}
-
 	//check the best ip in the extra in response
 	ipList := getIPListFromResponse(response)
 	monitor.Rec53Log.Debugf("[ITER] IP list from Extra: %v", ipList)
@@ -322,37 +427,18 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 		return QUERY_UPSTREAM_COMMON_ERROR, err
 	}
 
-	//send query to the best ip
-	theBestIP := bestAddr
+	//send query using Happy Eyeballs: concurrently query bestAddr and secondAddr,
+	//use the first successful response and cancel the other.
 	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
 	port := getIterPort()
-	monitor.Rec53Log.Debugf("[ITER] Sending query to %s:%s for %s", bestAddr, port, request.Question[0].Name)
-	newResponse, rtt, err := dnsClient.ExchangeContext(s.ctx, newQuery, bestAddr+":"+port)
+
+	winner, err := queryHappyEyeballs(s.ctx, newQuery, bestAddr, secondAddr, port)
 	if err != nil {
-		monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
-		// Record failure in V2 only (V1 deprecated)
-		iqv2 := globalIPPool.GetIPQualityV2(bestAddr)
-		if iqv2 != nil {
-			iqv2.RecordFailure()
-		}
-		//try to use the second ip
-		if secondAddr == "" {
-			monitor.Rec53Log.Debugf("[ITER] No second IP available, returning error")
-			return QUERY_UPSTREAM_COMMON_ERROR, err
-		}
-		monitor.Rec53Log.Debugf("[ITER] Retrying with second IP: %s", secondAddr)
-		newResponse, rtt, err = dnsClient.ExchangeContext(s.ctx, newQuery, secondAddr+":"+port)
-		if err != nil {
-			monitor.Rec53Log.Debugf("[ITER] Query to second IP %s also failed: %v", secondAddr, err)
-			// Record failure in V2 only (V1 deprecated)
-			iqv2 := globalIPPool.GetIPQualityV2(secondAddr)
-			if iqv2 != nil {
-				iqv2.RecordFailure()
-			}
-			return QUERY_UPSTREAM_COMMON_ERROR, err
-		}
-		theBestIP = secondAddr
+		return QUERY_UPSTREAM_COMMON_ERROR, err
 	}
+	theBestIP := winner.addr
+	newResponse := winner.response
+	rtt := winner.rtt
 
 	// Record latency and metrics using V2 only (V1 deprecated)
 	iqv2 := globalIPPool.GetIPQualityV2(theBestIP)
@@ -387,7 +473,7 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 			return QUERY_UPSTREAM_NO_ERROR, nil
 		case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeFormatError, dns.RcodeNotImplemented:
 			// B-013: Bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) should trigger server switch
-			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with secondary IP",
+			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with alternate IP",
 				dns.RcodeToString[newResponse.Rcode], theBestIP)
 
 			// Record failure in IP quality tracking
@@ -397,37 +483,44 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 				monitor.Rec53Log.Debugf("[ITER] Recorded failure for IP %s", theBestIP)
 			}
 
-			// Try secondary IP if available
-			if secondAddr == "" {
-				monitor.Rec53Log.Debugf("[ITER] No secondary IP available for retry, returning bad Rcode")
-				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no secondary IP",
+			// Determine the alternate IP (the one that lost the Happy Eyeballs race).
+			altAddr := secondAddr
+			if theBestIP == secondAddr {
+				altAddr = bestAddr
+			}
+
+			// Try alternate IP if available
+			if altAddr == "" || altAddr == theBestIP {
+				monitor.Rec53Log.Debugf("[ITER] No alternate IP available for retry, returning bad Rcode")
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no alternate IP",
 					dns.RcodeToString[newResponse.Rcode])
 			}
 
-			monitor.Rec53Log.Debugf("[ITER] Retrying with secondary IP %s for bad Rcode %s",
-				secondAddr, dns.RcodeToString[newResponse.Rcode])
+			monitor.Rec53Log.Debugf("[ITER] Retrying with alternate IP %s for bad Rcode %s",
+				altAddr, dns.RcodeToString[newResponse.Rcode])
 
-			// Retry query with secondary IP
-			newResponse, rtt, err = dnsClient.ExchangeContext(s.ctx, newQuery, secondAddr+":"+port)
+			// Retry query with alternate IP (single query — race is over)
+			var altRtt time.Duration
+			newResponse, altRtt, err = newDNSClient().ExchangeContext(s.ctx, newQuery, altAddr+":"+port)
 			if err != nil {
-				monitor.Rec53Log.Debugf("[ITER] Query to secondary IP %s failed: %v", secondAddr, err)
-				// Record failure for secondary IP
-				iqv2 = globalIPPool.GetIPQualityV2(secondAddr)
+				monitor.Rec53Log.Debugf("[ITER] Query to alternate IP %s failed: %v", altAddr, err)
+				// Record failure for alternate IP
+				iqv2 = globalIPPool.GetIPQualityV2(altAddr)
 				if iqv2 != nil {
 					iqv2.RecordFailure()
 				}
-				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, secondary IP also failed: %v",
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, alternate IP also failed: %v",
 					dns.RcodeToString[newResponse.Rcode], err)
 			}
 
-			// Secondary IP succeeded, update tracking
-			theBestIP = secondAddr
-			monitor.Rec53Log.Debugf("[ITER] Secondary IP %s succeeded after bad Rcode from primary", secondAddr)
+			// Alternate IP succeeded, update tracking
+			theBestIP = altAddr
+			monitor.Rec53Log.Debugf("[ITER] Alternate IP %s succeeded after bad Rcode from primary", altAddr)
 
-			// Record latency for secondary IP
+			// Record latency for alternate IP
 			iqv2 = globalIPPool.GetIPQualityV2(theBestIP)
 			if iqv2 != nil {
-				iqv2.RecordLatency(int32(rtt / time.Millisecond))
+				iqv2.RecordLatency(int32(altRtt / time.Millisecond))
 				// Export V2 percentile metrics to Prometheus
 				monitor.Rec53Metric.IPQualityV2GaugeSet(theBestIP,
 					float64(iqv2.GetP50Latency()),
@@ -436,22 +529,22 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 				)
 			}
 
-			// After successful secondary IP retry, check its response code
+			// After successful alternate IP retry, check its response code
 			s.response.Rcode = newResponse.Rcode
 			s.response.Ns = newResponse.Ns
 
-			// If secondary IP also returned bad Rcode, give up
+			// If alternate IP also returned bad Rcode, give up
 			if newResponse.Rcode != dns.RcodeSuccess {
 				if newResponse.Rcode == dns.RcodeNameError {
-					monitor.Rec53Log.Debugf("[ITER] Secondary IP returned NXDOMAIN")
+					monitor.Rec53Log.Debugf("[ITER] Alternate IP returned NXDOMAIN")
 					return QUERY_UPSTREAM_NO_ERROR, nil
 				}
-				monitor.Rec53Log.Debugf("[ITER] Secondary IP also returned bad Rcode: %s",
+				monitor.Rec53Log.Debugf("[ITER] Alternate IP also returned bad Rcode: %s",
 					dns.RcodeToString[newResponse.Rcode])
-				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("both primary and secondary IPs returned bad rcode: %s",
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("both primary and alternate IPs returned bad rcode: %s",
 					dns.RcodeToString[newResponse.Rcode])
 			}
-			// Secondary IP succeeded, continue to process response
+			// Alternate IP succeeded, continue to process response
 		default:
 			// Other unknown errors - return as error
 			monitor.Rec53Log.Debugf("[ITER] Non-success Rcode: %s", dns.RcodeToString[newResponse.Rcode])
