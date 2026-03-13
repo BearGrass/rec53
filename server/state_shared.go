@@ -1,6 +1,28 @@
 package server
 
-import "github.com/miekg/dns"
+import (
+	"context"
+
+	"github.com/miekg/dns"
+)
+
+// baseState holds the three fields common to every state struct and provides
+// default implementations of the getRequest / getResponse / getContext methods
+// defined by the stateMachine interface.
+type baseState struct {
+	request  *dns.Msg
+	response *dns.Msg
+	ctx      context.Context
+}
+
+func (b *baseState) getRequest() *dns.Msg  { return b.request }
+func (b *baseState) getResponse() *dns.Msg { return b.response }
+func (b *baseState) getContext() context.Context {
+	if b.ctx == nil {
+		return context.Background()
+	}
+	return b.ctx
+}
 
 // contextKeyType is the type for context keys
 type contextKeyType string

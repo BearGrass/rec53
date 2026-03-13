@@ -24,10 +24,6 @@ func (m *Metric) LatencyHistogramObserve(stage string, name string, qtype string
 	LatencyHistogramObserver.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype, "code": code}).Observe(latency)
 }
 
-func (m *Metric) IPQualityGaugeSet(ip string, quality float64) {
-	IPQuality.With(prometheus.Labels{"ip": ip}).Set(quality)
-}
-
 // IPQualityV2GaugeSet sets the P50, P95, P99 latency gauges for an IP
 func (m *Metric) IPQualityV2GaugeSet(ip string, p50, p95, p99 float64) {
 	IPQualityV2_P50.With(prometheus.Labels{"ip": ip}).Set(p50)
@@ -40,7 +36,6 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
 	m.reg.MustRegister(OutCounter)
 	m.reg.MustRegister(LatencyHistogramObserver)
-	m.reg.MustRegister(IPQuality)
 	m.reg.MustRegister(IPQualityV2_P50)
 	m.reg.MustRegister(IPQualityV2_P95)
 	m.reg.MustRegister(IPQualityV2_P99)
@@ -82,6 +77,7 @@ func ShutdownMetric(ctx context.Context) error {
 // tests. It does not register any Prometheus collectors or bind an HTTP
 // listener, so it is safe to call from TestMain or individual test functions
 // without causing duplicate-registration panics.
+// Only use in tests.
 func InitMetricForTest() {
 	Rec53Metric = &Metric{}
 }

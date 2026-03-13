@@ -116,7 +116,7 @@ func (m *MockDNSServer) GetIP() string {
 // TestIterState_NilRequest tests error handling for nil request
 func TestIterState_NilRequest(t *testing.T) {
 	resp := new(dns.Msg)
-	state := newQueryUpstreamState(nil, resp)
+	state := newQueryUpstreamState(nil, resp, context.Background())
 	ret, err := state.handle(nil, resp)
 
 	if err == nil {
@@ -130,7 +130,7 @@ func TestIterState_NilRequest(t *testing.T) {
 // TestIterState_NilResponse tests error handling for nil response
 func TestIterState_NilResponse(t *testing.T) {
 	req := new(dns.Msg)
-	state := newQueryUpstreamState(req, nil)
+	state := newQueryUpstreamState(req, nil, context.Background())
 	ret, err := state.handle(req, nil)
 
 	if err == nil {
@@ -148,7 +148,7 @@ func TestIterState_EmptyExtra(t *testing.T) {
 	resp := new(dns.Msg)
 	// No extra section
 
-	state := newQueryUpstreamState(req, resp)
+	state := newQueryUpstreamState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -172,7 +172,7 @@ func TestIterState_NoARecordsInExtra(t *testing.T) {
 		},
 	}
 
-	state := newQueryUpstreamState(req, resp)
+	state := newQueryUpstreamState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -281,164 +281,6 @@ func TestGetBestAddressAndPrefetchIPs_LatencyBased(t *testing.T) {
 	if bestIP != "192.0.2.2" {
 		t.Errorf("expected bestIP 192.0.2.2 (lowest latency), got %s", bestIP)
 	}
-}
-
-// =============================================================================
-// IPQuality Tests (used by iterState)
-// =============================================================================
-
-// TestIPQualityOperations tests IPQuality operations used in iterState
-func TestIPQualityOperations(t *testing.T) {
-	t.Run("new IPQuality has default latency", func(t *testing.T) {
-		ipq := NewIPQuality()
-		if ipq.GetLatency() != INIT_IP_LATENCY {
-			t.Errorf("expected initial latency %d, got %d", INIT_IP_LATENCY, ipq.GetLatency())
-		}
-		if !ipq.IsInit() {
-			t.Error("expected new IPQuality to be initialized")
-		}
-	})
-
-	t.Run("SetLatency updates value", func(t *testing.T) {
-		ipq := NewIPQuality()
-		ipq.SetLatency(500)
-		if ipq.GetLatency() != 500 {
-			t.Errorf("expected latency 500, got %d", ipq.GetLatency())
-		}
-	})
-
-	t.Run("SetLatencyAndState marks as uninitialized", func(t *testing.T) {
-		ipq := NewIPQuality()
-		ipq.SetLatencyAndState(300)
-		if ipq.GetLatency() != 300 {
-			t.Errorf("expected latency 300, got %d", ipq.GetLatency())
-		}
-		if ipq.IsInit() {
-			t.Error("expected IPQuality to be uninitialized after SetLatencyAndState")
-		}
-	})
-
-	t.Run("concurrent access is safe", func(t *testing.T) {
-		ipq := NewIPQuality()
-		var wg sync.WaitGroup
-
-		// Concurrent writes
-		for i := 0; i < 100; i++ {
-			wg.Add(1)
-			go func(val int32) {
-				defer wg.Done()
-				ipq.SetLatency(val)
-			}(int32(i))
-		}
-
-		// Concurrent reads
-		for i := 0; i < 100; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_ = ipq.GetLatency()
-			}()
-		}
-
-		wg.Wait()
-		// Test passes if no race condition detected
-	})
-}
-
-// =============================================================================
-// IPPool Tests for iterState dependencies
-// =============================================================================
-
-// TestIPPool_GetBestIPs tests the getBestIPs method used by iterState
-func TestIPPool_GetBestIPs(t *testing.T) {
-	globalIPPool = NewIPPool()
-
-	t.Run("empty list returns empty strings", func(t *testing.T) {
-		best, second := globalIPPool.getBestIPs([]string{})
-		if best != "" || second != "" {
-			t.Errorf("expected empty strings, got best=%s, second=%s", best, second)
-		}
-	})
-
-	t.Run("single IP returns that IP", func(t *testing.T) {
-		best, second := globalIPPool.getBestIPs([]string{"192.0.2.1"})
-		if best != "192.0.2.1" {
-			t.Errorf("expected 192.0.2.1, got %s", best)
-		}
-		if second != "" {
-			t.Errorf("expected empty second, got %s", second)
-		}
-	})
-
-	t.Run("lower latency IP is preferred", func(t *testing.T) {
-		globalIPPool = NewIPPool()
-
-		// Set different latencies
-		ipq1 := &IPQuality{latency: 1000}
-		ipq1.isInit.Store(true)
-		globalIPPool.SetIPQuality("192.0.2.1", ipq1)
-
-		ipq2 := &IPQuality{latency: 100} // Lower latency
-		ipq2.isInit.Store(true)
-		globalIPPool.SetIPQuality("192.0.2.2", ipq2)
-
-		best, _ := globalIPPool.getBestIPs([]string{"192.0.2.1", "192.0.2.2"})
-		if best != "192.0.2.2" {
-			t.Errorf("expected 192.0.2.2 (lower latency), got %s", best)
-		}
-	})
-
-	t.Run("MAX_IP_LATENCY IP is not preferred", func(t *testing.T) {
-		globalIPPool = NewIPPool()
-
-		// One IP has max latency (failed), one has normal
-		ipq1 := &IPQuality{latency: MAX_IP_LATENCY}
-		ipq1.isInit.Store(true)
-		globalIPPool.SetIPQuality("192.0.2.1", ipq1)
-
-		ipq2 := &IPQuality{latency: 500}
-		ipq2.isInit.Store(true)
-		globalIPPool.SetIPQuality("192.0.2.2", ipq2)
-
-		best, _ := globalIPPool.getBestIPs([]string{"192.0.2.1", "192.0.2.2"})
-		if best != "192.0.2.2" {
-			t.Errorf("expected 192.0.2.2 (not failed), got %s", best)
-		}
-	})
-}
-
-// TestIPPool_UpdateIPQuality tests the updateIPQuality method
-func TestIPPool_UpdateIPQuality(t *testing.T) {
-	globalIPPool = NewIPPool()
-
-	t.Run("creates new IPQuality if not exists", func(t *testing.T) {
-		globalIPPool.updateIPQuality("192.0.2.1", 150)
-
-		ipq := globalIPPool.GetIPQuality("192.0.2.1")
-		if ipq == nil {
-			t.Fatal("expected IPQuality to be created")
-		}
-		if ipq.GetLatency() != 150 {
-			t.Errorf("expected latency 150, got %d", ipq.GetLatency())
-		}
-	})
-
-	t.Run("updates existing IPQuality", func(t *testing.T) {
-		globalIPPool = NewIPPool()
-
-		// Create initial
-		ipq := &IPQuality{latency: 1000}
-		ipq.isInit.Store(true)
-		globalIPPool.SetIPQuality("192.0.2.1", ipq)
-
-		// Update
-		globalIPPool.updateIPQuality("192.0.2.1", 200)
-
-		updated := globalIPPool.GetIPQuality("192.0.2.1")
-		if updated.GetLatency() != 200 {
-			t.Errorf("expected latency 200, got %d", updated.GetLatency())
-		}
-	})
 }
 
 // =============================================================================
@@ -930,7 +772,7 @@ func TestInGlueStateNSRelevance(t *testing.T) {
 				resp = makeResponseWithNS(tt.nsZone)
 			}
 
-			state := newExtractGlueState(req, resp)
+			state := newExtractGlueState(req, resp, context.Background())
 			code, err := state.handle(req, resp)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1146,7 +988,7 @@ func TestCrossdomainCNAMEColdCacheResolves(t *testing.T) {
 	req.SetQuestion("www.d1.test.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	stm := newStateInitStateWithContext(req, resp, ctx)
+	stm := newStateInitState(req, resp, ctx)
 	result, err := Change(stm)
 
 	if err != nil {
@@ -1476,7 +1318,7 @@ func TestSameZoneCNAMEPreservesGlue(t *testing.T) {
 		},
 	}
 
-	state := newExtractGlueState(req, resp)
+	state := newExtractGlueState(req, resp, context.Background())
 	code, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1577,7 +1419,7 @@ func TestQueryUpstreamState_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -1656,7 +1498,7 @@ func TestQueryUpstreamState_PrimaryFailoverToSecondary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1708,7 +1550,7 @@ func TestQueryUpstreamState_BothIPsFail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -1801,7 +1643,7 @@ func TestQueryUpstreamState_BadRcodeServfail_SecondarySucceeds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1846,7 +1688,7 @@ func TestQueryUpstreamState_BadRcodeRefused_NoSecondary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -1899,7 +1741,7 @@ func TestQueryUpstreamState_QuestionMismatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -1950,7 +1792,7 @@ func TestQueryUpstreamState_EmptyQuestionSection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
@@ -1992,7 +1834,7 @@ func TestQueryUpstreamState_NXDOMAIN(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state := newQueryUpstreamStateWithContext(req, resp, ctx)
+	state := newQueryUpstreamState(req, resp, ctx)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {

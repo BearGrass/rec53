@@ -26,15 +26,6 @@ var (
 		},
 		[]string{"stage", "name", "type", "code"},
 	)
-	IPQuality = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "rec53_ip_quality",
-			Help: "rec53 ip quality",
-		},
-		[]string{"ip"},
-	)
-
-	// IPQualityV2 metrics - percentile-based latency tracking
 	IPQualityV2_P50 = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rec53_ipv2_p50_latency_ms",

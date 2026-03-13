@@ -64,7 +64,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	monitor.Rec53Metric.InCounterAdd("request", r.Question[0].Name, dns.TypeToString[r.Question[0].Qtype])
-	stm := newStateInitState(r, reply)
+	stm := newStateInitState(r, reply, context.Background())
 	result, err := Change(stm)
 	if err != nil {
 		monitor.Rec53Log.Errorf("Change state error: %s", err.Error())

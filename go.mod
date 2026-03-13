@@ -1,6 +1,6 @@
 module rec53
 
-go 1.21
+go 1.23
 
 require (
 	github.com/miekg/dns v1.1.52
@@ -8,6 +8,7 @@ require (
 	github.com/prometheus/client_golang v1.14.0
 	go.uber.org/zap v1.24.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -26,5 +27,4 @@ require (
 	golang.org/x/sys v0.2.0 // indirect
 	golang.org/x/tools v0.3.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

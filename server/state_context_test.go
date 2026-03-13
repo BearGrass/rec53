@@ -22,7 +22,7 @@ func TestCacheLookupState_CacheHitEmptyAnswer(t *testing.T) {
 	req.SetQuestion(domain, dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newCacheLookupState(req, resp)
+	s := newCacheLookupState(req, resp, context.Background())
 	ret, err := s.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -54,7 +54,7 @@ func TestCacheLookupStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newCacheLookupStateWithContext(req, resp, nil)
+	s := newCacheLookupState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newCacheLookupStateWithContext(nil)")
 	}
@@ -74,7 +74,7 @@ func TestClassifyRespStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newClassifyRespStateWithContext(req, resp, nil)
+	s := newClassifyRespState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newClassifyRespStateWithContext(nil)")
 	}
@@ -90,7 +90,7 @@ func TestExtractGlueStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newExtractGlueStateWithContext(req, resp, nil)
+	s := newExtractGlueState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newExtractGlueStateWithContext(nil)")
 	}
@@ -106,7 +106,7 @@ func TestStateInitStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newStateInitStateWithContext(req, resp, nil)
+	s := newStateInitState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newStateInitStateWithContext(nil)")
 	}
@@ -122,7 +122,7 @@ func TestLookupNSCacheStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newLookupNSCacheStateWithContext(req, resp, nil)
+	s := newLookupNSCacheState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newLookupNSCacheStateWithContext(nil)")
 	}
@@ -138,7 +138,7 @@ func TestQueryUpstreamStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newQueryUpstreamStateWithContext(req, resp, nil)
+	s := newQueryUpstreamState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newQueryUpstreamStateWithContext(nil)")
 	}
@@ -154,7 +154,7 @@ func TestReturnRespStateWithContext_NilCtx(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	s := newReturnRespStateWithContext(req, resp, nil)
+	s := newReturnRespState(req, resp, nil)
 	if s.ctx == nil {
 		t.Fatal("expected ctx to be non-nil after newReturnRespStateWithContext(nil)")
 	}
@@ -178,49 +178,49 @@ func TestStateWithContext_PropagatesCtx(t *testing.T) {
 	resp := new(dns.Msg)
 
 	t.Run("cacheLookup", func(t *testing.T) {
-		s := newCacheLookupStateWithContext(req, resp, parent)
+		s := newCacheLookupState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("classifyResp", func(t *testing.T) {
-		s := newClassifyRespStateWithContext(req, resp, parent)
+		s := newClassifyRespState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("extractGlue", func(t *testing.T) {
-		s := newExtractGlueStateWithContext(req, resp, parent)
+		s := newExtractGlueState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("stateInit", func(t *testing.T) {
-		s := newStateInitStateWithContext(req, resp, parent)
+		s := newStateInitState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("lookupNSCache", func(t *testing.T) {
-		s := newLookupNSCacheStateWithContext(req, resp, parent)
+		s := newLookupNSCacheState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("queryUpstream", func(t *testing.T) {
-		s := newQueryUpstreamStateWithContext(req, resp, parent)
+		s := newQueryUpstreamState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}
 	})
 
 	t.Run("returnResp", func(t *testing.T) {
-		s := newReturnRespStateWithContext(req, resp, parent)
+		s := newReturnRespState(req, resp, parent)
 		if s.getContext().Value(key) != "marker" {
 			t.Error("context value not propagated")
 		}

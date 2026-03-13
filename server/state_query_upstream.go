@@ -13,16 +13,16 @@ import (
 )
 
 // iterPortOverride allows tests to inject a custom port for upstream queries.
-// When non-empty, iterState uses this port instead of the default "53".
+// When non-empty, queryUpstreamState uses this port instead of the default "53".
 var iterPortOverride string
 
-// SetIterPort overrides the port used by iterState for upstream DNS queries.
+// SetIterPort overrides the port used by queryUpstreamState for upstream DNS queries.
 // This is intended for testing with mock servers on non-standard ports.
 func SetIterPort(port string) {
 	iterPortOverride = port
 }
 
-// ResetIterPort clears the port override so iterState uses port 53 again.
+// ResetIterPort clears the port override so queryUpstreamState uses port 53 again.
 func ResetIterPort() {
 	iterPortOverride = ""
 }
@@ -36,49 +36,21 @@ func getIterPort() string {
 }
 
 type queryUpstreamState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newQueryUpstreamState(req, resp *dns.Msg) *queryUpstreamState {
-	return &queryUpstreamState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newQueryUpstreamStateWithContext creates a queryUpstreamState with a specific context
-func newQueryUpstreamStateWithContext(req, resp *dns.Msg, ctx context.Context) *queryUpstreamState {
+// newQueryUpstreamState creates a queryUpstreamState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newQueryUpstreamState(req, resp *dns.Msg, ctx context.Context) *queryUpstreamState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &queryUpstreamState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &queryUpstreamState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *queryUpstreamState) getCurrentState() int {
 	return QUERY_UPSTREAM
-}
-
-func (s *queryUpstreamState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *queryUpstreamState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *queryUpstreamState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func getIPListFromResponse(response *dns.Msg) []string {
@@ -199,7 +171,7 @@ func resolveNSIPsConcurrently(ctx context.Context, nsNames []string) []string {
 
 			// Use the state machine to resolve the NS name
 			// Pass context through to nested resolutions
-			stm := newStateInitStateWithContext(req, resp, ctx)
+			stm := newStateInitState(req, resp, ctx)
 			result, err := Change(stm)
 			if err != nil {
 				monitor.Rec53Log.Debugf("[ITER] Failed to resolve NS %s: %v", name, err)
@@ -294,10 +266,6 @@ func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 		return "", "", fmt.Errorf("no ip in extra")
 	}
 	bestIP, backupIP := globalIPPool.GetBestIPsV2(ipList)
-	if bestIP != "" {
-		IPs := globalIPPool.GetPrefetchIPs(bestIP)
-		globalIPPool.PrefetchIPs(IPs)
-	}
 	return bestIP, backupIP, nil
 }
 

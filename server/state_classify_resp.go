@@ -10,49 +10,21 @@ import (
 )
 
 type classifyRespState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newClassifyRespState(req, resp *dns.Msg) *classifyRespState {
-	return &classifyRespState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newClassifyRespStateWithContext creates a classifyRespState with a specific context
-func newClassifyRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *classifyRespState {
+// newClassifyRespState creates a classifyRespState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newClassifyRespState(req, resp *dns.Msg, ctx context.Context) *classifyRespState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &classifyRespState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &classifyRespState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *classifyRespState) getCurrentState() int {
 	return CLASSIFY_RESP
-}
-
-func (s *classifyRespState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *classifyRespState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *classifyRespState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func (s *classifyRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {

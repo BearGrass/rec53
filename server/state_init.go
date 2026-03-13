@@ -10,49 +10,21 @@ import (
 )
 
 type stateInitState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newStateInitState(req, resp *dns.Msg) *stateInitState {
-	return &stateInitState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newStateInitStateWithContext creates a stateInitState with a specific context
-func newStateInitStateWithContext(req, resp *dns.Msg, ctx context.Context) *stateInitState {
+// newStateInitState creates a stateInitState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newStateInitState(req, resp *dns.Msg, ctx context.Context) *stateInitState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &stateInitState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &stateInitState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *stateInitState) getCurrentState() int {
 	return STATE_INIT
-}
-
-func (s *stateInitState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *stateInitState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *stateInitState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func (s *stateInitState) handle(request *dns.Msg, response *dns.Msg) (int, error) {

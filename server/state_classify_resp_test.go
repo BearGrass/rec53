@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -15,7 +16,7 @@ func TestClassifyRespState_NilInput(t *testing.T) {
 	t.Run("nil request", func(t *testing.T) {
 		resp := new(dns.Msg)
 		resp.SetQuestion("example.com.", dns.TypeA)
-		state := newClassifyRespState(nil, resp)
+		state := newClassifyRespState(nil, resp, context.Background())
 		ret, err := state.handle(nil, resp)
 		if err == nil {
 			t.Error("expected error for nil request")
@@ -28,7 +29,7 @@ func TestClassifyRespState_NilInput(t *testing.T) {
 	t.Run("nil response", func(t *testing.T) {
 		req := new(dns.Msg)
 		req.SetQuestion("example.com.", dns.TypeA)
-		state := newClassifyRespState(req, nil)
+		state := newClassifyRespState(req, nil, context.Background())
 		ret, err := state.handle(req, nil)
 		if err == nil {
 			t.Error("expected error for nil response")
@@ -61,7 +62,7 @@ func TestClassifyRespState_NXDOMAIN(t *testing.T) {
 		},
 	}
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -93,7 +94,7 @@ func TestClassifyRespState_NODATA(t *testing.T) {
 		},
 	}
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -120,7 +121,7 @@ func TestClassifyRespState_NoAnswerNoSOA(t *testing.T) {
 	}
 	// No SOA in authority
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -174,7 +175,7 @@ func TestClassifyRespState_MatchingType(t *testing.T) {
 			resp.Rcode = dns.RcodeSuccess
 			resp.Answer = []dns.RR{tt.ansRR}
 
-			state := newClassifyRespState(req, resp)
+			state := newClassifyRespState(req, resp, context.Background())
 			ret, err := state.handle(req, resp)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -202,7 +203,7 @@ func TestClassifyRespState_CNAME_followed(t *testing.T) {
 		},
 	}
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -227,7 +228,7 @@ func TestClassifyRespState_CNAME_is_answer(t *testing.T) {
 		},
 	}
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -255,7 +256,7 @@ func TestClassifyRespState_WrongTypeNoMatch(t *testing.T) {
 		},
 	}
 
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
