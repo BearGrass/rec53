@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -191,7 +192,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := newClassifyRespState(tt.request, tt.response)
+			state := newClassifyRespState(tt.request, tt.response, context.Background())
 			ret, err := state.handle(tt.request, tt.response)
 
 			if (err != nil) != tt.expectError {
@@ -259,7 +260,7 @@ func TestInCacheStateHandle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			response := new(dns.Msg)
-			state := newCacheLookupState(tt.request, response)
+			state := newCacheLookupState(tt.request, response, context.Background())
 			ret, err := state.handle(tt.request, response)
 
 			if err != nil {
@@ -281,7 +282,7 @@ func TestStateInitState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newStateInitState(req, resp)
+		state := newStateInitState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -297,7 +298,7 @@ func TestStateInitState(t *testing.T) {
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newStateInitState(nil, resp)
+		state := newStateInitState(nil, resp, context.Background())
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -307,7 +308,7 @@ func TestStateInitState(t *testing.T) {
 
 	t.Run("nil response error", func(t *testing.T) {
 		req := new(dns.Msg)
-		state := newStateInitState(req, nil)
+		state := newStateInitState(req, nil, context.Background())
 		_, err := state.handle(req, nil)
 
 		if err == nil {
@@ -335,7 +336,7 @@ func TestInGlueState(t *testing.T) {
 			},
 		}
 
-		state := newExtractGlueState(req, resp)
+		state := newExtractGlueState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -351,7 +352,7 @@ func TestInGlueState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newExtractGlueState(req, resp)
+		state := newExtractGlueState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -364,7 +365,7 @@ func TestInGlueState(t *testing.T) {
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newExtractGlueState(nil, resp)
+		state := newExtractGlueState(nil, resp, context.Background())
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -386,7 +387,7 @@ func TestRetRespState(t *testing.T) {
 			},
 		}
 
-		state := newReturnRespState(req, resp)
+		state := newReturnRespState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -402,7 +403,7 @@ func TestRetRespState(t *testing.T) {
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newReturnRespState(nil, resp)
+		state := newReturnRespState(nil, resp, context.Background())
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -439,7 +440,7 @@ func TestInGlueCacheState(t *testing.T) {
 		req.SetQuestion("www.example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newLookupNSCacheState(req, resp)
+		state := newLookupNSCacheState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -457,7 +458,7 @@ func TestInGlueCacheState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newLookupNSCacheState(req, resp)
+		state := newLookupNSCacheState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
@@ -475,7 +476,7 @@ func TestInGlueCacheState(t *testing.T) {
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newLookupNSCacheState(nil, resp)
+		state := newLookupNSCacheState(nil, resp, context.Background())
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -572,7 +573,7 @@ func TestChangeMaxIterations(t *testing.T) {
 func TestIterState(t *testing.T) {
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newQueryUpstreamState(nil, resp)
+		state := newQueryUpstreamState(nil, resp, context.Background())
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -582,7 +583,7 @@ func TestIterState(t *testing.T) {
 
 	t.Run("nil response error", func(t *testing.T) {
 		req := new(dns.Msg)
-		state := newQueryUpstreamState(req, nil)
+		state := newQueryUpstreamState(req, nil, context.Background())
 		_, err := state.handle(req, nil)
 
 		if err == nil {
@@ -595,7 +596,7 @@ func TestIterState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newQueryUpstreamState(req, resp)
+		state := newQueryUpstreamState(req, resp, context.Background())
 		ret, err := state.handle(req, resp)
 
 		if err == nil {
@@ -650,7 +651,7 @@ func TestChange_RetRespState(t *testing.T) {
 	}
 
 	// Test RETURN_RESP state directly - this is a terminal state
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -703,7 +704,7 @@ func TestChange_MultipleAnswerRecords(t *testing.T) {
 		},
 	}
 
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -730,7 +731,7 @@ func TestChange_EmptyAnswer(t *testing.T) {
 	resp.SetReply(req)
 	// No answers
 
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -766,7 +767,7 @@ func TestChange_CNAMEInAnswer(t *testing.T) {
 		},
 	}
 
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -799,7 +800,7 @@ func TestChange_NXDOMAINResponse(t *testing.T) {
 	resp.SetReply(req)
 	resp.Rcode = dns.RcodeNameError // NXDOMAIN
 
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -831,7 +832,7 @@ func TestChange_AAAARecord(t *testing.T) {
 		},
 	}
 
-	retState := newReturnRespState(req, resp)
+	retState := newReturnRespState(req, resp, context.Background())
 	result, err := Change(retState)
 
 	if err != nil {
@@ -955,7 +956,7 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := newClassifyRespState(tt.request, tt.response)
+			state := newClassifyRespState(tt.request, tt.response, context.Background())
 			ret, err := state.handle(tt.request, tt.response)
 
 			if err != nil {
@@ -1004,7 +1005,7 @@ func TestCNAMEChain_ClearStaleRecords(t *testing.T) {
 
 	// Simulate what happens in Change() when CLASSIFY_RESP_GET_CNAME is returned
 	// This is the code path at state_machine.go:83-105
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1086,7 +1087,7 @@ func TestCNAMEChain_MultiLevelResolution(t *testing.T) {
 				}
 			}
 
-			state := newClassifyRespState(req, resp)
+			state := newClassifyRespState(req, resp, context.Background())
 			ret, err := state.handle(req, resp)
 
 			if err != nil {
@@ -1178,7 +1179,7 @@ func TestCNAMEChain_CrossZoneResolution(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1351,7 +1352,7 @@ func TestCNAMEChain_ValidNSDelegation(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1419,7 +1420,7 @@ func TestCNAMEChain_StaleNSDelegation(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newClassifyRespState(req, resp)
+	state := newClassifyRespState(req, resp, context.Background())
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
@@ -1464,7 +1465,7 @@ func TestStateInit_FORMERR_NoQuestion(t *testing.T) {
 	req.Question = nil
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	ret, err := stm.handle(req, resp)
 
 	if err != nil {
@@ -1486,7 +1487,7 @@ func TestStateInit_FORMERR_MultipleQuestions(t *testing.T) {
 	}
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	ret, err := stm.handle(req, resp)
 
 	if err != nil {
@@ -1506,7 +1507,7 @@ func TestStateInit_FORMERR_QRSet(t *testing.T) {
 	req.Response = true // QR=1: this is a response, not a query
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	ret, err := stm.handle(req, resp)
 
 	if err != nil {
@@ -1526,7 +1527,7 @@ func TestStateInit_FORMERR_NonQueryOpcode(t *testing.T) {
 	req.Opcode = dns.OpcodeStatus // OPCODE=2, not QUERY
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	ret, err := stm.handle(req, resp)
 
 	if err != nil {
@@ -1545,7 +1546,7 @@ func TestStateInit_ValidQuery_NoError(t *testing.T) {
 	req.SetQuestion("example.com.", dns.TypeA)
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	ret, err := stm.handle(req, resp)
 
 	if err != nil {
@@ -1561,7 +1562,7 @@ func TestChange_FORMERR_NoQuestion(t *testing.T) {
 	req.Question = nil
 	resp := new(dns.Msg)
 
-	stm := newStateInitState(req, resp)
+	stm := newStateInitState(req, resp, context.Background())
 	result, err := Change(stm)
 
 	if err != nil {

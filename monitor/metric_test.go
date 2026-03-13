@@ -18,7 +18,6 @@ func unregisterMetrics() {
 	prometheus.Unregister(InCounter)
 	prometheus.Unregister(OutCounter)
 	prometheus.Unregister(LatencyHistogramObserver)
-	prometheus.Unregister(IPQuality)
 	prometheus.Unregister(IPQualityV2_P50)
 	prometheus.Unregister(IPQualityV2_P95)
 	prometheus.Unregister(IPQualityV2_P99)
@@ -117,43 +116,6 @@ func TestMetric_LatencyHistogramObserve(t *testing.T) {
 
 	// Record one more to ensure no panic
 	m.LatencyHistogramObserve("query", "example.com.", "A", "NOERROR", 200.0)
-}
-
-// TestMetric_IPQualityGaugeSet tests the IPQualityGaugeSet method
-func TestMetric_IPQualityGaugeSet(t *testing.T) {
-	unregisterMetrics()
-	reg := prometheus.NewRegistry()
-	m := &Metric{reg: reg}
-	m.Register()
-
-	// Set IP quality
-	m.IPQualityGaugeSet("192.0.2.1", 50.5)
-
-	// Verify gauge was set
-	value := testutil.ToFloat64(IPQuality.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
-	if value != 50.5 {
-		t.Errorf("Expected gauge to be 50.5, got %f", value)
-	}
-
-	// Update IP quality (gauge should overwrite)
-	m.IPQualityGaugeSet("192.0.2.1", 100.0)
-	value = testutil.ToFloat64(IPQuality.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
-	if value != 100.0 {
-		t.Errorf("Expected gauge to be 100.0, got %f", value)
-	}
-
-	// Set different IP
-	m.IPQualityGaugeSet("192.0.2.2", 25.0)
-	value = testutil.ToFloat64(IPQuality.With(prometheus.Labels{
-		"ip": "192.0.2.2",
-	}))
-	if value != 25.0 {
-		t.Errorf("Expected gauge to be 25.0, got %f", value)
-	}
 }
 
 // TestMetric_IPQualityV2GaugeSet tests the IPQualityV2GaugeSet method for V2 percentile metrics
@@ -326,7 +288,6 @@ func TestMetricConcurrentAccess(t *testing.T) {
 				m.InCounterAdd("concurrent", "test.com.", "A")
 				m.OutCounterAdd("concurrent", "test.com.", "A", "NOERROR")
 				m.LatencyHistogramObserve("concurrent", "test.com.", "A", "NOERROR", float64(j))
-				m.IPQualityGaugeSet("192.0.2.1", float64(j))
 			}
 			done <- true
 		}(i)

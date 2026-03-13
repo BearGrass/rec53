@@ -8,49 +8,21 @@ import (
 )
 
 type extractGlueState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newExtractGlueState(req, resp *dns.Msg) *extractGlueState {
-	return &extractGlueState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newExtractGlueStateWithContext creates an extractGlueState with a specific context
-func newExtractGlueStateWithContext(req, resp *dns.Msg, ctx context.Context) *extractGlueState {
+// newExtractGlueState creates an extractGlueState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newExtractGlueState(req, resp *dns.Msg, ctx context.Context) *extractGlueState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &extractGlueState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &extractGlueState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *extractGlueState) getCurrentState() int {
 	return EXTRACT_GLUE
-}
-
-func (s *extractGlueState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *extractGlueState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *extractGlueState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func (s *extractGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {

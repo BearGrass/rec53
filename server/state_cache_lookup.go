@@ -10,49 +10,21 @@ import (
 )
 
 type cacheLookupState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newCacheLookupState(req, resp *dns.Msg) *cacheLookupState {
-	return &cacheLookupState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newCacheLookupStateWithContext creates a cacheLookupState with a specific context
-func newCacheLookupStateWithContext(req, resp *dns.Msg, ctx context.Context) *cacheLookupState {
+// newCacheLookupState creates a cacheLookupState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newCacheLookupState(req, resp *dns.Msg, ctx context.Context) *cacheLookupState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &cacheLookupState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &cacheLookupState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *cacheLookupState) getCurrentState() int {
 	return CACHE_LOOKUP
-}
-
-func (s *cacheLookupState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *cacheLookupState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *cacheLookupState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func (s *cacheLookupState) handle(request *dns.Msg, response *dns.Msg) (int, error) {

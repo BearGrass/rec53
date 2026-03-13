@@ -11,49 +11,21 @@ import (
 )
 
 type lookupNSCacheState struct {
-	request  *dns.Msg
-	response *dns.Msg
-	ctx      context.Context
+	baseState
 }
 
-func newLookupNSCacheState(req, resp *dns.Msg) *lookupNSCacheState {
-	return &lookupNSCacheState{
-		request:  req,
-		response: resp,
-		ctx:      context.Background(),
-	}
-}
-
-// newLookupNSCacheStateWithContext creates a lookupNSCacheState with a specific context
-func newLookupNSCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *lookupNSCacheState {
+// newLookupNSCacheState creates a lookupNSCacheState with a specific context.
+// Pass context.Background() if no deadline or cancellation is needed.
+func newLookupNSCacheState(req, resp *dns.Msg, ctx context.Context) *lookupNSCacheState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &lookupNSCacheState{
-		request:  req,
-		response: resp,
-		ctx:      ctx,
-	}
+	return &lookupNSCacheState{baseState{request: req, response: resp, ctx: ctx}}
 }
 
 // implement stateMachine interface
 func (s *lookupNSCacheState) getCurrentState() int {
 	return LOOKUP_NS_CACHE
-}
-
-func (s *lookupNSCacheState) getRequest() *dns.Msg {
-	return s.request
-}
-
-func (s *lookupNSCacheState) getResponse() *dns.Msg {
-	return s.response
-}
-
-func (s *lookupNSCacheState) getContext() context.Context {
-	if s.ctx == nil {
-		return context.Background()
-	}
-	return s.ctx
 }
 
 func (s *lookupNSCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
