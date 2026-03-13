@@ -115,28 +115,28 @@ func (m *MockDNSServer) GetIP() string {
 // TestIterState_NilRequest tests error handling for nil request
 func TestIterState_NilRequest(t *testing.T) {
 	resp := new(dns.Msg)
-	state := newIterState(nil, resp)
+	state := newQueryUpstreamState(nil, resp)
 	ret, err := state.handle(nil, resp)
 
 	if err == nil {
 		t.Error("expected error for nil request")
 	}
-	if ret != ITER_COMMON_ERROR {
-		t.Errorf("expected ITER_COMMON_ERROR, got %d", ret)
+	if ret != QUERY_UPSTREAM_COMMON_ERROR {
+		t.Errorf("expected QUERY_UPSTREAM_COMMON_ERROR, got %d", ret)
 	}
 }
 
 // TestIterState_NilResponse tests error handling for nil response
 func TestIterState_NilResponse(t *testing.T) {
 	req := new(dns.Msg)
-	state := newIterState(req, nil)
+	state := newQueryUpstreamState(req, nil)
 	ret, err := state.handle(req, nil)
 
 	if err == nil {
 		t.Error("expected error for nil response")
 	}
-	if ret != ITER_COMMON_ERROR {
-		t.Errorf("expected ITER_COMMON_ERROR, got %d", ret)
+	if ret != QUERY_UPSTREAM_COMMON_ERROR {
+		t.Errorf("expected QUERY_UPSTREAM_COMMON_ERROR, got %d", ret)
 	}
 }
 
@@ -147,14 +147,14 @@ func TestIterState_EmptyExtra(t *testing.T) {
 	resp := new(dns.Msg)
 	// No extra section
 
-	state := newIterState(req, resp)
+	state := newQueryUpstreamState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
 		t.Error("expected error for empty extra section")
 	}
-	if ret != ITER_COMMON_ERROR {
-		t.Errorf("expected ITER_COMMON_ERROR, got %d", ret)
+	if ret != QUERY_UPSTREAM_COMMON_ERROR {
+		t.Errorf("expected QUERY_UPSTREAM_COMMON_ERROR, got %d", ret)
 	}
 }
 
@@ -171,14 +171,14 @@ func TestIterState_NoARecordsInExtra(t *testing.T) {
 		},
 	}
 
-	state := newIterState(req, resp)
+	state := newQueryUpstreamState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err == nil {
 		t.Error("expected error when no A records in extra")
 	}
-	if ret != ITER_COMMON_ERROR {
-		t.Errorf("expected ITER_COMMON_ERROR, got %d", ret)
+	if ret != QUERY_UPSTREAM_COMMON_ERROR {
+		t.Errorf("expected QUERY_UPSTREAM_COMMON_ERROR, got %d", ret)
 	}
 }
 
@@ -882,38 +882,38 @@ func TestInGlueStateNSRelevance(t *testing.T) {
 		wantNsCleared bool
 	}{
 		{
-			name:          "NS zone is ancestor of query domain → IN_GLUE_EXIST",
+			name:          "NS zone is ancestor of query domain → EXTRACT_GLUE_EXIST",
 			queryName:     "www.foo.akadns.net.",
 			nsZone:        "akadns.net.",
-			wantCode:      IN_GLUE_EXIST,
+			wantCode:      EXTRACT_GLUE_EXIST,
 			wantNsCleared: false,
 		},
 		{
-			name:          "NS zone equals query domain → IN_GLUE_EXIST",
+			name:          "NS zone equals query domain → EXTRACT_GLUE_EXIST",
 			queryName:     "akadns.net.",
 			nsZone:        "akadns.net.",
-			wantCode:      IN_GLUE_EXIST,
+			wantCode:      EXTRACT_GLUE_EXIST,
 			wantNsCleared: false,
 		},
 		{
-			name:          "NS zone unrelated to query domain → IN_GLUE_NOT_EXIST, Ns cleared",
+			name:          "NS zone unrelated to query domain → EXTRACT_GLUE_NOT_EXIST, Ns cleared",
 			queryName:     "www.huawei.com.c.cdnhwc1.com.",
 			nsZone:        "akadns.net.",
-			wantCode:      IN_GLUE_NOT_EXIST,
+			wantCode:      EXTRACT_GLUE_NOT_EXIST,
 			wantNsCleared: true,
 		},
 		{
-			name:          "NS zone is root → IN_GLUE_EXIST (universal ancestor)",
+			name:          "NS zone is root → EXTRACT_GLUE_EXIST (universal ancestor)",
 			queryName:     "www.example.com.",
 			nsZone:        ".",
-			wantCode:      IN_GLUE_EXIST,
+			wantCode:      EXTRACT_GLUE_EXIST,
 			wantNsCleared: false,
 		},
 		{
-			name:          "Empty Ns → IN_GLUE_NOT_EXIST",
+			name:          "Empty Ns → EXTRACT_GLUE_NOT_EXIST",
 			queryName:     "www.example.com.",
 			nsZone:        "", // signals: build empty response
-			wantCode:      IN_GLUE_NOT_EXIST,
+			wantCode:      EXTRACT_GLUE_NOT_EXIST,
 			wantNsCleared: false,
 		},
 	}
@@ -929,7 +929,7 @@ func TestInGlueStateNSRelevance(t *testing.T) {
 				resp = makeResponseWithNS(tt.nsZone)
 			}
 
-			state := newInGlueState(req, resp)
+			state := newExtractGlueState(req, resp)
 			code, err := state.handle(req, resp)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1050,7 +1050,7 @@ func startCNAMEChainMockDNS(t *testing.T) (port string, mockIP string) {
 			// Intentionally include NS for d1.test. (old domain) in the response.
 			// After this CNAME, the state machine will switch the question to www.d2.test.
 			// inGlueState MUST detect that d1.test. NS is unrelated to www.d2.test.
-			// and return IN_GLUE_NOT_EXIST instead of IN_GLUE_EXIST.
+			// and return EXTRACT_GLUE_NOT_EXIST instead of EXTRACT_GLUE_EXIST.
 			resp.Ns = []dns.RR{makeNS("d1.test.", "ns.d1.test.")}
 			resp.Extra = []dns.RR{makeGlue("ns.d1.test.")}
 
@@ -1134,7 +1134,7 @@ func startCNAMEChainMockDNS(t *testing.T) (port string, mockIP string) {
 // response, deliberately triggering the scenario where inGlueState might
 // incorrectly accept stale glue from a prior hop as valid for the new target
 // domain. The fix in inGlueState.handle must detect this and return
-// IN_GLUE_NOT_EXIST so the resolver fetches the correct delegation.
+// EXTRACT_GLUE_NOT_EXIST so the resolver fetches the correct delegation.
 func TestCrossdomainCNAMEColdCacheResolves(t *testing.T) {
 	startCNAMEChainMockDNS(t)
 
@@ -1187,7 +1187,7 @@ func TestCrossdomainCNAMEColdCacheResolves(t *testing.T) {
 
 // TestSameZoneCNAMEPreservesGlue verifies that when a CNAME target is within
 // the same delegated zone (e.g. foo.d1.test → bar.d1.test), the existing NS
-// glue for d1.test. is preserved by inGlueState (IN_GLUE_EXIST), avoiding an
+// glue for d1.test. is preserved by inGlueState (EXTRACT_GLUE_EXIST), avoiding an
 // unnecessary re-delegation round-trip.
 func TestSameZoneCNAMEPreservesGlue(t *testing.T) {
 	_, mockIP := startCNAMEChainMockDNS(t)
@@ -1214,13 +1214,13 @@ func TestSameZoneCNAMEPreservesGlue(t *testing.T) {
 		},
 	}
 
-	state := newInGlueState(req, resp)
+	state := newExtractGlueState(req, resp)
 	code, err := state.handle(req, resp)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if code != IN_GLUE_EXIST {
-		t.Errorf("same-zone CNAME: expected IN_GLUE_EXIST (%d), got %d", IN_GLUE_EXIST, code)
+	if code != EXTRACT_GLUE_EXIST {
+		t.Errorf("same-zone CNAME: expected EXTRACT_GLUE_EXIST (%d), got %d", EXTRACT_GLUE_EXIST, code)
 	}
 	if len(resp.Ns) == 0 {
 		t.Error("same-zone CNAME: NS glue was incorrectly cleared")

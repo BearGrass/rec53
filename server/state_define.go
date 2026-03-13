@@ -118,26 +118,26 @@ func (s *stateInitState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	return STATE_INIT_NO_ERROR, nil
 }
 
-type inCacheState struct {
+type cacheLookupState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newInCacheState(req, resp *dns.Msg) *inCacheState {
-	return &inCacheState{
+func newCacheLookupState(req, resp *dns.Msg) *cacheLookupState {
+	return &cacheLookupState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newInCacheStateWithContext creates an inCacheState with a specific context
-func newInCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *inCacheState {
+// newCacheLookupStateWithContext creates a cacheLookupState with a specific context
+func newCacheLookupStateWithContext(req, resp *dns.Msg, ctx context.Context) *cacheLookupState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &inCacheState{
+	return &cacheLookupState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -145,28 +145,28 @@ func newInCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *inCach
 }
 
 // implement stateMachine interface
-func (s *inCacheState) getCurrentState() int {
-	return IN_CACHE
+func (s *cacheLookupState) getCurrentState() int {
+	return CACHE_LOOKUP
 }
 
-func (s *inCacheState) getRequest() *dns.Msg {
+func (s *cacheLookupState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *inCacheState) getResponse() *dns.Msg {
+func (s *cacheLookupState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *inCacheState) getContext() context.Context {
+func (s *cacheLookupState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
 	return s.ctx
 }
 
-func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *cacheLookupState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_CACHE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return CACHE_LOOKUP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	q := request.Question[0]
 	monitor.Rec53Log.Debugf("try to get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
@@ -175,32 +175,32 @@ func (s *inCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) 
 		monitor.Rec53Log.Debugf("get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
 		if len(msgInCache.Answer) != 0 {
 			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
-			return IN_CACHE_HIT_CACHE, nil
+			return CACHE_LOOKUP_HIT, nil
 		}
 	}
-	return IN_CACHE_MISS_CACHE, nil
+	return CACHE_LOOKUP_MISS, nil
 }
 
-type checkRespState struct {
+type classifyRespState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newCheckRespState(req, resp *dns.Msg) *checkRespState {
-	return &checkRespState{
+func newClassifyRespState(req, resp *dns.Msg) *classifyRespState {
+	return &classifyRespState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newCheckRespStateWithContext creates a checkRespState with a specific context
-func newCheckRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *checkRespState {
+// newClassifyRespStateWithContext creates a classifyRespState with a specific context
+func newClassifyRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *classifyRespState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &checkRespState{
+	return &classifyRespState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -208,28 +208,28 @@ func newCheckRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *chec
 }
 
 // implement stateMachine interface
-func (s *checkRespState) getCurrentState() int {
-	return CHECK_RESP
+func (s *classifyRespState) getCurrentState() int {
+	return CLASSIFY_RESP
 }
 
-func (s *checkRespState) getRequest() *dns.Msg {
+func (s *classifyRespState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *checkRespState) getResponse() *dns.Msg {
+func (s *classifyRespState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *checkRespState) getContext() context.Context {
+func (s *classifyRespState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
 	return s.ctx
 }
 
-func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *classifyRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return CHECK_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return CLASSIFY_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 
 	qtype := request.Question[0].Qtype
@@ -249,7 +249,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 				setCacheCopyByType(qname, qtype, response, ttl)
 				monitor.Rec53Log.Debugf("[CHECK_RESP] Cached NXDOMAIN for %s (type: %s) with TTL: %d", qname, dns.TypeToString[qtype], ttl)
 			}
-			return CHECK_RESP_GET_NEGATIVE, nil
+			return CLASSIFY_RESP_GET_NEGATIVE, nil
 		} else if response.Rcode == dns.RcodeSuccess {
 			// NODATA: domain exists but has no records of the requested type
 			monitor.Rec53Log.Debugf("[CHECK_RESP] NODATA detected for %s (type: %s), returning negative response", qname, dns.TypeToString[qtype])
@@ -258,7 +258,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 				setCacheCopyByType(qname, qtype, response, ttl)
 				monitor.Rec53Log.Debugf("[CHECK_RESP] Cached NODATA for %s (type: %s) with TTL: %d", qname, dns.TypeToString[qtype], ttl)
 			}
-			return CHECK_RESP_GET_NEGATIVE, nil
+			return CLASSIFY_RESP_GET_NEGATIVE, nil
 		}
 	}
 
@@ -266,7 +266,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	if len(response.Answer) == 0 {
 		// No answers and no SOA (not a negative response), need to continue iteration
 		monitor.Rec53Log.Debugf("[CHECK_RESP] No answers (and no SOA), continuing to IN_GLUE")
-		return CHECK_RESP_GET_NS, nil
+		return CLASSIFY_RESP_GET_NS, nil
 	}
 
 	// Priority 3: Check if we have a matching record type in the answers
@@ -274,7 +274,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 		if rr.Header().Rrtype == qtype {
 			// Found a matching record type, return the answer
 			monitor.Rec53Log.Debugf("[CHECK_RESP] Found matching type %s, returning answer", dns.TypeToString[qtype])
-			return CHECK_RESP_GET_ANS, nil
+			return CLASSIFY_RESP_GET_ANS, nil
 		}
 	}
 
@@ -285,7 +285,7 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 			if cname, ok := rr.(*dns.CNAME); ok {
 				// Found a CNAME record, need to follow it
 				monitor.Rec53Log.Debugf("[CHECK_RESP] Found CNAME: %s -> %s", rr.Header().Name, cname.Target)
-				return CHECK_RESP_GET_CNAME, nil
+				return CLASSIFY_RESP_GET_CNAME, nil
 			}
 		}
 	}
@@ -296,29 +296,29 @@ func (s *checkRespState) handle(request *dns.Msg, response *dns.Msg) (int, error
 	// - The server returned a partial answer
 	// Continue iteration to get the correct type
 	monitor.Rec53Log.Debugf("[CHECK_RESP] No matching type %s in answers, continuing to IN_GLUE", dns.TypeToString[qtype])
-	return CHECK_RESP_GET_NS, nil
+	return CLASSIFY_RESP_GET_NS, nil
 }
 
-type inGlueState struct {
+type extractGlueState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newInGlueState(req, resp *dns.Msg) *inGlueState {
-	return &inGlueState{
+func newExtractGlueState(req, resp *dns.Msg) *extractGlueState {
+	return &extractGlueState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newInGlueStateWithContext creates an inGlueState with a specific context
-func newInGlueStateWithContext(req, resp *dns.Msg, ctx context.Context) *inGlueState {
+// newExtractGlueStateWithContext creates an extractGlueState with a specific context
+func newExtractGlueStateWithContext(req, resp *dns.Msg, ctx context.Context) *extractGlueState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &inGlueState{
+	return &extractGlueState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -326,28 +326,28 @@ func newInGlueStateWithContext(req, resp *dns.Msg, ctx context.Context) *inGlueS
 }
 
 // implement stateMachine interface
-func (s *inGlueState) getCurrentState() int {
-	return IN_GLUE
+func (s *extractGlueState) getCurrentState() int {
+	return EXTRACT_GLUE
 }
 
-func (s *inGlueState) getRequest() *dns.Msg {
+func (s *extractGlueState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *inGlueState) getResponse() *dns.Msg {
+func (s *extractGlueState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *inGlueState) getContext() context.Context {
+func (s *extractGlueState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
 	return s.ctx
 }
 
-func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *extractGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_GLUE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return EXTRACT_GLUE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	if len(response.Ns) != 0 && len(response.Extra) != 0 {
 		// We got glue from cache or iterator.
@@ -357,13 +357,13 @@ func (s *inGlueState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		nsZone := response.Ns[0].Header().Name
 		queryName := request.Question[0].Name
 		if dns.IsSubDomain(nsZone, queryName) {
-			return IN_GLUE_EXIST, nil
+			return EXTRACT_GLUE_EXIST, nil
 		}
 		// NS zone is unrelated to query domain; clear stale glue and re-delegate.
 		response.Ns = nil
 		response.Extra = nil
 	}
-	return IN_GLUE_NOT_EXIST, nil
+	return EXTRACT_GLUE_NOT_EXIST, nil
 }
 
 // iterPortOverride allows tests to inject a custom port for upstream queries.
@@ -389,26 +389,26 @@ func getIterPort() string {
 	return "53"
 }
 
-type iterState struct {
+type queryUpstreamState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newIterState(req, resp *dns.Msg) *iterState {
-	return &iterState{
+func newQueryUpstreamState(req, resp *dns.Msg) *queryUpstreamState {
+	return &queryUpstreamState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newIterStateWithContext creates an iterState with a specific context
-func newIterStateWithContext(req, resp *dns.Msg, ctx context.Context) *iterState {
+// newQueryUpstreamStateWithContext creates a queryUpstreamState with a specific context
+func newQueryUpstreamStateWithContext(req, resp *dns.Msg, ctx context.Context) *queryUpstreamState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &iterState{
+	return &queryUpstreamState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -416,19 +416,19 @@ func newIterStateWithContext(req, resp *dns.Msg, ctx context.Context) *iterState
 }
 
 // implement stateMachine interface
-func (s *iterState) getCurrentState() int {
-	return ITER
+func (s *queryUpstreamState) getCurrentState() int {
+	return QUERY_UPSTREAM
 }
 
-func (s *iterState) getRequest() *dns.Msg {
+func (s *queryUpstreamState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *iterState) getResponse() *dns.Msg {
+func (s *queryUpstreamState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *iterState) getContext() context.Context {
+func (s *queryUpstreamState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
@@ -655,15 +655,15 @@ func getBestAddressAndPrefetchIPs(ipList []string) (string, string, error) {
 	return bestIP, backupIP, nil
 }
 
-func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return ITER_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 
 	// Check context before doing any work — exit early if already cancelled
 	if err := s.ctx.Err(); err != nil {
 		monitor.Rec53Log.Debugf("[ITER] Context cancelled before query for %s: %v", request.Question[0].Name, err)
-		return ITER_COMMON_ERROR, err
+		return QUERY_UPSTREAM_COMMON_ERROR, err
 	}
 
 	monitor.Rec53Log.Debugf("[ITER] Querying: %s (type: %s)", request.Question[0].Name, dns.TypeToString[request.Question[0].Qtype])
@@ -705,7 +705,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 
 	bestAddr, secondAddr, err := getBestAddressAndPrefetchIPs(ipList)
 	if bestAddr == "" || err != nil {
-		return ITER_COMMON_ERROR, err
+		return QUERY_UPSTREAM_COMMON_ERROR, err
 	}
 
 	//send query to the best ip
@@ -724,7 +724,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		//try to use the second ip
 		if secondAddr == "" {
 			monitor.Rec53Log.Debugf("[ITER] No second IP available, returning error")
-			return ITER_COMMON_ERROR, err
+			return QUERY_UPSTREAM_COMMON_ERROR, err
 		}
 		monitor.Rec53Log.Debugf("[ITER] Retrying with second IP: %s", secondAddr)
 		newResponse, rtt, err = dnsClient.ExchangeContext(s.ctx, newQuery, secondAddr+":"+port)
@@ -735,7 +735,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			if iqv2 != nil {
 				iqv2.RecordFailure()
 			}
-			return ITER_COMMON_ERROR, err
+			return QUERY_UPSTREAM_COMMON_ERROR, err
 		}
 		theBestIP = secondAddr
 	}
@@ -768,9 +768,9 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 		case dns.RcodeNameError: // NXDOMAIN - domain does not exist
 			monitor.Rec53Log.Debugf("[ITER] NXDOMAIN received for %s", request.Question[0].Name)
 			// Return normally with NXDOMAIN code preserved
-			return ITER_NO_ERROR, nil
+			return QUERY_UPSTREAM_NO_ERROR, nil
 		case dns.RcodeSuccess:
-			return ITER_NO_ERROR, nil
+			return QUERY_UPSTREAM_NO_ERROR, nil
 		case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeFormatError, dns.RcodeNotImplemented:
 			// B-013: Bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) should trigger server switch
 			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with secondary IP",
@@ -786,7 +786,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			// Try secondary IP if available
 			if secondAddr == "" {
 				monitor.Rec53Log.Debugf("[ITER] No secondary IP available for retry, returning bad Rcode")
-				return ITER_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no secondary IP",
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no secondary IP",
 					dns.RcodeToString[newResponse.Rcode])
 			}
 
@@ -802,7 +802,7 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 				if iqv2 != nil {
 					iqv2.RecordFailure()
 				}
-				return ITER_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, secondary IP also failed: %v",
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, secondary IP also failed: %v",
 					dns.RcodeToString[newResponse.Rcode], err)
 			}
 
@@ -830,29 +830,29 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 			if newResponse.Rcode != dns.RcodeSuccess {
 				if newResponse.Rcode == dns.RcodeNameError {
 					monitor.Rec53Log.Debugf("[ITER] Secondary IP returned NXDOMAIN")
-					return ITER_NO_ERROR, nil
+					return QUERY_UPSTREAM_NO_ERROR, nil
 				}
 				monitor.Rec53Log.Debugf("[ITER] Secondary IP also returned bad Rcode: %s",
 					dns.RcodeToString[newResponse.Rcode])
-				return ITER_COMMON_ERROR, fmt.Errorf("both primary and secondary IPs returned bad rcode: %s",
+				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("both primary and secondary IPs returned bad rcode: %s",
 					dns.RcodeToString[newResponse.Rcode])
 			}
 			// Secondary IP succeeded, continue to process response
 		default:
 			// Other unknown errors - return as error
 			monitor.Rec53Log.Debugf("[ITER] Non-success Rcode: %s", dns.RcodeToString[newResponse.Rcode])
-			return ITER_COMMON_ERROR, fmt.Errorf("response rcode: %s",
+			return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("response rcode: %s",
 				dns.RcodeToString[newResponse.Rcode])
 		}
 	}
 	//check the response is the same as the request
 	if len(newResponse.Question) == 0 {
 		monitor.Rec53Log.Debugf("[ITER] Response has no question section")
-		return ITER_COMMON_ERROR, fmt.Errorf("response has no question")
+		return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("response has no question")
 	}
 	if newResponse.Question[0].Name != request.Question[0].Name {
 		monitor.Rec53Log.Debugf("[ITER] Question mismatch: response=%s, request=%s", newResponse.Question[0].Name, request.Question[0].Name)
-		return ITER_COMMON_ERROR, fmt.Errorf("response.Question is not the same as request")
+		return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("response.Question is not the same as request")
 	}
 	monitor.Rec53Log.Debugf("[ITER] Response validated, Answers: %d, Ns: %d, Extra: %d",
 		len(newResponse.Answer), len(newResponse.Ns), len(newResponse.Extra))
@@ -871,29 +871,29 @@ func (s *iterState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	s.response.Ns = newResponse.Ns
 	s.response.Extra = newResponse.Extra
 	monitor.Rec53Log.Debugf("[ITER] State complete, total answers: %d", len(s.response.Answer))
-	return ITER_NO_ERROR, nil
+	return QUERY_UPSTREAM_NO_ERROR, nil
 }
 
-type inGlueCacheState struct {
+type lookupNSCacheState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newInGlueCacheState(req, resp *dns.Msg) *inGlueCacheState {
-	return &inGlueCacheState{
+func newLookupNSCacheState(req, resp *dns.Msg) *lookupNSCacheState {
+	return &lookupNSCacheState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newInGlueCacheStateWithContext creates an inGlueCacheState with a specific context
-func newInGlueCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *inGlueCacheState {
+// newLookupNSCacheStateWithContext creates a lookupNSCacheState with a specific context
+func newLookupNSCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *lookupNSCacheState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &inGlueCacheState{
+	return &lookupNSCacheState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -901,67 +901,67 @@ func newInGlueCacheStateWithContext(req, resp *dns.Msg, ctx context.Context) *in
 }
 
 // implement stateMachine interface
-func (s *inGlueCacheState) getCurrentState() int {
-	return IN_GLUE_CACHE
+func (s *lookupNSCacheState) getCurrentState() int {
+	return LOOKUP_NS_CACHE
 }
 
-func (s *inGlueCacheState) getRequest() *dns.Msg {
+func (s *lookupNSCacheState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *inGlueCacheState) getResponse() *dns.Msg {
+func (s *lookupNSCacheState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *inGlueCacheState) getContext() context.Context {
+func (s *lookupNSCacheState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
 	return s.ctx
 }
 
-func (s *inGlueCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *lookupNSCacheState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return IN_GLUE_CACHE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return LOOKUP_NS_CACHE_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
 	zoneList := utils.GetZoneList(request.Question[0].Name)
 	for _, zone := range zoneList {
 		// Use getCacheCopy to avoid modifying cached message
 		if msgInCache, ok := getCacheCopy(zone); ok {
-			monitor.Rec53Log.Debug("get cache: ", zone, " in inGlueCacheState")
+			monitor.Rec53Log.Debug("get cache: ", zone, " in lookupNSCacheState")
 			if len(msgInCache.Ns) != 0 && len(msgInCache.Extra) != 0 {
 				s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
 				s.response.Extra = append(s.response.Extra, msgInCache.Extra...)
-				return IN_GLUE_CACHE_HIT_CACHE, nil
+				return LOOKUP_NS_CACHE_HIT, nil
 			}
 		}
 	}
 	rootGlue := utils.GetRootGlue()
 	s.response.Ns = append(s.response.Ns, rootGlue.Ns...)
 	s.response.Extra = append(s.response.Extra, rootGlue.Extra...)
-	return IN_CACHE_MISS_CACHE, nil
+	return LOOKUP_NS_CACHE_MISS, nil
 }
 
-type retRespState struct {
+type returnRespState struct {
 	request  *dns.Msg
 	response *dns.Msg
 	ctx      context.Context
 }
 
-func newRetRespState(req, resp *dns.Msg) *retRespState {
-	return &retRespState{
+func newReturnRespState(req, resp *dns.Msg) *returnRespState {
+	return &returnRespState{
 		request:  req,
 		response: resp,
 		ctx:      context.Background(),
 	}
 }
 
-// newRetRespStateWithContext creates a retRespState with a specific context
-func newRetRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *retRespState {
+// newReturnRespStateWithContext creates a returnRespState with a specific context
+func newReturnRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *returnRespState {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &retRespState{
+	return &returnRespState{
 		request:  req,
 		response: resp,
 		ctx:      ctx,
@@ -969,28 +969,28 @@ func newRetRespStateWithContext(req, resp *dns.Msg, ctx context.Context) *retRes
 }
 
 // implement stateMachine interface
-func (s *retRespState) getCurrentState() int {
-	return RET_RESP
+func (s *returnRespState) getCurrentState() int {
+	return RETURN_RESP
 }
 
-func (s *retRespState) getRequest() *dns.Msg {
+func (s *returnRespState) getRequest() *dns.Msg {
 	return s.request
 }
 
-func (s *retRespState) getResponse() *dns.Msg {
+func (s *returnRespState) getResponse() *dns.Msg {
 	return s.response
 }
 
-func (s *retRespState) getContext() context.Context {
+func (s *returnRespState) getContext() context.Context {
 	if s.ctx == nil {
 		return context.Background()
 	}
 	return s.ctx
 }
 
-func (s *retRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
+func (s *returnRespState) handle(request *dns.Msg, response *dns.Msg) (int, error) {
 	if request == nil || response == nil {
-		return RET_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
+		return RETURN_RESP_COMMON_ERROR, fmt.Errorf("request is nil or response is nil")
 	}
-	return RET_RESP_NO_ERROR, nil
+	return RETURN_RESP_NO_ERROR, nil
 }
