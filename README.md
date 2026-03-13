@@ -93,21 +93,22 @@ To use a custom list, specify `warmup.tlds`. Leave empty for the curated default
 
 ### First-Packet Resolution Latency (real network, 3-run average)
 
-The three scenarios below show the progression from worst-case to best-case:
+The three scenarios below show the progression from worst-case to best-case.
+Results reflect the **Happy Eyeballs** optimization (concurrent dual-upstream
+queries) and the **1.5 s upstream timeout** (down from 5 s):
 
 | Domain | Cold start (no warmup) | First packet (after warmup) | Cache hit |
 |--------|----------------------|----------------------------|-----------|
-| `www.qq.com` | ~2,539 ms | ~774 ms | ~0.17 ms |
-| `www.baidu.com` | ~467 ms | ~498 ms | ~0.20 ms |
-| `www.taobao.com` | ~593 ms | ~590 ms | ~0.13 ms |
+| `www.qq.com` | ~826 ms | ~717 ms | ~0.12 ms |
+| `www.baidu.com` | ~423 ms | ~488 ms | ~0.10 ms |
+| `www.taobao.com` | ~563 ms | ~610 ms | ~0.06 ms |
 
 - **Cold start** — IP pool is empty; the resolver has no prior RTT measurements for
-  any nameserver. This is the absolute worst case.
+  any nameserver. This is the absolute worst case. Cold-start latency for
+  `www.qq.com` has dropped from ~2,500 ms to ~826 ms compared to the previous
+  release, primarily due to the Happy Eyeballs dual-upstream race.
 - **After warmup** — The default warmup pre-seeds the IP pool with RTT data for
-  `.com` TLD nameservers, enabling better NS selection. `www.qq.com` improves by
-  ~70% because its delegation chain passes through `.com` nameservers that warmup
-  has already measured. Domains whose authoritative servers are not covered by
-  warmup TLDs see little change.
+  `.com` TLD nameservers, enabling better NS selection.
 - **Cache hit** — A previously resolved domain is served entirely from memory.
   Latency drops to **< 0.2 ms**, a 1,000–10,000× improvement over iterative resolution.
 
