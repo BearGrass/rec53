@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"rec53/monitor"
@@ -18,6 +19,7 @@ type stateMachine interface {
 	getRequest() *dns.Msg
 	getResponse() *dns.Msg
 	handle(request *dns.Msg, response *dns.Msg) (int, error)
+	getContext() context.Context
 }
 
 // isNSRelevantForCNAME checks if NS records are relevant for resolving a CNAME target.
@@ -79,7 +81,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			if ret == STATE_INIT_FORMERR {
 				return stm.getResponse(), nil
 			}
-			inCache := newInCacheState(stm.getRequest(), stm.getResponse())
+			inCache := newInCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			stm = inCache
 		case IN_CACHE:
 			var (
@@ -92,10 +94,10 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			}
 			switch ret {
 			case IN_CACHE_HIT_CACHE:
-				checkResp := newCheckRespState(stm.getRequest(), stm.getResponse())
+				checkResp := newCheckRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 				stm = checkResp
 			case IN_CACHE_MISS_CACHE:
-				inGlue := newInGlueState(stm.getRequest(), stm.getResponse())
+				inGlue := newInGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 				stm = inGlue
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
@@ -114,10 +116,10 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CHECK_RESP_COMMON_ERROR:
 				return stm.getResponse(), nil
 			case CHECK_RESP_GET_ANS:
-				stm = newRetRespState(stm.getRequest(), stm.getResponse())
+				stm = newRetRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CHECK_RESP_GET_NEGATIVE:
 				// Negative response (NXDOMAIN/NODATA) - return directly to client
-				stm = newRetRespState(stm.getRequest(), stm.getResponse())
+				stm = newRetRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CHECK_RESP_GET_CNAME:
 				// Find the CNAME record in the answer
 				var cnameTarget string
@@ -160,9 +162,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 					stm.getResponse().Answer = nil
 					stm.getRequest().Question[0].Name = cnameTarget
 				}
-				stm = newInCacheState(stm.getRequest(), stm.getResponse())
+				stm = newInCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CHECK_RESP_GET_NS:
-				stm = newInGlueState(stm.getRequest(), stm.getResponse())
+				stm = newInGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
@@ -178,9 +180,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			}
 			switch ret {
 			case IN_GLUE_EXIST:
-				stm = newIterState(stm.getRequest(), stm.getResponse())
+				stm = newIterStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case IN_GLUE_NOT_EXIST:
-				stm = newInGlueCacheState(stm.getRequest(), stm.getResponse())
+				stm = newInGlueCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
@@ -197,7 +199,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			switch ret {
 			case IN_GLUE_CACHE_HIT_CACHE,
 				IN_GLUE_CACHE_MISS_CACHE:
-				stm = newIterState(stm.getRequest(), stm.getResponse())
+				stm = newIterStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
@@ -218,7 +220,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
 			case ITER_NO_ERROR:
-				stm = newCheckRespState(stm.getRequest(), stm.getResponse())
+				stm = newCheckRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)

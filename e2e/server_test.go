@@ -7,16 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"rec53/monitor"
 	"rec53/server"
 
 	"github.com/miekg/dns"
-	"go.uber.org/zap"
 )
-
-func init() {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-}
 
 // TestServerLifecycle tests the complete server lifecycle.
 func TestServerLifecycle(t *testing.T) {
@@ -78,6 +72,11 @@ func TestServerUDPAndTCP(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	// Reset global state to avoid interference from prior tests modifying
+	// the IP pool quality scores or DNS cache.
+	server.FlushCacheForTest()
+	server.ResetIPPoolForTest()
+
 	s := server.NewServer("127.0.0.1:0")
 	errChan := s.Run()
 	defer func() {
@@ -96,9 +95,9 @@ func TestServerUDPAndTCP(t *testing.T) {
 
 	t.Run("UDP query", func(t *testing.T) {
 		client := &dns.Client{
-			Net:      "udp",
-			Timeout:  5 * time.Second,
-			UDPSize:  4096,
+			Net:     "udp",
+			Timeout: 15 * time.Second,
+			UDPSize: 4096,
 		}
 
 		msg := new(dns.Msg)
@@ -118,8 +117,8 @@ func TestServerUDPAndTCP(t *testing.T) {
 
 	t.Run("TCP query", func(t *testing.T) {
 		client := &dns.Client{
-			Net:      "tcp",
-			Timeout:  5 * time.Second,
+			Net:     "tcp",
+			Timeout: 15 * time.Second,
 		}
 
 		msg := new(dns.Msg)
@@ -229,6 +228,9 @@ func TestServerConcurrentQueries(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	server.FlushCacheForTest()
+	server.ResetIPPoolForTest()
+
 	s := server.NewServer("127.0.0.1:0")
 	errChan := s.Run()
 	defer func() {
@@ -256,9 +258,9 @@ func TestServerConcurrentQueries(t *testing.T) {
 			defer wg.Done()
 
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			for i := 0; i < numQueries; i++ {

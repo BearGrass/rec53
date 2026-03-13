@@ -558,6 +558,7 @@ func createTestConfigFile(t *testing.T, listen, metric string) string {
 warmup:
   enabled: false
   timeout: 5s
+  duration: 5s
   concurrency: 32
   tlds:
     - com

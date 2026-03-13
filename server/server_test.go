@@ -116,7 +116,9 @@ func TestServerUDPAddr(t *testing.T) {
 	}
 
 	// Cleanup
-	s.Shutdown(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.Shutdown(ctx)
 }
 
 // TestServerTCPAddr tests TCPAddr method
@@ -138,7 +140,9 @@ func TestServerTCPAddr(t *testing.T) {
 	}
 
 	// Cleanup
-	s.Shutdown(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.Shutdown(ctx)
 }
 
 // TestServeDNSBasicQuery tests basic DNS query handling
@@ -151,7 +155,9 @@ func TestServeDNSBasicQuery(t *testing.T) {
 
 	s := NewServer("127.0.0.1:0")
 	s.Run()
-	defer s.Shutdown(context.Background())
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutCancel()
+	defer s.Shutdown(shutCtx)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -187,7 +193,9 @@ func TestServeDNSBasicQuery(t *testing.T) {
 func TestServeDNSEmptyQuestion(t *testing.T) {
 	s := NewServer("127.0.0.1:0")
 	s.Run()
-	defer s.Shutdown(context.Background())
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutCancel()
+	defer s.Shutdown(shutCtx)
 
 	time.Sleep(50 * time.Millisecond)
 

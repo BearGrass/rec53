@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"rec53/monitor"
+	"rec53/utils"
 
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
@@ -753,4 +755,474 @@ func TestHasSOAInAuthority(t *testing.T) {
 			t.Error("expected true when SOA mixed with other records, got false")
 		}
 	})
+}
+
+// =============================================================================
+// resolveNSIPsConcurrently bug-fix regression tests
+// Covers: B1 (defer close(semaphore) panic) and B2 (dual-consumer deadlock).
+// =============================================================================
+
+// makeAResponse builds a minimal DNS A-record response for use in mock servers.
+func makeAResponse(name, ip string) *dns.Msg {
+	m := new(dns.Msg)
+	m.Response = true
+	m.Answer = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{
+				Name:   name,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+				Ttl:    300,
+			},
+			A: net.ParseIP(ip),
+		},
+	}
+	return m
+}
+
+// TestResolveNSIPsConcurrentlyNoPanic verifies that calling resolveNSIPsConcurrently
+// with many NS names does not panic due to a send-on-closed-channel (B1 fix).
+// Run with -race to also catch data-race regressions.
+func TestResolveNSIPsConcurrentlyNoPanic(t *testing.T) {
+	// Redirect all DNS traffic to a local SERVFAIL mock so the state machine
+	// fails fast (no real network needed, no 5-second DNS timeout).
+	startWarmupTestMockDNS(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	// Use several NS names — enough to exercise the semaphore path.
+	// The state machine will fail quickly (mock returns SERVFAIL) and return
+	// nil, but must not panic.
+	nsNames := []string{
+		"ns1.example.com.", "ns2.example.com.", "ns3.example.com.",
+		"ns4.example.com.", "ns5.example.com.",
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = resolveNSIPsConcurrently(ctx, nsNames)
+	}()
+
+	select {
+	case <-done:
+		// OK — no panic, no hang
+	case <-time.After(2 * time.Second):
+		t.Fatal("resolveNSIPsConcurrently hung — possible deadlock (B2)")
+	}
+}
+
+// TestResolveNSIPsConcurrentlyContextCancelDoesNotHang verifies that a pre-cancelled
+// context causes resolveNSIPsConcurrently to return promptly without blocking (B2 fix).
+func TestResolveNSIPsConcurrentlyContextCancelDoesNotHang(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling
+
+	nsNames := []string{"ns1.example.com.", "ns2.example.com.", "ns3.example.com."}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = resolveNSIPsConcurrently(ctx, nsNames)
+	}()
+
+	select {
+	case <-done:
+		// OK — returned promptly
+	case <-time.After(3 * time.Second):
+		t.Fatal("resolveNSIPsConcurrently did not return after context cancellation — possible deadlock (B2)")
+	}
+}
+
+// TestInGlueStateNSRelevance verifies that inGlueState.handle validates NS zone
+// relevance before accepting glue records. Stale NS from a prior CNAME hop must
+// not be reused when they belong to a different delegation zone.
+func TestInGlueStateNSRelevance(t *testing.T) {
+	// Helper: build a dns.Msg with a question
+	makeRequest := func(qname string) *dns.Msg {
+		req := new(dns.Msg)
+		req.SetQuestion(qname, dns.TypeA)
+		return req
+	}
+
+	// Helper: build a dns.Msg with NS + Extra (glue)
+	makeResponseWithNS := func(nsZone string) *dns.Msg {
+		resp := new(dns.Msg)
+		resp.Ns = []dns.RR{
+			&dns.NS{
+				Hdr: dns.RR_Header{
+					Name:   nsZone,
+					Rrtype: dns.TypeNS,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				Ns: "ns1." + nsZone,
+			},
+		}
+		resp.Extra = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{
+					Name:   "ns1." + nsZone,
+					Rrtype: dns.TypeA,
+					Class:  dns.ClassINET,
+					Ttl:    300,
+				},
+				A: net.ParseIP("1.2.3.4"),
+			},
+		}
+		return resp
+	}
+
+	tests := []struct {
+		name          string
+		queryName     string
+		nsZone        string // empty string means: use empty Ns/Extra
+		wantCode      int
+		wantNsCleared bool
+	}{
+		{
+			name:          "NS zone is ancestor of query domain → IN_GLUE_EXIST",
+			queryName:     "www.foo.akadns.net.",
+			nsZone:        "akadns.net.",
+			wantCode:      IN_GLUE_EXIST,
+			wantNsCleared: false,
+		},
+		{
+			name:          "NS zone equals query domain → IN_GLUE_EXIST",
+			queryName:     "akadns.net.",
+			nsZone:        "akadns.net.",
+			wantCode:      IN_GLUE_EXIST,
+			wantNsCleared: false,
+		},
+		{
+			name:          "NS zone unrelated to query domain → IN_GLUE_NOT_EXIST, Ns cleared",
+			queryName:     "www.huawei.com.c.cdnhwc1.com.",
+			nsZone:        "akadns.net.",
+			wantCode:      IN_GLUE_NOT_EXIST,
+			wantNsCleared: true,
+		},
+		{
+			name:          "NS zone is root → IN_GLUE_EXIST (universal ancestor)",
+			queryName:     "www.example.com.",
+			nsZone:        ".",
+			wantCode:      IN_GLUE_EXIST,
+			wantNsCleared: false,
+		},
+		{
+			name:          "Empty Ns → IN_GLUE_NOT_EXIST",
+			queryName:     "www.example.com.",
+			nsZone:        "", // signals: build empty response
+			wantCode:      IN_GLUE_NOT_EXIST,
+			wantNsCleared: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := makeRequest(tt.queryName)
+
+			var resp *dns.Msg
+			if tt.nsZone == "" {
+				resp = new(dns.Msg) // empty Ns and Extra
+			} else {
+				resp = makeResponseWithNS(tt.nsZone)
+			}
+
+			state := newInGlueState(req, resp)
+			code, err := state.handle(req, resp)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if code != tt.wantCode {
+				t.Errorf("handle() = %d, want %d", code, tt.wantCode)
+			}
+			if tt.wantNsCleared {
+				if len(resp.Ns) != 0 {
+					t.Errorf("expected Ns to be cleared, got %d records", len(resp.Ns))
+				}
+				if len(resp.Extra) != 0 {
+					t.Errorf("expected Extra to be cleared, got %d records", len(resp.Extra))
+				}
+			} else if tt.nsZone != "" {
+				// Non-empty nsZone and not cleared: Ns should still be present
+				if len(resp.Ns) == 0 {
+					t.Errorf("expected Ns to be preserved but it was cleared")
+				}
+			}
+		})
+	}
+}
+
+// TestResolveNSIPsConcurrentlyEmptyInput verifies that an empty nsNames slice
+// returns nil immediately without spawning any goroutines.
+func TestResolveNSIPsConcurrentlyEmptyInput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result := resolveNSIPsConcurrently(ctx, nil)
+	if result != nil {
+		t.Errorf("expected nil for empty input, got %v", result)
+	}
+
+	result = resolveNSIPsConcurrently(ctx, []string{})
+	if result != nil {
+		t.Errorf("expected nil for empty slice, got %v", result)
+	}
+}
+
+// =============================================================================
+// Cross-domain CNAME Integration Tests
+// =============================================================================
+
+// startCNAMEChainMockDNS starts a mock DNS server that responds to a three-hop
+// cross-domain CNAME chain:
+//
+//	www.d1.test. → CNAME www.d2.test. → CNAME www.d3.test. → A 1.2.3.4
+//
+// The mock acts as both root and authoritative server for all test domains.
+// Every response that delivers a delegation also includes an A glue record
+// pointing back to the mock server so that iterState can reach it without
+// needing a real network.
+//
+// The same helper also installs root-glue and iter-port overrides identical to
+// startWarmupTestMockDNS so the full state machine is exercised in isolation.
+//
+// Returns the mock server port string (e.g. "54321").
+func startCNAMEChainMockDNS(t *testing.T) (port string, mockIP string) {
+	t.Helper()
+
+	// We need to know the port before building glue records, so we start the
+	// server on :0 and inject globals once the socket is ready.
+	started := make(chan struct{})
+	var portOnce sync.Once
+
+	var srv *dns.Server
+	srv = &dns.Server{
+		Addr: "127.0.0.1:0",
+		Net:  "udp",
+		NotifyStartedFunc: func() {
+			portOnce.Do(func() { close(started) })
+		},
+	}
+
+	// Handler closed over srv so it can read the actual port after binding.
+	srv.Handler = dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		if len(r.Question) == 0 {
+			resp := new(dns.Msg)
+			resp.SetRcode(r, dns.RcodeServerFailure)
+			w.WriteMsg(resp) //nolint:errcheck
+			return
+		}
+
+		_, mockPort, _ := net.SplitHostPort(srv.PacketConn.LocalAddr().String())
+		mockAddr := net.ParseIP("127.0.0.1")
+
+		qname := r.Question[0].Name
+		resp := new(dns.Msg)
+		resp.SetReply(r)
+		resp.RecursionAvailable = false
+		resp.Authoritative = true
+
+		makeNS := func(zone, nsName string) dns.RR {
+			return &dns.NS{
+				Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+				Ns:  nsName,
+			}
+		}
+		makeGlue := func(nsName string) dns.RR {
+			return &dns.A{
+				Hdr: dns.RR_Header{Name: nsName, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   mockAddr,
+			}
+		}
+		_ = mockPort // port is encoded in the global iterPortOverride set below
+
+		switch qname {
+		case "www.d1.test.":
+			// First hop: CNAME to a completely different domain.
+			resp.Answer = []dns.RR{
+				&dns.CNAME{
+					Hdr:    dns.RR_Header{Name: "www.d1.test.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 60},
+					Target: "www.d2.test.",
+				},
+			}
+			// Intentionally include NS for d1.test. (old domain) in the response.
+			// After this CNAME, the state machine will switch the question to www.d2.test.
+			// inGlueState MUST detect that d1.test. NS is unrelated to www.d2.test.
+			// and return IN_GLUE_NOT_EXIST instead of IN_GLUE_EXIST.
+			resp.Ns = []dns.RR{makeNS("d1.test.", "ns.d1.test.")}
+			resp.Extra = []dns.RR{makeGlue("ns.d1.test.")}
+
+		case "www.d2.test.":
+			// Second hop: CNAME to yet another domain.
+			resp.Answer = []dns.RR{
+				&dns.CNAME{
+					Hdr:    dns.RR_Header{Name: "www.d2.test.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 60},
+					Target: "www.d3.test.",
+				},
+			}
+			// Include NS for d2.test. — again unrelated to www.d3.test.
+			resp.Ns = []dns.RR{makeNS("d2.test.", "ns.d2.test.")}
+			resp.Extra = []dns.RR{makeGlue("ns.d2.test.")}
+
+		case "www.d3.test.":
+			// Final hop: actual A record answer.
+			resp.Answer = []dns.RR{
+				&dns.A{
+					Hdr: dns.RR_Header{Name: "www.d3.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+					A:   net.ParseIP("1.2.3.4"),
+				},
+			}
+
+		default:
+			// For any other query (delegation, NS resolution, etc.) return a
+			// referral to the mock server itself so the iterator can reach us.
+			// This covers queries to d2.test., d3.test., test., etc.
+			resp.Authoritative = false
+			resp.Ns = []dns.RR{makeNS(".", "ns.mock-root.")}
+			resp.Extra = []dns.RR{makeGlue("ns.mock-root.")}
+		}
+
+		w.WriteMsg(resp) //nolint:errcheck
+	})
+
+	go func() {
+		srv.ListenAndServe() //nolint:errcheck
+	}()
+	<-started
+
+	_, p, _ := net.SplitHostPort(srv.PacketConn.LocalAddr().String())
+
+	// Build root glue pointing to our mock server.
+	rootGlue := new(dns.Msg)
+	rootGlue.SetUpdate(".")
+	rootGlue.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 0},
+			Ns:  "ns.mock-root.",
+		},
+	}
+	rootGlue.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns.mock-root.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 0},
+			A:   net.ParseIP("127.0.0.1"),
+		},
+	}
+
+	utils.SetRootGlue(rootGlue)
+	SetIterPort(p)
+	FlushCacheForTest()
+	ResetIPPoolForTest()
+
+	t.Cleanup(func() {
+		srv.Shutdown()
+		utils.ResetRootGlue()
+		ResetIterPort()
+		FlushCacheForTest()
+		ResetIPPoolForTest()
+	})
+
+	return p, "127.0.0.1"
+}
+
+// TestCrossdomainCNAMEColdCacheResolves verifies that the resolver successfully
+// follows a three-hop cross-domain CNAME chain on the very first query (cold
+// cache), without returning SERVFAIL.
+//
+// The mock DNS server returns old-domain NS records alongside each CNAME
+// response, deliberately triggering the scenario where inGlueState might
+// incorrectly accept stale glue from a prior hop as valid for the new target
+// domain. The fix in inGlueState.handle must detect this and return
+// IN_GLUE_NOT_EXIST so the resolver fetches the correct delegation.
+func TestCrossdomainCNAMEColdCacheResolves(t *testing.T) {
+	startCNAMEChainMockDNS(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.d1.test.", dns.TypeA)
+	resp := new(dns.Msg)
+
+	stm := newStateInitStateWithContext(req, resp, ctx)
+	result, err := Change(stm)
+
+	if err != nil {
+		t.Fatalf("Change() returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Change() returned nil response")
+	}
+	if result.Rcode == dns.RcodeServerFailure {
+		t.Fatalf("Change() returned SERVFAIL — cold-cache cross-domain CNAME resolution failed")
+	}
+
+	// Find the final A record in the answer section.
+	var gotA net.IP
+	for _, rr := range result.Answer {
+		if a, ok := rr.(*dns.A); ok {
+			gotA = a.A
+			break
+		}
+	}
+	if gotA == nil {
+		t.Fatalf("no A record in answer; got: %v", result.Answer)
+	}
+	if !gotA.Equal(net.ParseIP("1.2.3.4")) {
+		t.Errorf("expected A=1.2.3.4, got %v", gotA)
+	}
+
+	// CNAME chain should be preserved in the answer per RFC1034.
+	cnames := 0
+	for _, rr := range result.Answer {
+		if _, ok := rr.(*dns.CNAME); ok {
+			cnames++
+		}
+	}
+	if cnames < 2 {
+		t.Errorf("expected at least 2 CNAME records in answer (RFC1034), got %d", cnames)
+	}
+}
+
+// TestSameZoneCNAMEPreservesGlue verifies that when a CNAME target is within
+// the same delegated zone (e.g. foo.d1.test → bar.d1.test), the existing NS
+// glue for d1.test. is preserved by inGlueState (IN_GLUE_EXIST), avoiding an
+// unnecessary re-delegation round-trip.
+func TestSameZoneCNAMEPreservesGlue(t *testing.T) {
+	_, mockIP := startCNAMEChainMockDNS(t)
+
+	// Manually seed d1.test. NS in the response to simulate a warm-glue scenario
+	// (as if a prior ITER for a different d1.test. name already filled response.Ns).
+	nsZone := "d1.test."
+	queryName := "bar.d1.test." // same zone as NS
+
+	req := new(dns.Msg)
+	req.SetQuestion(queryName, dns.TypeA)
+
+	resp := new(dns.Msg)
+	resp.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: nsZone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+			Ns:  "ns.d1.test.",
+		},
+	}
+	resp.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns.d1.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP(mockIP),
+		},
+	}
+
+	state := newInGlueState(req, resp)
+	code, err := state.handle(req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != IN_GLUE_EXIST {
+		t.Errorf("same-zone CNAME: expected IN_GLUE_EXIST (%d), got %d", IN_GLUE_EXIST, code)
+	}
+	if len(resp.Ns) == 0 {
+		t.Error("same-zone CNAME: NS glue was incorrectly cleared")
+	}
 }

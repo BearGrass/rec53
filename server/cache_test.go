@@ -354,14 +354,14 @@ func TestCacheMultipleTypesSameDomain(t *testing.T) {
 	aMsg := new(dns.Msg)
 	aMsg.Answer = append(aMsg.Answer, &dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
-		A: net.ParseIP("192.0.2.1"),
+		A:   net.ParseIP("192.0.2.1"),
 	})
 	setCacheCopyByType(domain, dns.TypeA, aMsg, 300)
 
 	// Cache AAAA record
 	aaaaMsg := new(dns.Msg)
 	aaaaMsg.Answer = append(aaaaMsg.Answer, &dns.AAAA{
-		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 300},
+		Hdr:  dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 300},
 		AAAA: net.ParseIP("2001:db8::1"),
 	})
 	setCacheCopyByType(domain, dns.TypeAAAA, aaaaMsg, 300)
@@ -369,8 +369,8 @@ func TestCacheMultipleTypesSameDomain(t *testing.T) {
 	// Cache MX record
 	mxMsg := new(dns.Msg)
 	mxMsg.Answer = append(mxMsg.Answer, &dns.MX{
-		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: 300},
-		Mx: "mail.example.com.",
+		Hdr:        dns.RR_Header{Name: domain, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: 300},
+		Mx:         "mail.example.com.",
 		Preference: 10,
 	})
 	setCacheCopyByType(domain, dns.TypeMX, mxMsg, 300)

@@ -65,7 +65,7 @@ func loadConfig(configPath string) (*Config, error) {
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("Failed to parse config: %v", err)
+		return nil, fmt.Errorf("failed to parse config: %v", err)
 	}
 
 	// Apply TLD list configuration: if custom TLDs are provided, use them; otherwise use curated defaults
@@ -167,7 +167,8 @@ func waitForSignal(sigChan chan os.Signal, errChan <-chan error) os.Signal {
 }
 
 func main() {
-	// Recover from panics during startup and log them
+	// Recover from panics during startup and log them with a full stack trace.
+	// This runs before the logger is initialized, so output goes to stderr.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "FATAL: Panic during startup: %v\n", r)
@@ -183,17 +184,15 @@ func main() {
 		return
 	}
 
-	// Load configuration
-	fmt.Fprintf(os.Stderr, "DEBUG: Loading config from %s\n", *configPath)
+	// Load configuration from file.
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG: Config loaded successfully\n")
 
-	// Override config with command-line flags if provided
-	// (Command-line flags take precedence over config file)
+	// Override config with command-line flags if provided.
+	// Command-line flags take precedence over config file values.
 	if listenAddr != nil && *listenAddr != "" && *listenAddr != "127.0.0.1:5353" {
 		cfg.DNS.Listen = *listenAddr
 	}
@@ -209,27 +208,24 @@ func main() {
 		cfg.Warmup.Enabled = false
 	}
 
-	// Validate configuration before using it
-	fmt.Fprintf(os.Stderr, "DEBUG: Validating configuration\n")
+	// Validate configuration before using any config values.
 	if err := validateConfig(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration error: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "configuration error: %s\n", err.Error())
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG: Configuration validation passed\n")
 
-	// Initialize logger
-	fmt.Fprintf(os.Stderr, "DEBUG: Initializing logger\n")
+	// Initialize logger. All subsequent log output uses monitor.Rec53Log.
 	monitor.InitLogger()
 	defer monitor.Rec53Log.Sync()
 	monitor.SetLogLevel(parseLogLevel(cfg.DNS.LogLevel).Level())
-	monitor.Rec53Log.Debugf("Logger initialized with level: %s", cfg.DNS.LogLevel)
+	monitor.Rec53Log.Debugf("logger initialized with level: %s", cfg.DNS.LogLevel)
 
-	// Initialize metrics server with error handling
-	fmt.Fprintf(os.Stderr, "DEBUG: Initializing metrics server on %s\n", cfg.DNS.Metric)
+	// Initialize Prometheus metrics server.
 	monitor.InitMetricWithAddr(cfg.DNS.Metric)
-	monitor.Rec53Log.Debugf("Metrics server initialized on %s", cfg.DNS.Metric)
+	monitor.Rec53Log.Debugf("metrics server initialized on %s", cfg.DNS.Metric)
 
-	// Start DNS server with config and panic recovery
+	// Second panic recovery layer — after logger is available, panics are logged
+	// via monitor.Rec53Log so they appear in the configured log output.
 	defer func() {
 		if r := recover(); r != nil {
 			monitor.Rec53Log.Errorf("PANIC during server startup: %v", r)
@@ -238,11 +234,11 @@ func main() {
 		}
 	}()
 
-	fmt.Fprintf(os.Stderr, "DEBUG: Creating DNS server with listen address %s\n", cfg.DNS.Listen)
+	// Create and start the DNS server.
+	monitor.Rec53Log.Debugf("creating DNS server on %s", cfg.DNS.Listen)
 	rec53 := server.NewServerWithConfig(cfg.DNS.Listen, cfg.Warmup)
-	monitor.Rec53Log.Debugf("DNS server created, starting...")
+	monitor.Rec53Log.Debugf("starting DNS server")
 	errChan := rec53.Run()
-	monitor.Rec53Log.Debugf("DNS server started")
 
 	monitor.Rec53Log.Infof("rec53 started, listening on %s, metrics on %s", cfg.DNS.Listen, cfg.DNS.Metric)
 

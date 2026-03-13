@@ -6,16 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"rec53/monitor"
 	"rec53/server"
 
 	"github.com/miekg/dns"
-	"go.uber.org/zap"
 )
-
-func init() {
-	monitor.Rec53Log = zap.NewNop().Sugar()
-}
 
 // TestCacheBehavior tests caching functionality.
 func TestCacheBehavior(t *testing.T) {
@@ -37,9 +31,9 @@ func TestCacheBehavior(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	client := &dns.Client{
-		Net:      "udp",
-		Timeout:  10 * time.Second,
-		UDPSize:  4096,
+		Net:     "udp",
+		Timeout: 10 * time.Second,
+		UDPSize: 4096,
 	}
 
 	domain := "cache-test.example.com."
@@ -118,9 +112,9 @@ func TestCacheConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			for i := 0; i < numQueries; i++ {
@@ -186,9 +180,9 @@ func TestCacheDifferentTypes(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	tests := []struct {
-		name  string
+		name   string
 		domain string
-		qtype uint16
+		qtype  uint16
 	}{
 		{"A record", "google.com.", dns.TypeA},
 		{"AAAA record", "google.com.", dns.TypeAAAA},
@@ -199,9 +193,9 @@ func TestCacheDifferentTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &dns.Client{
-				Net:      "udp",
-				Timeout:  10 * time.Second,
-				UDPSize:  4096,
+				Net:     "udp",
+				Timeout: 10 * time.Second,
+				UDPSize: 4096,
 			}
 
 			// First query
@@ -264,9 +258,9 @@ func TestCacheHitRate(t *testing.T) {
 	}
 
 	client := &dns.Client{
-		Net:      "udp",
-		Timeout:  10 * time.Second,
-		UDPSize:  4096,
+		Net:     "udp",
+		Timeout: 10 * time.Second,
+		UDPSize: 4096,
 	}
 
 	// Query each domain twice

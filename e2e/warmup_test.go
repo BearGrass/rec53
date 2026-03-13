@@ -29,6 +29,9 @@ import (
 // - All queries should complete successfully
 // - Stats should show expected total count
 func TestWarmupNSRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping warmup integration test in short mode")
+	}
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
@@ -73,6 +76,9 @@ func TestWarmupNSRecords(t *testing.T) {
 // - Should complete in reasonable time without overwhelming system
 // - Stats should match input
 func TestWarmupNSRecords_Concurrency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping warmup integration test in short mode")
+	}
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
@@ -110,6 +116,9 @@ func TestWarmupNSRecords_Concurrency(t *testing.T) {
 // - Some queries may timeout, but warmup continues
 // - Warmup should complete within overall timeout
 func TestWarmupNSRecords_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping warmup integration test in short mode")
+	}
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
@@ -143,6 +152,9 @@ func TestWarmupNSRecords_Timeout(t *testing.T) {
 // - Should complete in reasonable time
 // - High concurrency (32) should achieve good performance
 func TestWarmupNSRecords_LargeTLDList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping warmup integration test in short mode")
+	}
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
@@ -234,6 +246,9 @@ func TestWarmupNSRecords_CachePopulation(t *testing.T) {
 // - Run warmup with mixed success/failure
 // - Stats should be consistent: Succeeded + Failed = Total
 func TestWarmupStats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping warmup integration test in short mode")
+	}
 	server.FlushCacheForTest()
 	server.ResetIPPoolForTest()
 
