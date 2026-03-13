@@ -43,7 +43,7 @@ func TestChange(t *testing.T) {
 	}
 }
 
-// TestCheckRespStateHandle tests the checkRespState.handle() function
+// TestCheckRespStateHandle tests the classifyRespState.handle() function
 func TestCheckRespStateHandle(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -68,7 +68,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_ANS,
+			expectedRet: CLASSIFY_RESP_GET_ANS,
 			expectError: false,
 		},
 		{
@@ -87,7 +87,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_ANS,
+			expectedRet: CLASSIFY_RESP_GET_ANS,
 			expectError: false,
 		},
 		{
@@ -107,7 +107,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_CNAME,
+			expectedRet: CLASSIFY_RESP_GET_CNAME,
 			expectError: false,
 		},
 		{
@@ -130,7 +130,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_ANS,
+			expectedRet: CLASSIFY_RESP_GET_ANS,
 			expectError: false,
 		},
 		{
@@ -145,7 +145,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				m.Answer = nil
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_NS,
+			expectedRet: CLASSIFY_RESP_GET_NS,
 			expectError: false,
 		},
 		{
@@ -164,7 +164,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_NS,
+			expectedRet: CLASSIFY_RESP_GET_NS,
 			expectError: false,
 		},
 		{
@@ -174,7 +174,7 @@ func TestCheckRespStateHandle(t *testing.T) {
 				m := new(dns.Msg)
 				return m
 			}(),
-			expectedRet: CHECK_RESP_COMMON_ERROR,
+			expectedRet: CLASSIFY_RESP_COMMON_ERROR,
 			expectError: true,
 		},
 		{
@@ -184,14 +184,14 @@ func TestCheckRespStateHandle(t *testing.T) {
 				return m
 			}(),
 			response:    nil,
-			expectedRet: CHECK_RESP_COMMON_ERROR,
+			expectedRet: CLASSIFY_RESP_COMMON_ERROR,
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := newCheckRespState(tt.request, tt.response)
+			state := newClassifyRespState(tt.request, tt.response)
 			ret, err := state.handle(tt.request, tt.response)
 
 			if (err != nil) != tt.expectError {
@@ -234,7 +234,7 @@ func TestInCacheStateHandle(t *testing.T) {
 				m.SetQuestion(domain, dns.TypeA)
 				return m
 			}(),
-			expectedRet: IN_CACHE_HIT_CACHE,
+			expectedRet: CACHE_LOOKUP_HIT,
 		},
 		{
 			name: "AAAA record cache miss (different type)",
@@ -243,7 +243,7 @@ func TestInCacheStateHandle(t *testing.T) {
 				m.SetQuestion(domain, dns.TypeAAAA)
 				return m
 			}(),
-			expectedRet: IN_CACHE_MISS_CACHE,
+			expectedRet: CACHE_LOOKUP_MISS,
 		},
 		{
 			name: "MX record cache miss (different type)",
@@ -252,14 +252,14 @@ func TestInCacheStateHandle(t *testing.T) {
 				m.SetQuestion(domain, dns.TypeMX)
 				return m
 			}(),
-			expectedRet: IN_CACHE_MISS_CACHE,
+			expectedRet: CACHE_LOOKUP_MISS,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			response := new(dns.Msg)
-			state := newInCacheState(tt.request, response)
+			state := newCacheLookupState(tt.request, response)
 			ret, err := state.handle(tt.request, response)
 
 			if err != nil {
@@ -335,14 +335,14 @@ func TestInGlueState(t *testing.T) {
 			},
 		}
 
-		state := newInGlueState(req, resp)
+		state := newExtractGlueState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if ret != IN_GLUE_EXIST {
-			t.Errorf("expected %d, got %d", IN_GLUE_EXIST, ret)
+		if ret != EXTRACT_GLUE_EXIST {
+			t.Errorf("expected %d, got %d", EXTRACT_GLUE_EXIST, ret)
 		}
 	})
 
@@ -351,20 +351,20 @@ func TestInGlueState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newInGlueState(req, resp)
+		state := newExtractGlueState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if ret != IN_GLUE_NOT_EXIST {
-			t.Errorf("expected %d, got %d", IN_GLUE_NOT_EXIST, ret)
+		if ret != EXTRACT_GLUE_NOT_EXIST {
+			t.Errorf("expected %d, got %d", EXTRACT_GLUE_NOT_EXIST, ret)
 		}
 	})
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newInGlueState(nil, resp)
+		state := newExtractGlueState(nil, resp)
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -386,23 +386,23 @@ func TestRetRespState(t *testing.T) {
 			},
 		}
 
-		state := newRetRespState(req, resp)
+		state := newReturnRespState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if ret != RET_RESP_NO_ERROR {
-			t.Errorf("expected %d, got %d", RET_RESP_NO_ERROR, ret)
+		if ret != RETURN_RESP_NO_ERROR {
+			t.Errorf("expected %d, got %d", RETURN_RESP_NO_ERROR, ret)
 		}
-		if state.getCurrentState() != RET_RESP {
-			t.Errorf("expected state %d, got %d", RET_RESP, state.getCurrentState())
+		if state.getCurrentState() != RETURN_RESP {
+			t.Errorf("expected state %d, got %d", RETURN_RESP, state.getCurrentState())
 		}
 	})
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newRetRespState(nil, resp)
+		state := newReturnRespState(nil, resp)
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -439,14 +439,14 @@ func TestInGlueCacheState(t *testing.T) {
 		req.SetQuestion("www.example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newInGlueCacheState(req, resp)
+		state := newLookupNSCacheState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if ret != IN_GLUE_CACHE_HIT_CACHE {
-			t.Errorf("expected %d, got %d", IN_GLUE_CACHE_HIT_CACHE, ret)
+		if ret != LOOKUP_NS_CACHE_HIT {
+			t.Errorf("expected %d, got %d", LOOKUP_NS_CACHE_HIT, ret)
 		}
 	})
 
@@ -457,15 +457,15 @@ func TestInGlueCacheState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newInGlueCacheState(req, resp)
+		state := newLookupNSCacheState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		// Should return IN_CACHE_MISS_CACHE and use root glue
-		if ret != IN_CACHE_MISS_CACHE {
-			t.Errorf("expected %d, got %d", IN_CACHE_MISS_CACHE, ret)
+		// Should return CACHE_LOOKUP_MISS and use root glue
+		if ret != CACHE_LOOKUP_MISS {
+			t.Errorf("expected %d, got %d", CACHE_LOOKUP_MISS, ret)
 		}
 		// Verify root glue was added
 		if len(resp.Ns) == 0 {
@@ -475,7 +475,7 @@ func TestInGlueCacheState(t *testing.T) {
 
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newInGlueCacheState(nil, resp)
+		state := newLookupNSCacheState(nil, resp)
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -572,7 +572,7 @@ func TestChangeMaxIterations(t *testing.T) {
 func TestIterState(t *testing.T) {
 	t.Run("nil request error", func(t *testing.T) {
 		resp := new(dns.Msg)
-		state := newIterState(nil, resp)
+		state := newQueryUpstreamState(nil, resp)
 		_, err := state.handle(nil, resp)
 
 		if err == nil {
@@ -582,7 +582,7 @@ func TestIterState(t *testing.T) {
 
 	t.Run("nil response error", func(t *testing.T) {
 		req := new(dns.Msg)
-		state := newIterState(req, nil)
+		state := newQueryUpstreamState(req, nil)
 		_, err := state.handle(req, nil)
 
 		if err == nil {
@@ -595,14 +595,14 @@ func TestIterState(t *testing.T) {
 		req.SetQuestion("example.com.", dns.TypeA)
 		resp := new(dns.Msg)
 
-		state := newIterState(req, resp)
+		state := newQueryUpstreamState(req, resp)
 		ret, err := state.handle(req, resp)
 
 		if err == nil {
 			t.Error("expected error for empty extra section")
 		}
-		if ret != ITER_COMMON_ERROR {
-			t.Errorf("expected %d, got %d", ITER_COMMON_ERROR, ret)
+		if ret != QUERY_UPSTREAM_COMMON_ERROR {
+			t.Errorf("expected %d, got %d", QUERY_UPSTREAM_COMMON_ERROR, ret)
 		}
 	})
 }
@@ -628,12 +628,12 @@ func parseTestIP(s string) net.IP {
 // 2. It creates new state instances internally after STATE_INIT and other states,
 //    which make real network calls
 //
-// The only directly testable state is RET_RESP (terminal state with no state transitions).
+// The only directly testable state is RETURN_RESP (terminal state with no state transitions).
 // Other states (STATE_INIT, IN_CACHE, ITER, etc.) are tested via their individual handle() methods.
 //
 // For full integration testing of Change(), see e2e tests.
 
-// TestChange_RetRespState tests the RET_RESP state behavior - the terminal state
+// TestChange_RetRespState tests the RETURN_RESP state behavior - the terminal state
 // that returns the final DNS response.
 func TestChange_RetRespState(t *testing.T) {
 	originalDomain := "original.example.com."
@@ -649,8 +649,8 @@ func TestChange_RetRespState(t *testing.T) {
 		},
 	}
 
-	// Test RET_RESP state directly - this is a terminal state
-	retState := newRetRespState(req, resp)
+	// Test RETURN_RESP state directly - this is a terminal state
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -703,7 +703,7 @@ func TestChange_MultipleAnswerRecords(t *testing.T) {
 		},
 	}
 
-	retState := newRetRespState(req, resp)
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -730,7 +730,7 @@ func TestChange_EmptyAnswer(t *testing.T) {
 	resp.SetReply(req)
 	// No answers
 
-	retState := newRetRespState(req, resp)
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -766,7 +766,7 @@ func TestChange_CNAMEInAnswer(t *testing.T) {
 		},
 	}
 
-	retState := newRetRespState(req, resp)
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -799,7 +799,7 @@ func TestChange_NXDOMAINResponse(t *testing.T) {
 	resp.SetReply(req)
 	resp.Rcode = dns.RcodeNameError // NXDOMAIN
 
-	retState := newRetRespState(req, resp)
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -831,7 +831,7 @@ func TestChange_AAAARecord(t *testing.T) {
 		},
 	}
 
-	retState := newRetRespState(req, resp)
+	retState := newReturnRespState(req, resp)
 	result, err := Change(retState)
 
 	if err != nil {
@@ -865,7 +865,7 @@ func TestChange_AAAARecord(t *testing.T) {
 // =============================================================================
 
 // TestCheckRespState_CNAMEDetection tests that checkRespState correctly detects CNAME records
-// and returns CHECK_RESP_GET_CNAME when a CNAME is found without a matching A record.
+// and returns CLASSIFY_RESP_GET_CNAME when a CNAME is found without a matching A record.
 func TestCheckRespState_CNAMEDetection(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -904,7 +904,7 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_CNAME,
+			expectedRet: CLASSIFY_RESP_GET_CNAME,
 			description: "CNAME without matching A should trigger CNAME follow",
 		},
 		{
@@ -928,7 +928,7 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_ANS,
+			expectedRet: CLASSIFY_RESP_GET_ANS,
 			description: "CNAME with matching A should return answer directly",
 		},
 		{
@@ -948,14 +948,14 @@ func TestCheckRespState_CNAMEDetection(t *testing.T) {
 				}
 				return m
 			}(),
-			expectedRet: CHECK_RESP_GET_CNAME,
+			expectedRet: CLASSIFY_RESP_GET_CNAME,
 			description: "First CNAME in chain should trigger follow",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := newCheckRespState(tt.request, tt.response)
+			state := newClassifyRespState(tt.request, tt.response)
 			ret, err := state.handle(tt.request, tt.response)
 
 			if err != nil {
@@ -1002,17 +1002,17 @@ func TestCNAMEChain_ClearStaleRecords(t *testing.T) {
 		},
 	}
 
-	// Simulate what happens in Change() when CHECK_RESP_GET_CNAME is returned
+	// Simulate what happens in Change() when CLASSIFY_RESP_GET_CNAME is returned
 	// This is the code path at state_machine.go:83-105
-	state := newCheckRespState(req, resp)
+	state := newClassifyRespState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if ret != CHECK_RESP_GET_CNAME {
-		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	if ret != CLASSIFY_RESP_GET_CNAME {
+		t.Fatalf("Expected CLASSIFY_RESP_GET_CNAME, got %d", ret)
 	}
 
 	// Now simulate the CNAME handling in Change()
@@ -1086,7 +1086,7 @@ func TestCNAMEChain_MultiLevelResolution(t *testing.T) {
 				}
 			}
 
-			state := newCheckRespState(req, resp)
+			state := newClassifyRespState(req, resp)
 			ret, err := state.handle(req, resp)
 
 			if err != nil {
@@ -1095,12 +1095,12 @@ func TestCNAMEChain_MultiLevelResolution(t *testing.T) {
 			}
 
 			if step.cnameTarget != "" {
-				if ret != CHECK_RESP_GET_CNAME {
-					t.Errorf("Expected CHECK_RESP_GET_CNAME for step %d, got %d", i, ret)
+				if ret != CLASSIFY_RESP_GET_CNAME {
+					t.Errorf("Expected CLASSIFY_RESP_GET_CNAME for step %d, got %d", i, ret)
 				}
 			} else {
-				if ret != CHECK_RESP_GET_ANS {
-					t.Errorf("Expected CHECK_RESP_GET_ANS for final step, got %d", ret)
+				if ret != CLASSIFY_RESP_GET_ANS {
+					t.Errorf("Expected CLASSIFY_RESP_GET_ANS for final step, got %d", ret)
 				}
 			}
 		})
@@ -1178,15 +1178,15 @@ func TestCNAMEChain_CrossZoneResolution(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newCheckRespState(req, resp)
+	state := newClassifyRespState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if ret != CHECK_RESP_GET_CNAME {
-		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	if ret != CLASSIFY_RESP_GET_CNAME {
+		t.Fatalf("Expected CLASSIFY_RESP_GET_CNAME, got %d", ret)
 	}
 
 	// Step 2: Simulate the fix - clear stale records before following CNAME
@@ -1218,14 +1218,14 @@ func TestCNAMEChain_CrossZoneResolution(t *testing.T) {
 // returnCodeToString converts return codes to readable strings for debugging
 func returnCodeToString(code int) string {
 	switch code {
-	case CHECK_RESP_GET_ANS:
-		return "CHECK_RESP_GET_ANS"
-	case CHECK_RESP_GET_CNAME:
-		return "CHECK_RESP_GET_CNAME"
-	case CHECK_RESP_GET_NS:
-		return "CHECK_RESP_GET_NS"
-	case CHECK_RESP_COMMON_ERROR:
-		return "CHECK_RESP_COMMON_ERROR"
+	case CLASSIFY_RESP_GET_ANS:
+		return "CLASSIFY_RESP_GET_ANS"
+	case CLASSIFY_RESP_GET_CNAME:
+		return "CLASSIFY_RESP_GET_CNAME"
+	case CLASSIFY_RESP_GET_NS:
+		return "CLASSIFY_RESP_GET_NS"
+	case CLASSIFY_RESP_COMMON_ERROR:
+		return "CLASSIFY_RESP_COMMON_ERROR"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", code)
 	}
@@ -1351,15 +1351,15 @@ func TestCNAMEChain_ValidNSDelegation(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newCheckRespState(req, resp)
+	state := newClassifyRespState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if ret != CHECK_RESP_GET_CNAME {
-		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	if ret != CLASSIFY_RESP_GET_CNAME {
+		t.Fatalf("Expected CLASSIFY_RESP_GET_CNAME, got %d", ret)
 	}
 
 	// Step 2: Verify isNSRelevantForCNAME returns true for this case
@@ -1419,15 +1419,15 @@ func TestCNAMEChain_StaleNSDelegation(t *testing.T) {
 	}
 
 	// Step 1: Check response detects CNAME
-	state := newCheckRespState(req, resp)
+	state := newClassifyRespState(req, resp)
 	ret, err := state.handle(req, resp)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if ret != CHECK_RESP_GET_CNAME {
-		t.Fatalf("Expected CHECK_RESP_GET_CNAME, got %d", ret)
+	if ret != CLASSIFY_RESP_GET_CNAME {
+		t.Fatalf("Expected CLASSIFY_RESP_GET_CNAME, got %d", ret)
 	}
 
 	// Step 2: Verify isNSRelevantForCNAME returns false for this case

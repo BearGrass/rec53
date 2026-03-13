@@ -81,9 +81,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			if ret == STATE_INIT_FORMERR {
 				return stm.getResponse(), nil
 			}
-			inCache := newInCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			inCache := newCacheLookupStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			stm = inCache
-		case IN_CACHE:
+		case CACHE_LOOKUP:
 			var (
 				ret int
 				err error
@@ -93,17 +93,17 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case IN_CACHE_HIT_CACHE:
-				checkResp := newCheckRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case CACHE_LOOKUP_HIT:
+				checkResp := newClassifyRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 				stm = checkResp
-			case IN_CACHE_MISS_CACHE:
-				inGlue := newInGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case CACHE_LOOKUP_MISS:
+				inGlue := newExtractGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 				stm = inGlue
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
-		case CHECK_RESP:
+		case CLASSIFY_RESP:
 			var (
 				ret int
 				err error
@@ -113,14 +113,14 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case CHECK_RESP_COMMON_ERROR:
+			case CLASSIFY_RESP_COMMON_ERROR:
 				return stm.getResponse(), nil
-			case CHECK_RESP_GET_ANS:
-				stm = newRetRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
-			case CHECK_RESP_GET_NEGATIVE:
+			case CLASSIFY_RESP_GET_ANS:
+				stm = newReturnRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case CLASSIFY_RESP_GET_NEGATIVE:
 				// Negative response (NXDOMAIN/NODATA) - return directly to client
-				stm = newRetRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
-			case CHECK_RESP_GET_CNAME:
+				stm = newReturnRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case CLASSIFY_RESP_GET_CNAME:
 				// Find the CNAME record in the answer
 				var cnameTarget string
 				var cnameRecord *dns.CNAME
@@ -162,14 +162,14 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 					stm.getResponse().Answer = nil
 					stm.getRequest().Question[0].Name = cnameTarget
 				}
-				stm = newInCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
-			case CHECK_RESP_GET_NS:
-				stm = newInGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+				stm = newCacheLookupStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case CLASSIFY_RESP_GET_NS:
+				stm = newExtractGlueStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
-		case IN_GLUE:
+		case EXTRACT_GLUE:
 			var (
 				ret int
 				err error
@@ -179,15 +179,15 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case IN_GLUE_EXIST:
-				stm = newIterStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
-			case IN_GLUE_NOT_EXIST:
-				stm = newInGlueCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case EXTRACT_GLUE_EXIST:
+				stm = newQueryUpstreamStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case EXTRACT_GLUE_NOT_EXIST:
+				stm = newLookupNSCacheStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
-		case IN_GLUE_CACHE:
+		case LOOKUP_NS_CACHE:
 			var (
 				ret int
 				err error
@@ -197,14 +197,14 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case IN_GLUE_CACHE_HIT_CACHE,
-				IN_GLUE_CACHE_MISS_CACHE:
-				stm = newIterStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case LOOKUP_NS_CACHE_HIT,
+				LOOKUP_NS_CACHE_MISS:
+				stm = newQueryUpstreamStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
-		case ITER:
+		case QUERY_UPSTREAM:
 			var (
 				ret int
 				err error
@@ -214,18 +214,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				return nil, fmt.Errorf("handle state error %d %v", stm.getCurrentState(), err)
 			}
 			switch ret {
-			case ITER_COMMON_ERROR:
+			case QUERY_UPSTREAM_COMMON_ERROR:
 				//return servfail response
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
-			case ITER_NO_ERROR:
-				stm = newCheckRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case QUERY_UPSTREAM_NO_ERROR:
+				stm = newClassifyRespStateWithContext(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
-		case RET_RESP:
+		case RETURN_RESP:
 			var (
 				err error
 			)

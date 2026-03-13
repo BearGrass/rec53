@@ -169,50 +169,103 @@ type stateMachine interface {
 }
 ```
 
-`handle()` returns `(nextStateCode, error)`. The loop continues until it receives `RET_RESP` or an error.
+`handle()` returns `(nextStateCode, error)`. The loop continues until it receives `RETURN_RESP` or an error.
 
 ### States
 
 | State | Constant | Purpose |
 |-------|----------|---------|
 | `STATE_INIT` | `0` | Validate request; initialize response header |
-| `IN_CACHE` | `1` | Look up query in `globalDnsCache` |
-| `CHECK_RESP` | `2` | Classify current response: Answer / CNAME / NS referral |
-| `IN_GLUE` | `3` | Extract nameserver IPs from glue records in current response |
-| `IN_GLUE_CACHE` | `4` | Fall back to cache or root servers if no glue IPs found |
-| `ITER` | `5` | Send query to best nameserver IP; record latency or failure |
-| `RET_RESP` | `6` | Prepend CNAME chain; write final response |
+| `CACHE_LOOKUP` | `1` | Look up query in `globalDnsCache` |
+| `CLASSIFY_RESP` | `2` | Classify current response: Answer / CNAME / NS referral |
+| `EXTRACT_GLUE` | `3` | Extract nameserver IPs from glue records in current response |
+| `LOOKUP_NS_CACHE` | `4` | Fall back to cache or root servers if no glue IPs found |
+| `QUERY_UPSTREAM` | `5` | Send query to best nameserver IP; record latency or failure |
+| `RETURN_RESP` | `6` | Prepend CNAME chain; write final response |
 
 ### Transition Diagram
 
+三条循环路径贯穿整个状态机：
+
 ```
-STATE_INIT
-    │
-    ▼
-IN_CACHE ──── hit ────► CHECK_RESP ──── answer ───► RET_RESP ─► (done)
-    │                       │
-    │ miss                  │ CNAME ──────────────────► IN_CACHE  (re-resolve target)
-    │                       │
-    ▼                       │ NS referral
-IN_GLUE ◄──────────────────┘
-    │
-    │ glue IPs found
-    ▼
-  ITER
-    │
-    │ success ──► CHECK_RESP   (loop continues with new response)
-    │
-    │ no glue IPs
-    ▼
-IN_GLUE_CACHE
-    │ IPs from cache or root servers
-    ▼
-  ITER ──► CHECK_RESP ──► … ──► RET_RESP
+                      ┌─────────────────────────────────────────────────┐
+                      │           Loop A: iterative delegation          │
+                      │   (each NS referral → drill one level deeper)   │
+                      │                                                 │
+                      │  ┌──────────────────────────────────────┐       │
+                      │  │        Loop B: CNAME chain           │       │
+                      │  │  (each CNAME target re-resolved)     │       │
+                      │  │                                      │       │
+    ┌─────────────┐   │  │                                      │       │
+    │  STATE_INIT │   │  │                                      │       │
+    └──────┬──────┘   │  │                                      │       │
+           │ always   │  │                                      │       │
+           ▼          │  │                                      │       │
+    ┌─────────────┐   │  │   hit                                │       │
+    │ CACHE_LOOKUP│───┼──┼──────────────────┐                   │       │
+    └──────┬──────┘   │  │                  ▼                   │       │
+           │ miss     │  │         ┌──────────────────┐         │       │
+           ▼          │  │         │  CLASSIFY_RESP   │         │       │
+    ┌─────────────┐   │  │         └────────┬─────────┘         │       │
+    │ EXTRACT_GLUE│◄──┼──┼──────────────────┤ NS referral       │       │
+    └──────┬──────┘   │  │                  │                   │       │
+           │          │  │                  │ CNAME ────────────┘       │
+           │ glue IPs │  │                  │                           │
+           │ found    │  │                  │ answer / negative         │
+           │          │  │                  ▼                           │
+           │          │  │         ┌──────────────────┐                 │
+           │          │  │         │   RETURN_RESP    │ ──► (done)      │
+           │          │  │         └──────────────────┘                 │
+           │ no glue  │  │                                              │
+           ▼          │  │                                              │
+    ┌──────────────┐  │  │                                              │
+    │LOOKUP_NS_CACHE│ │  │                                              │
+    └──────┬───────┘  │  │                                              │
+           │ hit or   │  │                                              │
+           │ miss     │  │                                              │
+           │ (roots)  │  │                                              │
+           ▼          │  │                                              │
+    ┌──────────────┐  │  │                                              │
+    │QUERY_UPSTREAM│──┴──┘  success → CLASSIFY_RESP ──────────────────┘
+    └──────┬───────┘         (new NS referral closes Loop A)
+           │
+           │ error → SERVFAIL (terminal)
+```
+
+**Loop A — 迭代下钻**（主循环，最多 50 次迭代）
+
+每次 QUERY_UPSTREAM 从上游权威服务器拿到 NS referral（有 Ns + Extra，但没有 Answer），
+CLASSIFY_RESP 识别为 NS referral 并转到 EXTRACT_GLUE，循环继续，直到某一层服务器返回最终答案。
+
+```
+EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP →(NS referral)→ EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP → …
+   (root)         (root)           (TLD NS)         (TLD)           (TLD)         (auth)             (answer!)
+```
+
+**Loop B — CNAME 链追踪**（每个 CNAME target 触发一次完整解析）
+
+CLASSIFY_RESP 发现 CNAME 时，把 CNAME record 追加到 `cnameChain`，修改 Question 为 target，
+转回 CACHE_LOOKUP 重新走完整解析流程，直到拿到非 CNAME 记录。
+
+```
+CLASSIFY_RESP →(CNAME a→b)→ CACHE_LOOKUP →(miss)→ EXTRACT_GLUE → QUERY_UPSTREAM → CLASSIFY_RESP
+               →(CNAME b→c)→ CACHE_LOOKUP → …
+               →(answer c)→  RETURN_RESP  (prepend cnameChain: [a→b, b→c] + answer)
+```
+
+**LOOKUP_NS_CACHE 回退路径**（Loop A 的分支，非独立循环）
+
+EXTRACT_GLUE 发现无 glue 记录时，LOOKUP_NS_CACHE 从缓存中查找父级 zone 的 NS+glue，
+或退回 root servers。cache hit / miss 均进入 QUERY_UPSTREAM 继续 Loop A。
+
+```
+EXTRACT_GLUE →(no glue)→ LOOKUP_NS_CACHE →(hit: cached zone)→ QUERY_UPSTREAM
+                                          →(miss: root servers)→ QUERY_UPSTREAM
 ```
 
 ### CNAME Chain Handling
 
-`CHECK_RESP` detects CNAME records in the Answer section and appends them to `cnameChain []dns.RR` (stored in the state machine). The next query is re-issued for the CNAME target via `IN_CACHE`. At `RET_RESP`, the accumulated chain is prepended to the final Answer.
+`CLASSIFY_RESP` detects CNAME records in the Answer section and appends them to `cnameChain []dns.RR` (stored in the state machine). The next query is re-issued for the CNAME target via `CACHE_LOOKUP`. At `RETURN_RESP`, the accumulated chain is prepended to the final Answer.
 
 **Cycle detection**: a `visitedDomains` map prevents infinite CNAME loops.
 
@@ -220,7 +273,7 @@ IN_GLUE_CACHE
 
 ### NS Resolution Without Glue
 
-When `IN_GLUE_CACHE` cannot find nameserver IPs in cache or from roots, `resolveNSIPsConcurrently` launches parallel recursive state machine calls (one per NS hostname). A depth guard via `contextKeyNSResolutionDepth` prevents deadlock when NS hostnames are themselves delegated.
+When `LOOKUP_NS_CACHE` cannot find nameserver IPs in cache or from roots, `resolveNSIPsConcurrently` launches parallel recursive state machine calls (one per NS hostname). A depth guard via `contextKeyNSResolutionDepth` prevents deadlock when NS hostnames are themselves delegated.
 
 ### Return Codes
 
@@ -228,15 +281,15 @@ Return codes are defined in `server/state_machine.go` and `server/state_define.g
 
 | Code | Meaning |
 |------|---------|
-| `IN_CACHE_HIT_CACHE` | Cache hit — go to `CHECK_RESP` |
-| `IN_CACHE_MISS_CACHE` | Cache miss — go to `IN_GLUE` |
-| `CHECK_RESP_IS_ANS` | Final answer ready — go to `RET_RESP` |
-| `CHECK_RESP_IS_CNAME` | CNAME found — re-enter `IN_CACHE` |
-| `CHECK_RESP_IS_NS` | NS referral — go to `IN_GLUE` |
-| `IN_GLUE_HAS_GLUE` | Glue IPs found — go to `ITER` |
-| `IN_GLUE_NO_GLUE` | No glue — go to `IN_GLUE_CACHE` |
-| `ITER_COMMON_ERROR` | Upstream query failed |
-| `RET_RESP_DONE` | Terminal state, return response |
+| `CACHE_LOOKUP_HIT` | Cache hit — go to `CLASSIFY_RESP` |
+| `CACHE_LOOKUP_MISS` | Cache miss — go to `EXTRACT_GLUE` |
+| `CLASSIFY_RESP_GET_ANS` | Final answer ready — go to `RETURN_RESP` |
+| `CLASSIFY_RESP_GET_CNAME` | CNAME found — re-enter `CACHE_LOOKUP` |
+| `CLASSIFY_RESP_GET_NS` | NS referral — go to `EXTRACT_GLUE` |
+| `EXTRACT_GLUE_EXIST` | Glue IPs found — go to `QUERY_UPSTREAM` |
+| `EXTRACT_GLUE_NOT_EXIST` | No glue — go to `LOOKUP_NS_CACHE` |
+| `QUERY_UPSTREAM_COMMON_ERROR` | Upstream query failed |
+| `RETURN_RESP_NO_ERROR` | Terminal state, return response |
 
 ---
 
