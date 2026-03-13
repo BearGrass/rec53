@@ -4,13 +4,16 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 
 ## Features
 
-- **Recursive DNS Resolution** - Full iterative resolution from root servers
-- **UDP/TCP Support** - Listens on both protocols simultaneously
-- **Smart Caching** - LRU cache with TTL-based expiration (5 min default)
-- **IP Quality Tracking** - Monitors upstream nameserver latency for optimal server selection
-- **IP Prefetch** - Proactively checks nameserver quality for better performance
-- **Prometheus Metrics** - Built-in metrics endpoint for monitoring
-- **Graceful Shutdown** - Clean shutdown with timeout handling
+- **Full Iterative Resolution** — resolves from root servers, no upstream forwarding
+- **UDP/TCP Support** — dual-protocol listeners on the same port
+- **State Machine Architecture** — clean, auditable resolution pipeline with 7 states
+- **IPQualityV2** — sliding-window latency histograms with automatic fault recovery
+- **TTL-based Caching** — deep-copy safe cache with negative caching (NXDOMAIN/NODATA)
+- **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
+- **Prometheus Metrics** — per-query and per-nameserver observability
+- **Graceful Shutdown** — context-based cancellation with 5-second timeout
+
+---
 
 ## Quick Start
 
@@ -18,29 +21,38 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 # Build
 go build -o rec53 ./cmd
 
-# Run (DNS on :5353, metrics on :9999)
-./rec53
+# Generate default config (first run)
+./generate-config.sh
 
-# Run with custom configuration
-./rec53 -listen 0.0.0.0:53 -metric :9099 -log-level debug
+# Run with config
+./rec53 --config ./config.yaml
+
+# Run with overrides
+./rec53 --config ./config.yaml -listen 0.0.0.0:53 -metric :9099 -log-level debug
 
 # Test resolution
 dig @127.0.0.1 -p 5353 google.com
+dig @127.0.0.1 -p 5353 google.com AAAA
 ```
+
+---
 
 ## CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-listen` | `127.0.0.1:5353` | DNS server listen address |
-| `-metric` | `:9999` | Prometheus metrics address |
-| `-log-level` | `info` | Log level: debug, info, warn, error |
-| `-version` | `false` | Show version information |
+| `--config` | *(required)* | Path to YAML config file |
+| `-listen` | `127.0.0.1:5353` | DNS listen address (overrides config) |
+| `-metric` | `:9999` | Prometheus metrics address (overrides config) |
+| `-log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `-no-warmup` | `false` | Disable NS warmup on startup |
+| `-version` | `false` | Print version and exit |
+
+CLI flags take precedence over config file values.
+
+---
 
 ## Configuration
-
-rec53 uses YAML configuration for advanced settings. Create a `config.yaml` file:
 
 ```yaml
 dns:
@@ -50,217 +62,341 @@ dns:
 
 warmup:
   enabled: true
-  timeout: 5s
-  duration: 5s
-  concurrency: 0  # 0 = auto-calculate based on CPU cores; set to >0 to override
-  tlds:
+  timeout: 5s        # per-query timeout during warmup
+  duration: 5s       # total warmup budget
+  concurrency: 0     # 0 = auto (min(NumCPU*2, 8)); >0 = manual override
+  tlds:              # leave empty to use curated 30-TLD defaults
     - com
     - net
     - org
-    # ... more TLDs
 ```
-
-### Warmup Concurrency
-
-The warmup process automatically scales to your CPU capacity:
-- **Auto-calculation** (concurrency: 0): Uses formula `min(NumCPU() * 2, 8)` 
-  - 2-core machine: 4 concurrent goroutines
-  - 4-core machine: 8 concurrent goroutines  
-  - 8+ core machine: 8 concurrent goroutines (capped)
-- **Manual override** (concurrency: N): Uses exactly N goroutines for your deployment requirements
-
-This prevents CPU oversubscription on smaller machines while maintaining efficient I/O-bound parallelism.
 
 ### Warmup TLD List
 
-By default, rec53 warms up a curated list of 30 high-traffic TLDs covering 85%+ of global domain registrations:
+By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registrations:
 
-- **Tier 1** (8 domains): `.com`, `.cn`, `.de`, `.net`, `.org`, `.uk`, `.ru`, `.nl`
-- **Tier 2** (22 domains): Major ccTLDs (`.br`, `.au`, `.in`, `.us`, `.fr`, `.it`, `.es`, `.ca`, ...) and strategic gTLDs (`.io`, `.ai`, `.app`, `.xyz`, ...)
+- **Tier 1** (8): `.com`, `.cn`, `.de`, `.net`, `.org`, `.uk`, `.ru`, `.nl`
+- **Tier 2** (22): major ccTLDs (`.br`, `.au`, `.in`, `.us`, `.fr`, `.it`, ...) plus strategic gTLDs (`.io`, `.ai`, `.app`, `.xyz`, ...)
 
-This replaces the prior approach of enumerating 1000+ TLDs, reducing startup memory by ~80-90% while maintaining coverage for the domains users are most likely to resolve.
+To use a custom list, specify `warmup.tlds`. Leave empty for the curated defaults.
 
-To use a custom TLD list, specify `warmup.tlds` in `config.yaml`. Leave it empty to use the curated defaults.
+---
 
-## Architecture
+## System Design
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         cmd/rec53.go                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │ Flag Parsing│→ │   Server    │→ │  Graceful Shutdown      │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       server/                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              State Machine (state_machine.go)             │   │
-│  │                                                           │   │
-│  │  STATE_INIT → IN_CACHE → CHECK_RESP → IN_GLUE → ITER →   │   │
-│  │      │           │            │           │        │      │   │
-│  │      │      ┌────┴────┐       │      ┌────┴───┐    │      │   │
-│  │      │      │         │       │      │        │    │      │   │
-│  │      ▼      ▼         ▼       ▼      ▼        ▼    ▼      │   │
-│  │  [Init]  [Hit/Miss] [Ans/CNAME/NS] [Exist/Cache] [Query]  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Cache     │  │   IP Pool   │  │    DNS Server (UDP/TCP) │  │
-│  │ (cache.go)  │  │(ip_pool.go) │  │      (server.go)        │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       monitor/                                  │
-│  ┌─────────────────────┐  ┌─────────────────────────────────┐   │
-│  │  Prometheus Metrics │  │         Zap Logger              │   │
-│  │    (metric.go)      │  │         (log.go)                │   │
-│  └─────────────────────┘  └─────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### State Machine Flow
+### Directory Structure
 
 ```
-                    ┌──────────────┐
-                    │  STATE_INIT  │
-                    └──────┬───────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-              ┌────→│   IN_CACHE   │←─────────────────────────┐
-              │     └──────┬───────┘                          │
-              │            │                                  │
-         CNAME │     ┌──────┴──────┐                          │
-              │     │             │                          │
-              │   Hit            Miss                         │
-              │     │             │                          │
-              │     ▼             ▼                          │
-              │ ┌────────┐  ┌──────────────┐                  │
-              │ │CHECK_  │  │   IN_GLUE    │                  │
-              │ │RESP    │  └──────┬───────┘                  │
-              │ └───┬────┘         │                          │
-              │     │       ┌──────┴──────┐                   │
-              │     │       │             │                   │
-              │     │    Exist      Not Exist                 │
-              │     │       │             │                   │
-              │     │       ▼             ▼                   │
-              │     │  ┌────────┐  ┌──────────────┐           │
-              │     │  │  ITER  │  │ IN_GLUE_CACHE│           │
-              │     │  └───┬────┘  └──────┬───────┘           │
-              │     │      │              │                   │
-              │     │      │        ┌─────┴─────┐             │
-              │     │      │        │           │             │
-              │     │      │      Hit         Miss            │
-              │     │      │        │           │             │
-              │     │      │        └─────┬─────┘             │
-              │     │      │              │                   │
-              │     │      ▼              ▼                   │
-              │     │  ┌──────────────────────┐               │
-              │     │  │        ITER          │───────────────┤
-              │     │  └──────────┬───────────┘               │
-              │     │             │                           │
-              │     │      Success                            │
-              │     │             │                           │
-              │     │             ▼                           │
-              │     │      ┌──────────────┐                   │
-              │     └──────│  CHECK_RESP  │                   │
-              │            └──────┬───────┘                   │
-              │                   │                           │
-              │        ┌──────────┼──────────┐                │
-              │        │          │          │                │
-              │     Answer     CNAME       NS                 │
-              │        │          │          │                │
-              │        ▼          └──────────┘                │
-              │  ┌──────────┐                                 │
-              │  │RET_RESP  │─────────────────────────────────┘
-              │  └──────────┘
-              │       │
-              └───────┘ (Done)
+rec53/
+├── cmd/                    # Entry point and CLI
+│   ├── rec53.go            # main(), flag parsing, config loading, signal handling
+│   └── loglevel.go         # log level parsing
+├── server/                 # Core DNS resolution logic
+│   ├── server.go           # UDP/TCP server, ServeDNS(), truncation, warmup lifecycle
+│   ├── state_machine.go    # Change() loop, CNAME chain, iteration guard
+│   ├── state_define.go     # State constants, return codes, state constructors
+│   ├── state.go            # State handler implementations (handle() methods)
+│   ├── cache.go            # TTL cache wrapper (go-cache)
+│   ├── ip_pool.go          # IPQualityV2 ring buffer, scoring, probe loop
+│   └── warmup.go           # WarmupNSRecords(), TLD list
+├── monitor/                # Observability
+│   ├── metric.go           # Prometheus metric methods, HTTP server
+│   ├── log.go              # Zap logger initialization, level control
+│   └── var.go              # Global metric/log singletons, metric definitions
+├── utils/                  # Utilities
+│   ├── root.go             # Root DNS server addresses (13 roots)
+│   ├── zone.go             # Zone parsing helpers
+│   └── net.go              # Network utilities
+└── e2e/                    # Integration tests
+    ├── helpers.go           # MockAuthorityServer, test utilities
+    ├── resolver_test.go     # End-to-end resolution tests
+    ├── cache_test.go        # Cache behavior tests
+    └── server_test.go       # Server lifecycle tests
 ```
 
-### Key Components
+### Request Lifecycle
 
-| Component | File | Description |
-|-----------|------|-------------|
-| State Machine | `server/state_machine.go` | Core DNS resolution logic |
-| States | `server/state_define.go`, `server/state.go` | State definitions and handlers |
-| Cache | `server/cache.go` | DNS response cache with TTL |
-| IP Pool | `server/ip_pool.go` | Nameserver quality tracking & prefetch |
-| Server | `server/server.go` | UDP/TCP DNS server |
-| Metrics | `monitor/metric.go` | Prometheus integration |
-| Logger | `monitor/log.go` | Zap structured logging |
+```
+Client UDP/TCP query
+        │
+        ▼
+  server.ServeDNS()           ← server/server.go
+  - guard QDCOUNT == 0
+  - save originalQuestion
+  - InCounterAdd(request)
+  - newStateInitState()
+        │
+        ▼
+  Change(stm)                 ← server/state_machine.go
+  - state machine loop (max 50 iterations)
+  - accumulates cnameChain
+        │
+        ▼
+  reply = result
+  - restore originalQuestion
+  - UDP: truncateResponse() if needed
+  - OutCounterAdd / LatencyHistogramObserve
+  - w.WriteMsg(reply)
+```
 
-## IP Quality Algorithm (IPQualityV2)
+### Component Map
 
-The resolver implements **IPQualityV2**, a sliding-window histogram-based system for intelligent nameserver selection with automatic fault recovery:
+| Component | File | Role |
+|-----------|------|------|
+| `server` | `server/server.go` | UDP/TCP listener, request entry point |
+| `Change()` | `server/state_machine.go` | State machine loop orchestrator |
+| State handlers | `server/state_define.go`, `state.go` | Per-state `handle()` logic |
+| `globalDnsCache` | `server/cache.go` | TTL response cache |
+| `globalIPPool` | `server/ip_pool.go` | Nameserver latency tracking & selection |
+| `WarmupNSRecords` | `server/warmup.go` | Startup IP pool bootstrap |
+| `Rec53Metric` | `monitor/metric.go` | Prometheus counters / histograms / gauges |
+| `Rec53Log` | `monitor/log.go` | Zap structured logger |
 
-### Key Features
+---
 
-1. **Sliding Window Histogram** - Maintains last 64 RTT samples per IP for percentile calculation
-   - P50 (median) - Primary metric for server selection
-   - P95, P99 - Monitoring percentiles for detecting outliers
+## Core Subsystem: State Machine
 
-2. **Exponential Backoff Failure Handling** - Graceful degradation on server failures
-   - Phase 1 (1-3 failures): DEGRADED state with 20% latency penalty
-   - Phase 2 (4-6 failures): SUSPECT state with MAX latency (10000ms)
-   - Phase 3 (7+ failures): Eligible for automatic recovery probing
+### Overview
 
-3. **Confidence-Based Selection** - Encourages sampling of new servers
-   - Confidence: 0-100% based on sample count (≥10 samples = 100%)
-   - Low-confidence IPs get 2x score multiplier to boost exploration
-   - Balances best-known performance with discovery of better servers
+All DNS resolution happens inside the `Change()` loop in `server/state_machine.go`. Each call to `Change()` drives a state machine through up to **50 transitions** (CNAME loop guard). Each state is a struct that implements:
 
-4. **Composite Scoring Formula**
-   ```
-   score = p50_latency × confidence_multiplier × state_weight
-   
-   Confidence multiplier: 2.0 (0% confidence) → 1.0 (100% confidence)
-   State weights: ACTIVE(1.0), DEGRADED(1.5), SUSPECT(100.0), RECOVERED(1.1)
-   ```
+```go
+type stateMachine interface {
+    getCurrentState() int
+    getRequest()      *dns.Msg
+    getResponse()     *dns.Msg
+    handle(req, resp *dns.Msg) (int, error)
+}
+```
 
-5. **Automatic Recovery Probing** - Background goroutine probes SUSPECT IPs
-   - Runs every 30 seconds non-blocking to queries
-   - Identifies recovery candidates via A record queries
-   - Resets to ACTIVE state on successful probe
+`handle()` returns `(nextStateCode, error)`. The loop continues until it receives `RET_RESP` or an error.
 
-6. **Prometheus Metrics Export**
-   - `rec53_ipv2_p50_latency_ms` - Median latency per IP
-   - `rec53_ipv2_p95_latency_ms` - 95th percentile per IP
-   - `rec53_ipv2_p99_latency_ms` - 99th percentile per IP
+### States
 
-### Performance Characteristics
+| State | Constant | Purpose |
+|-------|----------|---------|
+| `STATE_INIT` | `0` | Validate request; initialize response header |
+| `IN_CACHE` | `1` | Look up query in `globalDnsCache` |
+| `CHECK_RESP` | `2` | Classify current response: Answer / CNAME / NS referral |
+| `IN_GLUE` | `3` | Extract nameserver IPs from glue records in current response |
+| `IN_GLUE_CACHE` | `4` | Fall back to cache or root servers if no glue IPs found |
+| `ITER` | `5` | Send query to best nameserver IP; record latency or failure |
+| `RET_RESP` | `6` | Prepend CNAME chain; write final response |
 
-- **Selection Speed**: 94-98 µs for 1000 IPs (10x under 1ms target)
-- **Memory Usage**: ~24KB per 1000 IPs (64 samples × 8 bytes + metadata)
-- **Fault Recovery Time**: 30-60 seconds for SUSPECT IPs via background probing
+### Transition Diagram
+
+```
+STATE_INIT
+    │
+    ▼
+IN_CACHE ──── hit ────► CHECK_RESP ──── answer ───► RET_RESP ─► (done)
+    │                       │
+    │ miss                  │ CNAME ──────────────────► IN_CACHE  (re-resolve target)
+    │                       │
+    ▼                       │ NS referral
+IN_GLUE ◄──────────────────┘
+    │
+    │ glue IPs found
+    ▼
+  ITER
+    │
+    │ success ──► CHECK_RESP   (loop continues with new response)
+    │
+    │ no glue IPs
+    ▼
+IN_GLUE_CACHE
+    │ IPs from cache or root servers
+    ▼
+  ITER ──► CHECK_RESP ──► … ──► RET_RESP
+```
+
+### CNAME Chain Handling
+
+`CHECK_RESP` detects CNAME records in the Answer section and appends them to `cnameChain []dns.RR` (stored in the state machine). The next query is re-issued for the CNAME target via `IN_CACHE`. At `RET_RESP`, the accumulated chain is prepended to the final Answer.
+
+**Cycle detection**: a `visitedDomains` map prevents infinite CNAME loops.
+
+**B-004 fix**: `isNSRelevantForCNAME` preserves NS delegation records when they belong to the zone of the original query rather than the CNAME target — preventing incorrect referral loops.
+
+### NS Resolution Without Glue
+
+When `IN_GLUE_CACHE` cannot find nameserver IPs in cache or from roots, `resolveNSIPsConcurrently` launches parallel recursive state machine calls (one per NS hostname). A depth guard via `contextKeyNSResolutionDepth` prevents deadlock when NS hostnames are themselves delegated.
+
+### Return Codes
+
+Return codes are defined in `server/state_machine.go` and `server/state_define.go`:
+
+| Code | Meaning |
+|------|---------|
+| `IN_CACHE_HIT_CACHE` | Cache hit — go to `CHECK_RESP` |
+| `IN_CACHE_MISS_CACHE` | Cache miss — go to `IN_GLUE` |
+| `CHECK_RESP_IS_ANS` | Final answer ready — go to `RET_RESP` |
+| `CHECK_RESP_IS_CNAME` | CNAME found — re-enter `IN_CACHE` |
+| `CHECK_RESP_IS_NS` | NS referral — go to `IN_GLUE` |
+| `IN_GLUE_HAS_GLUE` | Glue IPs found — go to `ITER` |
+| `IN_GLUE_NO_GLUE` | No glue — go to `IN_GLUE_CACHE` |
+| `ITER_COMMON_ERROR` | Upstream query failed |
+| `RET_RESP_DONE` | Terminal state, return response |
+
+---
+
+## Core Subsystem: Cache
+
+### Design
+
+The cache is a thin wrapper around [`patrickmn/go-cache`](https://github.com/patrickmn/go-cache) with these guarantees:
+
+- **Key format**: `"name.:qtype_number"` — e.g. `"example.com.:1"` for A, `"example.com.:28"` for AAAA
+- **Deep copy on read and write**: every cached `*dns.Msg` is stored and retrieved via `msg.Copy()` to prevent callers from mutating cached data
+- **TTL from DNS response**: extracted from `Answer[0].Header().Ttl` (positive responses) or `Ns[0].Header().Ttl` (NS referrals); defaults to 5 minutes
+- **go-cache parameters**: default TTL 5 min, cleanup interval 10 min
+
+### Negative Caching
+
+NXDOMAIN and NODATA (empty answer, no error) responses are cached using the SOA `Minttl` field from the Authority section. If no SOA is present, a 60-second default TTL is used. This prevents repeated iterative resolution for non-existent domains.
+
+### Cache API
+
+```go
+// Read — always returns a deep copy; nil if not cached
+msg := getCacheCopyByType(name, qtype)
+
+// Write — stores a deep copy; ttl from msg or default 5 min
+setCacheCopyByType(name, qtype, msg)
+```
+
+### Thread Safety
+
+`go-cache` provides its own internal locking. The `getCacheCopyByType`/`setCacheCopyByType` wrappers do not add additional locking. The deep-copy discipline ensures no data races even under concurrent reads.
+
+---
+
+## Core Subsystem: IP Pool (IPQualityV2)
+
+### Overview
+
+`globalIPPool` tracks latency quality for every nameserver IP encountered during resolution. It uses a **64-sample sliding window ring buffer** per IP and exports P50/P95/P99 percentiles to Prometheus. Selection uses a **composite score** that balances measured latency, confidence, and fault state.
+
+### Per-IP Data Structure
+
+```go
+type IPQualityV2 struct {
+    samples      [64]float64   // ring buffer of RTT samples (ms)
+    sampleCount  int           // total samples recorded (capped at 64)
+    head         int           // next write position in ring buffer
+    p50, p95, p99 float64      // computed percentiles
+    failCount    int           // consecutive failure counter
+    state        int           // ACTIVE / DEGRADED / SUSPECT / RECOVERED
+}
+```
+
+### Lifecycle
+
+```
+New IP discovered
+    │  state=ACTIVE, confidence=0%, score=2000 (encouraged for sampling)
+    ▼
+RecordLatency(ip, rtt)
+    │  add rtt to ring buffer, recompute P50/P95/P99, reset failCount=0
+    ▼
+Query success ──► state stays ACTIVE; confidence increases toward 100%
+Query failure ──► RecordFailure(ip)
+                      failCount 1-3: state=DEGRADED  (score ×1.5)
+                      failCount 4-6: state=SUSPECT   (score ×100, p50=10000)
+                      failCount 7+:  state=SUSPECT   (eligible for probe)
+                          │
+                          ▼ every 30 s (background)
+                      periodicProbeLoop()
+                          probe A record → success → ResetForProbe()
+                                                      state=ACTIVE, failCount=0
+```
+
+### Composite Score Formula
+
+```
+score = p50_ms × confidence_multiplier × state_weight
+
+confidence_multiplier:
+  0%  confidence → 2.0   (new IPs are tried aggressively)
+  100% confidence → 1.0  (fully measured IPs are judged on latency alone)
+
+state_weight:
+  ACTIVE    → 1.0
+  RECOVERED → 1.1   (slight penalty: recently recovered)
+  DEGRADED  → 1.5   (moderate penalty: some failures)
+  SUSPECT   → 100.0 (avoided: severe failures)
+```
+
+### Score Examples
+
+| State | Confidence | P50 (ms) | Conf Mult | State Weight | Score |
+|-------|------------|----------|-----------|--------------|-------|
+| ACTIVE | 0% | 100 | 2.0 | 1.0 | **200** (new, encouraged) |
+| ACTIVE | 100% | 100 | 1.0 | 1.0 | **100** (preferred) |
+| ACTIVE | 100% | 50 | 1.0 | 1.0 | **50** (best) |
+| RECOVERED | 100% | 100 | 1.0 | 1.1 | **110** (slightly penalized) |
+| DEGRADED | 100% | 100 | 1.0 | 1.5 | **150** (penalized) |
+| SUSPECT | 100% | 10000 | 1.0 | 100.0 | **1,000,000** (avoided) |
+
+### Selection API
+
+```go
+// Returns (best, secondary) by lowest composite score
+best, secondary := globalIPPool.GetBestIPsV2(ips)
+
+// Record a successful query
+globalIPPool.RecordLatency(ip, rtt_ms)
+
+// Record a failed query
+globalIPPool.RecordFailure(ip)
+```
+
+### Concurrent Access
+
+- `IPQualityV2` fields are accessed lock-free via atomic operations in the hot path
+- `IPPool.pool` (the map of IP → `*IPQualityV2`) is protected by `sync.RWMutex`:
+  - `RLock` for reads during query path (`RecordLatency`, `RecordFailure`, `GetScore`)
+  - `Lock` only in background probe loop (`ResetForProbe`)
+- Background probe goroutine runs every 30 s; non-blocking to the query path
+
+### Warmup Bootstrap
+
+On startup, `WarmupNSRecords()` resolves NS records for a configurable TLD list. All resolved nameserver IPs are fed into `globalIPPool` via `RecordLatency`, giving the pool measured baselines before the first user query arrives. This eliminates the cold-start penalty where all IPs have 0% confidence.
+
+---
 
 ## Monitoring
 
 ### Prometheus Metrics
 
-Metrics available at `http://localhost:9999/metric`:
+Metrics endpoint: `http://localhost:9999/metric`
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `rec53_in_total` | Counter | stage, name, type | Incoming queries |
-| `rec53_out_total` | Counter | stage, name, type, code | Outgoing responses |
-| `rec53_latency_ms` | Histogram | stage, name, type, code | Query latency |
-| `rec53_ipv2_p50_latency_ms` | Gauge | ip | Median nameserver latency |
-| `rec53_ipv2_p95_latency_ms` | Gauge | ip | 95th percentile nameserver latency |
-| `rec53_ipv2_p99_latency_ms` | Gauge | ip | 99th percentile nameserver latency |
+| `rec53_in_total` | Counter | `stage`, `name`, `type` | Incoming query count |
+| `rec53_out_total` | Counter | `stage`, `name`, `type`, `code` | Outgoing response count |
+| `rec53_latency_ms` | Histogram | `stage`, `name`, `type`, `code` | End-to-end query latency (ms) |
+| `rec53_ipv2_p50_latency_ms` | Gauge | `ip` | Median nameserver RTT |
+| `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | 95th-percentile nameserver RTT |
+| `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | 99th-percentile nameserver RTT |
 
-### Grafana Dashboard
+### Useful Queries
 
-Use the Prometheus data source to visualize:
-- Query rate by domain/type
-- Response code distribution
-- P50/P99 latency
-- Top queried domains
-- Nameserver quality over time
+```promql
+# Query rate
+rate(rec53_in_total[1m])
+
+# Error rate (SERVFAIL)
+rate(rec53_out_total{code="SERVFAIL"}[1m]) / rate(rec53_out_total[1m])
+
+# P99 end-to-end latency
+histogram_quantile(0.99, rate(rec53_latency_ms_bucket[5m]))
+
+# Degraded nameservers (P50 > 500ms)
+rec53_ipv2_p50_latency_ms > 500
+```
+
+---
 
 ## Docker Deployment
 
@@ -269,9 +405,13 @@ Use the Prometheus data source to visualize:
 docker build -t rec53 .
 
 # Run standalone
-docker run -d -p 5353:5353/udp -p 5353:5353 -p 9999:9999 rec53
+docker run -d \
+  -p 5353:5353/udp \
+  -p 5353:5353/tcp \
+  -p 9999:9999 \
+  rec53
 
-# Run with Docker Compose (includes Prometheus)
+# Run with Docker Compose (includes Prometheus + node-exporter)
 cd single_machine && docker-compose up -d
 ```
 
@@ -279,47 +419,61 @@ cd single_machine && docker-compose up -d
 
 | Service | Port | Description |
 |---------|------|-------------|
-| rec53 | 5353 (UDP/TCP), 9999 | DNS server + metrics |
+| rec53 | 5353 (UDP/TCP), 9999 | DNS server + Prometheus metrics |
 | prometheus | 9090 | Metrics collection |
 | node-exporter | 9100 | Host metrics |
+
+---
 
 ## Development
 
 ```bash
-# Run tests
-go test ./...
+# Full test suite (always use -race)
+go test -race ./...
 
-# Run tests with coverage
+# Disable cache between runs
+go test -race -count=1 ./...
+
+# Single test
+go test -v -run TestResolverIntegration ./e2e/...
+go test -v -run TestIPPoolSelection ./server/...
+
+# Coverage
 go test -cover ./...
 
-# Format code
+# Format
 gofmt -w .
 
-# Run linter
+# Vet
 go vet ./...
 ```
 
-## Known Issues
+---
 
-- `www.huawei.com` resolution may have issues with certain CNAME chains
-- Some domains with complex CNAME chains may return SERVFAIL when the final A/AAAA resolution fails
+## Known Limitations
+
+- DNSSEC validation not implemented
+- DoT / DoH not supported
+- `www.huawei.com` and similar complex CNAME chains may return SERVFAIL when the final A/AAAA resolution fails
 
 ## Roadmap
 
 See [`.rec53/ROADMAP.md`](.rec53/ROADMAP.md) for planned features:
 - DNSSEC validation
 - DoT/DoH support
-- Concurrent queries
+- Concurrent upstream queries
 - Query rate limiting
 
 ## Documentation
 
-- [`.rec53/README.md`](.rec53/README.md) - Project documentation index
-- [`.rec53/ROADMAP.md`](.rec53/ROADMAP.md) - Roadmap and requirements
+- [`.rec53/ARCHITECTURE.md`](.rec53/ARCHITECTURE.md) — detailed architecture reference
+- [`.rec53/CONVENTIONS.md`](.rec53/CONVENTIONS.md) — code conventions and patterns
+- [`.rec53/ROADMAP.md`](.rec53/ROADMAP.md) — roadmap and requirements
 
 ## References
 
-- [miekg/dns](https://github.com/miekg/dns) - DNS library for Go
-- [Unbound](https://nlnetlabs.nl/projects/unbound/about/) - Reference state machine architecture
-- [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034) - DNS concepts
-- [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035) - DNS implementation
+- [miekg/dns](https://github.com/miekg/dns) — DNS protocol library for Go
+- [Unbound](https://nlnetlabs.nl/projects/unbound/about/) — reference recursive resolver architecture
+- [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034) — DNS concepts and facilities
+- [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035) — DNS implementation and specification
+- [RFC 2308](https://datatracker.ietf.org/doc/html/rfc2308) — Negative caching of DNS queries
