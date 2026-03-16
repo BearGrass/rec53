@@ -189,12 +189,12 @@ func TestMain(m *testing.M) {
 
 Update these docs **in the same commit** as the code change:
 
-- New package/dir → `.rec53/ARCHITECTURE.md`
-- New dependency → this file + `.rec53/ARCHITECTURE.md`
+- New package/dir → `docs/architecture.md`
+- New dependency → this file + `docs/architecture.md`
 - New patterns → `.rec53/CONVENTIONS.md`
 - User-facing changes → `README.md`
 
-Related: `.rec53/ARCHITECTURE.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
+Related: `docs/architecture.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
 
 ## 交互原则
 - 默认使用简体中文回复用户
