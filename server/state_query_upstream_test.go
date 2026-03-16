@@ -1393,6 +1393,21 @@ func makeQueryUpstreamReq(qname string, serverIP string) (*dns.Msg, *dns.Msg) {
 	return req, resp
 }
 
+// canSendUDPTo reports whether a UDP datagram can be sent to the given IP address
+// on a non-privileged port. It is used in tests to skip scenarios that require
+// multiple loopback addresses (e.g. 127.0.0.2) which may be blocked by seccomp
+// or container security policies. Port 53 (privileged) may have special access
+// rules, so we probe a high port to match the ports used by DNS test servers.
+func canSendUDPTo(ip string) bool {
+	conn, err := net.Dial("udp", ip+":19999")
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte("probe"))
+	return err == nil
+}
+
 // TestQueryUpstreamState_CancelledContext verifies that a pre-cancelled context
 // causes handle to return COMMON_ERROR immediately without making any DNS query.
 func TestQueryUpstreamState_CancelledContext(t *testing.T) {
@@ -1564,6 +1579,12 @@ func TestQueryUpstreamState_BothIPsFail(t *testing.T) {
 // TestQueryUpstreamState_BadRcodeServfail_SecondarySucceeds verifies that when
 // primary returns SERVFAIL, handle retries with secondary and succeeds.
 func TestQueryUpstreamState_BadRcodeServfail_SecondarySucceeds(t *testing.T) {
+	// This test requires 127.0.0.2 to be reachable (loopback alias).
+	// Some sandboxed environments block UDP to addresses other than 127.0.0.1.
+	if !canSendUDPTo("127.0.0.2") {
+		t.Skip("skipping: 127.0.0.2 not reachable via UDP in this environment")
+	}
+
 	FlushCacheForTest()
 	ResetIPPoolForTest()
 	defer func() { FlushCacheForTest(); ResetIPPoolForTest() }()

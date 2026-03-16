@@ -473,8 +473,9 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 			return QUERY_UPSTREAM_NO_ERROR, nil
 		case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeFormatError, dns.RcodeNotImplemented:
 			// B-013: Bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) should trigger server switch
+			badRcodeStr := dns.RcodeToString[newResponse.Rcode]
 			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with alternate IP",
-				dns.RcodeToString[newResponse.Rcode], theBestIP)
+				badRcodeStr, theBestIP)
 
 			// Record failure in IP quality tracking
 			iqv2 := globalIPPool.GetIPQualityV2(theBestIP)
@@ -493,11 +494,11 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 			if altAddr == "" || altAddr == theBestIP {
 				monitor.Rec53Log.Debugf("[ITER] No alternate IP available for retry, returning bad Rcode")
 				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, no alternate IP",
-					dns.RcodeToString[newResponse.Rcode])
+					badRcodeStr)
 			}
 
 			monitor.Rec53Log.Debugf("[ITER] Retrying with alternate IP %s for bad Rcode %s",
-				altAddr, dns.RcodeToString[newResponse.Rcode])
+				altAddr, badRcodeStr)
 
 			// Retry query with alternate IP (single query — race is over)
 			var altRtt time.Duration
@@ -510,7 +511,7 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 					iqv2.RecordFailure()
 				}
 				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, alternate IP also failed: %v",
-					dns.RcodeToString[newResponse.Rcode], err)
+					badRcodeStr, err)
 			}
 
 			// Alternate IP succeeded, update tracking
