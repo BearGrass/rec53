@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"rec53/monitor"
+	"rec53/utils"
 
 	"github.com/miekg/dns"
 )
@@ -199,7 +200,7 @@ func (s *server) Run() <-chan error {
 	}
 
 	// Start background IP probe loop for fault recovery
-	globalIPPool.StartProbeLoop()
+	globalIPPool.StartProbeLoop(utils.ExtractRootIPs())
 
 	// Start background NS warmup if enabled (non-blocking).
 	// warmupCancel lets Shutdown() stop warmup immediately without waiting for
@@ -294,7 +295,7 @@ func (s *server) Shutdown(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 
-	// Write NS cache snapshot on graceful shutdown (SIGTERM, SIGINT, or programmatic Shutdown).
+	// Write cache snapshot on graceful shutdown (SIGTERM, SIGINT, or programmatic Shutdown).
 	// Runs after listeners and IP pool are stopped to avoid concurrent cache writes.
 	// Write failures are logged but do not affect the Shutdown return value.
 	if s.snapshotCfg.Enabled {

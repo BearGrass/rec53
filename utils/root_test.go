@@ -196,6 +196,74 @@ func TestGetRootGlueReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestExtractRootIPs(t *testing.T) {
+	ips := ExtractRootIPs()
+
+	if len(ips) != 13 {
+		t.Errorf("expected 13 root server IPs, got %d", len(ips))
+	}
+
+	// Verify well-known root server IPs are present
+	expectedIPs := []string{
+		"198.41.0.4",     // a.root-servers.net
+		"199.9.14.201",   // b.root-servers.net
+		"192.33.4.12",    // c.root-servers.net
+		"199.7.91.13",    // d.root-servers.net
+		"192.203.230.10", // e.root-servers.net
+	}
+	for _, ip := range expectedIPs {
+		if _, ok := ips[ip]; !ok {
+			t.Errorf("expected root server IP %s not found in result", ip)
+		}
+	}
+
+	// Verify all entries are valid IP addresses
+	for ip := range ips {
+		if net.ParseIP(ip) == nil {
+			t.Errorf("entry %q is not a valid IP address", ip)
+		}
+	}
+}
+
+func TestExtractRootIPs_WithOverride(t *testing.T) {
+	defer ResetRootGlue()
+
+	// Override with a custom root glue containing 2 IPs
+	custom := new(dns.Msg)
+	custom.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock1.test.",
+		},
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+			Ns:  "mock2.test.",
+		},
+	}
+	custom.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "mock1.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.ParseIP("10.0.0.1"),
+		},
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "mock2.test.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.ParseIP("10.0.0.2"),
+		},
+	}
+	SetRootGlue(custom)
+
+	ips := ExtractRootIPs()
+	if len(ips) != 2 {
+		t.Errorf("expected 2 IPs from custom root glue, got %d", len(ips))
+	}
+	if _, ok := ips["10.0.0.1"]; !ok {
+		t.Error("expected 10.0.0.1 in result")
+	}
+	if _, ok := ips["10.0.0.2"]; !ok {
+		t.Error("expected 10.0.0.2 in result")
+	}
+}
+
 func TestResetRootGlue(t *testing.T) {
 	defer ResetRootGlue()
 

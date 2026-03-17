@@ -11,16 +11,27 @@ import (
 	"github.com/miekg/dns"
 )
 
+// STALE_IP_THRESHOLD is the duration after which an unreferenced IP is considered stale.
+// IPs whose lastSeen exceeds this threshold are eligible for pruning.
+// 24h covers DNS cache TTL cycles and crawler scheduling periods, avoiding
+// false pruning of IPs that are simply served from cache.
+const STALE_IP_THRESHOLD = 24 * time.Hour
+
+// PRUNE_INTERVAL is how often the probe loop checks whether pruning is needed.
+const PRUNE_INTERVAL = 30 * time.Minute
+
 // IPPool manages IP quality tracking and selection for upstream DNS servers.
 // It maintains a pool of IPQualityV2 entries keyed by IP address and provides
-// best-IP selection, periodic health probing, and graceful shutdown.
+// best-IP selection, periodic health probing, stale IP pruning, and graceful shutdown.
 type IPPool struct {
 	poolV2        map[string]*IPQualityV2 // V2 pool with sliding window histogram
 	l             sync.RWMutex
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
-	probeLoopOnce sync.Once // ensures StartProbeLoop starts exactly one goroutine
+	probeLoopOnce sync.Once           // ensures StartProbeLoop starts exactly one goroutine
+	exemptIPs     map[string]struct{} // IPs exempt from pruning (e.g. root servers)
+	lastPruneAt   time.Time           // wall-clock time of last prune execution
 }
 
 var globalIPPool = NewIPPool()
@@ -52,10 +63,13 @@ func (ipp *IPPool) Shutdown(ctx context.Context) error {
 }
 
 // StartProbeLoop initializes and launches the background probe goroutine
-// for periodic SUSPECT IP recovery attempts.
+// for periodic SUSPECT IP recovery attempts and stale IP pruning.
+// exemptIPs specifies IPs that should never be pruned (e.g. root server IPs).
 // Safe to call multiple times — only one goroutine is ever started (sync.Once).
-func (ipp *IPPool) StartProbeLoop() {
+func (ipp *IPPool) StartProbeLoop(exemptIPs map[string]struct{}) {
 	ipp.probeLoopOnce.Do(func() {
+		ipp.exemptIPs = exemptIPs
+		ipp.lastPruneAt = time.Now()
 		ipp.wg.Add(1)
 		go ipp.periodicProbeLoop()
 		monitor.Rec53Log.Debugf("IP pool probe loop started")
@@ -78,7 +92,40 @@ func (ipp *IPPool) periodicProbeLoop() {
 			return
 		case <-ticker.C:
 			ipp.probeAllSuspiciousIPs()
+
+			// Check if it's time to prune stale IPs (wall-clock based)
+			if time.Since(ipp.lastPruneAt) >= PRUNE_INTERVAL {
+				ipp.PruneStaleIPs(STALE_IP_THRESHOLD)
+				ipp.lastPruneAt = time.Now()
+			}
 		}
+	}
+}
+
+// PruneStaleIPs removes IP entries whose lastSeen exceeds the given threshold.
+// IPs in the exemptIPs set are never pruned regardless of their lastSeen value.
+// Thread-safe: holds IPPool write lock during iteration; reads lastSeen via
+// GetLastSeen() which acquires IPQualityV2 read lock (consistent lock order).
+func (ipp *IPPool) PruneStaleIPs(threshold time.Duration) {
+	now := time.Now()
+
+	ipp.l.Lock()
+	before := len(ipp.poolV2)
+	pruned := 0
+	for ip, iqv2 := range ipp.poolV2 {
+		if _, exempt := ipp.exemptIPs[ip]; exempt {
+			continue
+		}
+		if now.Sub(iqv2.GetLastSeen()) > threshold {
+			delete(ipp.poolV2, ip)
+			pruned++
+		}
+	}
+	after := len(ipp.poolV2)
+	ipp.l.Unlock()
+
+	if pruned > 0 {
+		monitor.Rec53Log.Debugf("[PRUNE] pruned %d stale IPs (pool size: %d → %d)", pruned, before, after)
 	}
 }
 

@@ -36,6 +36,7 @@ type IPQualityV2 struct {
 	state       uint8     // Current IP state (ACTIVE, DEGRADED, SUSPECT, RECOVERED)
 	lastUpdate  time.Time // Last update timestamp
 	lastFailure time.Time // Last failure timestamp
+	lastSeen    time.Time // Last time this IP was referenced by a query path
 
 	// Concurrency protection
 	mu sync.RWMutex
@@ -54,6 +55,7 @@ func NewIPQualityV2() *IPQualityV2 {
 		state:       IP_STATE_ACTIVE,
 		lastUpdate:  time.Now(),
 		lastFailure: time.Time{},
+		lastSeen:    time.Now(),
 	}
 }
 
@@ -83,6 +85,7 @@ func (iq *IPQualityV2) RecordLatency(latency int32) {
 	// Recalculate percentiles
 	iq.updatePercentiles()
 	iq.lastUpdate = time.Now()
+	iq.lastSeen = iq.lastUpdate
 }
 
 // updatePercentiles recalculates P50, P95, P99 from current samples
@@ -127,6 +130,7 @@ func (iq *IPQualityV2) RecordFailure() {
 
 	iq.failCount++
 	iq.lastFailure = time.Now()
+	iq.lastSeen = iq.lastFailure
 
 	// Exponential backoff strategy with 3 phases
 	switch {
@@ -215,6 +219,13 @@ func (iq *IPQualityV2) GetConfidence() uint8 {
 	iq.mu.RLock()
 	defer iq.mu.RUnlock()
 	return iq.confidence
+}
+
+// GetLastSeen returns the last time this IP was referenced by a query path
+func (iq *IPQualityV2) GetLastSeen() time.Time {
+	iq.mu.RLock()
+	defer iq.mu.RUnlock()
+	return iq.lastSeen
 }
 
 // GetScore returns a composite quality score for this IP

@@ -3,6 +3,7 @@
 ## Overview
 
 rec53 is a recursive DNS resolver implemented in Go with a state machine architecture. It performs iterative DNS resolution from root servers, featuring local hosts authority, forwarding rules, IP quality tracking for optimal upstream server selection, TTL-based caching, and Prometheus metrics for monitoring.
+From a product-positioning perspective, rec53 is a lightweight endpoint-side resolver for personal devices and production cluster nodes (including host machines). It replaces the OS-provided resolver per node to improve local resolution capability and reduce load on centralized enterprise or ISP recursive DNS infrastructure, rather than acting as a centralized recursive DNS cluster.
 
 ## Directory Structure
 
@@ -84,7 +85,7 @@ Client UDP/TCP query
 | `globalDnsCache` | `server/cache.go` | TTL response cache |
 | `globalIPPool` | `server/ip_pool.go` | Nameserver latency tracking & selection |
 | `WarmupNSRecords` | `server/warmup.go` | Startup IP pool bootstrap |
-| `SaveSnapshot` / `LoadSnapshot` | `server/snapshot.go` | NS cache persistence and restore |
+| `SaveSnapshot` / `LoadSnapshot` | `server/snapshot.go` | Full cache snapshot persistence and restore |
 | `Rec53Metric` | `monitor/metric.go` | Prometheus counters / histograms / gauges |
 | `Rec53Log` | `monitor/log.go` | Zap structured logger |
 
@@ -310,6 +311,7 @@ type IPQualityV2 struct {
     p50, p95, p99 float64      // computed percentiles
     failCount    int           // consecutive failure counter
     state        int           // ACTIVE / DEGRADED / SUSPECT / RECOVERED
+    lastSeen     time.Time     // last time this IP was used in a real query
 }
 ```
 
@@ -376,15 +378,26 @@ globalIPPool.RecordFailure(ip)
 
 ### Concurrent Access
 
-- `IPQualityV2` fields are accessed lock-free via atomic operations in the hot path
+- `IPQualityV2` fields are accessed lock-free via atomic operations in the hot path; `lastSeen` is protected by per-entry `sync.RWMutex`
 - `IPPool.pool` (the map of IP → `*IPQualityV2`) is protected by `sync.RWMutex`:
   - `RLock` for reads during query path (`RecordLatency`, `RecordFailure`, `GetScore`)
-  - `Lock` only in background probe loop (`ResetForProbe`)
+  - `Lock` for background probe loop (`ResetForProbe`) and stale IP pruning (`PruneStaleIPs`)
+- Lock ordering: `IPPool.l` → `IPQualityV2.mu` (never reversed)
 - Background probe goroutine runs every 30 s; non-blocking to the query path
 
 ### Warmup Bootstrap
 
 On startup, `WarmupNSRecords()` resolves NS records for a configurable TLD list. All resolved nameserver IPs are fed into `globalIPPool` via `RecordLatency`, giving the pool measured baselines before the first user query arrives. This eliminates the cold-start penalty where all IPs have 0% confidence.
+
+### Stale IP Pruning
+
+The IP pool is append-only during normal operation — every new nameserver IP encountered during iterative resolution gets an `IPQualityV2` entry. Over time, IPs from expired delegations, decommissioned nameservers, or one-off queries accumulate, wasting probe resources and memory.
+
+**Mechanism:** `PruneStaleIPs()` runs periodically (every 30 minutes, checked via wall-clock comparison in `periodicProbeLoop`) and removes entries whose `lastSeen` timestamp exceeds `STALE_IP_THRESHOLD` (24 hours). The 24h threshold accounts for DNS cache TTLs and query patterns — `lastSeen` only updates on actual iterative resolution (`RecordLatency`/`RecordFailure`), not cache hits, so shorter thresholds would cause false pruning of legitimate IPs.
+
+**Exempt IPs:** Root server IPs (13 A records from `utils.ExtractRootIPs()`) are never pruned regardless of `lastSeen` age, since they are essential for bootstrapping iterative resolution.
+
+**Logging:** Each prune cycle logs `[PRUNE] pruned N stale IPs (pool size: M → K)` for operational visibility.
 
 ---
 

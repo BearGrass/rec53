@@ -23,6 +23,20 @@ func ResetRootGlue() {
 	rootGlueOverride = nil
 }
 
+// ExtractRootIPs returns a set of all root server A record IPs
+// extracted from GetRootGlue().Extra. Used as the default exempt set
+// for IP pool pruning — root server IPs should never be pruned.
+func ExtractRootIPs() map[string]struct{} {
+	glue := GetRootGlue()
+	result := make(map[string]struct{}, len(glue.Extra))
+	for _, rr := range glue.Extra {
+		if a, ok := rr.(*dns.A); ok && a.A != nil {
+			result[a.A.String()] = struct{}{}
+		}
+	}
+	return result
+}
+
 func GetRootGlue() *dns.Msg {
 	if rootGlueOverride != nil {
 		return rootGlueOverride.Copy()

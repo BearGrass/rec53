@@ -921,7 +921,7 @@ func TestStartProbeLoop_LaunchesGoroutine(t *testing.T) {
 	initialGoroutines := runtime.NumGoroutine()
 
 	// Start probe loop
-	ipp.StartProbeLoop()
+	ipp.StartProbeLoop(nil)
 
 	// Give goroutine time to start; retry to accommodate Go 1.23+ scheduler changes
 	var afterStartGoroutines int
@@ -1073,7 +1073,7 @@ func TestProbeAllSuspiciousIPs_ConcurrencyWithQueries(t *testing.T) {
 	ipp.SetIPQualityV2(suspectIP, iq)
 
 	// Start probe loop
-	ipp.StartProbeLoop()
+	ipp.StartProbeLoop(nil)
 
 	// Measure time for concurrent GetIPQualityV2 calls while probes are running
 	startTime := time.Now()

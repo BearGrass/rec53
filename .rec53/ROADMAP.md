@@ -4,6 +4,7 @@
 
 | Version | Date     | Highlights                                                                        |
 |---------|----------|-----------------------------------------------------------------------------------|
+| v0.2.0  | 2026-03  | 全量缓存快照——重启后所有域名首次查询即缓存命中                                    |
 | dev     | 2026-03  | NS 缓存快照持久化，消除重启冷启动延迟                                             |
 | dev     | 2026-03  | 并发 NS 解析（O-024），最多 5 worker，首个成功即返回                               |
 | dev     | 2026-03  | Happy Eyeballs 并发上游查询，先到先得                                              |
@@ -40,7 +41,7 @@
 
 - **负缓存** — NXDOMAIN/NODATA 检测与缓存（基于 SOA Minttl，默认回退 60s）
 - **NS 预热** — 启动时查询 30 个高流量 TLD 的 NS 记录，CPU 感知动态并发
-- **NS 缓存快照持久化** — 关闭时保存 NS 委派缓存到 JSON 文件，启动时恢复未过期条目
+- **缓存快照持久化** — 关闭时保存全量 DNS 缓存到 JSON 文件，启动时恢复未过期条目
 
 ### 本地策略
 
@@ -124,13 +125,15 @@
 
 ---
 
-## ✅ 已完成 — NS 缓存快照持久化
+## ✅ 已完成 — 全量缓存快照（原 NS 缓存快照 → v0.2.0）
 
 **完成于**：2026-03-17
 
-- 关闭时保存 NS 委派缓存条目到 JSON 文件
+- 关闭时保存全量 DNS 缓存条目（A/AAAA 答案、CNAME、NS 委派、负缓存等）到 JSON 文件
 - 启动时恢复未过期条目，消除冷启动延迟
-- 配置项：`dns.cache_snapshot_path`
+- `remainingTTL` 覆盖 Answer + Ns + Extra 三个 section
+- 配置项：`snapshot.enabled` + `snapshot.file`
+- v0.1.0 仅保存 NS 委派；v0.2.0 扩展为全量缓存，~20 行代码改动
 
 ---
 
@@ -145,68 +148,49 @@
 
 ---
 
-## v0.2.0 — 全量缓存快照
+## ~~v0.2.0~~ ✅ 已完成 — 全量缓存快照
+
+**完成于**：2026-03-17
 
 **目标**：快照从仅保存 NS 委派扩展到保存全部缓存条目，重启后所有域名首次查询即缓存命中。
 
-> **背景**：当前快照仅保存 NS 委派条目，恢复后每个域名的最终 A/AAAA 答案仍需 1-2 次上游往返。
+> **背景**：v0.1.0 快照仅保存 NS 委派条目，恢复后每个域名的最终 A/AAAA 答案仍需 1-2 次上游往返。
 > 对于单机生产部署（应用 + Docker + 爬虫），重启后爬虫批量请求数千域名时，
 > 全部缓存 miss 会导致前几分钟吞吐量下降。全量快照可让爬虫重启后第一秒即全速运行。
 >
 > 原「学习型预热 Round 2」方案（衰减 LFU + `publicsuffix` + ~500 行代码）已废弃，
 > NS 缓存快照持久化已覆盖其 80-90% 的价值，剩余增量由本改动以 ~20 行代码完成。
 
-### 设计
+### 实际改动
 
-改动集中在 `server/snapshot.go` 的保存过滤逻辑：
-
-- **保存时**：移除"必须含 NS RR"的过滤条件，改为保存所有缓存条目（A/AAAA 答案、NS 委派、CNAME、负缓存等）
-- **恢复时**：逻辑不变——遍历条目、计算剩余 TTL、丢弃过期条目、`setCacheCopy()` 写入缓存
-- **无新配置项**：复用现有 `dns.cache_snapshot_path`
-
-### 规模评估（单机生产场景）
-
-| 负载类型 | 缓存条目 | 快照文件 | 恢复耗时 |
-|----------|---------|---------|---------|
-| 纯应用（50-200 域名） | 1,000-4,000 | 1-4 MB | < 50 ms |
-| 应用 + 垂类爬虫（200-500 站点） | 4,000-10,000 | 4-10 MB | < 100 ms |
-| 应用 + 多垂类爬虫（500-2,000 站点） | 10,000-40,000 | 10-40 MB | < 500 ms |
-
-### 任务清单
-
-- [ ] `server/snapshot.go` — 移除 NS-only 过滤，保存全部缓存条目
-- [ ] 单元测试 `server/snapshot_test.go` — 验证 A/AAAA/CNAME/负缓存条目的保存与恢复
-- [ ] 更新 `docs/architecture.md`
+- `server/snapshot.go` — 移除"必须含 NS RR"的过滤条件，保存所有缓存条目
+- `server/snapshot.go` — `remainingTTL` 扩展覆盖 Answer + Ns + Extra 三个 section
+- 单元测试 16 个（含 A/AAAA、CNAME、混合 section、corrupt base64、目录自动创建等）
+- e2e 测试 4 个（A 记录存活重启、NS 委派存活重启、过期条目跳过、disabled no-op）
 
 ---
 
-## v0.3.0 — IP 池 GC
+## v0.3.0 — IP 池 Stale Prune ✅
 
-**目标**：防止 `globalIPPool` 无限增长，避免长期运行内存泄漏。
+**目标**：防止 `globalIPPool` 无限增长，清理长期未被真实查询引用的 IP 条目。
 
-### 设计
+### 实现
 
-- `IPQualityV2` 新增 `lastSeen time.Time` 字段（原子更新，每次 `RecordLatency` / `RecordFailure` 时刷新）
-- 后台 goroutine 定期（默认每 30 min）遍历 IP 池，删除超过阈值未访问的条目
-- **根服务器豁免**：`utils/root.go` 中硬编码的 13 组根服务器 IP 不参与 GC
-- 阈值通过配置项 `dns.ip_pool_stale_duration` 控制
+- `IPQualityV2` 新增 `lastSeen time.Time` 字段，`RecordLatency` / `RecordFailure` 时更新（`sync.RWMutex` 保护）
+- `PruneStaleIPs(threshold)` 方法：写锁遍历 IP 池，删除 `lastSeen` 超过阈值且不在豁免集合中的条目
+- 集成到 `periodicProbeLoop`，每 30 分钟基于 wall-clock 比较触发一次 prune
+- **根服务器豁免**：`utils.ExtractRootIPs()` 提取 13 组根服务器 IP，在 `StartProbeLoop` 时传入，永不被 prune
+- 阈值 `STALE_IP_THRESHOLD = 24h`（包级常量）— 24h 而非最初设计的 2h，因为 `lastSeen` 仅在迭代解析时更新（不含缓存命中），短阈值会误删合法 IP
 
-### 配置格式（`dns:` 块新增字段）
+### 变更文件
 
-```yaml
-dns:
-  listen: "127.0.0.53:53"
-  ip_pool_stale_duration: "2h"   # 超过此时长未访问的 IP 将被 GC 清除
-```
-
-### 任务清单
-
-- [ ] `server/ip_pool_quality_v2.go` — `IPQualityV2` 新增 `lastSeen` 字段
-- [ ] `server/ip_pool.go` — 实现 `GCStaleIPs(threshold time.Duration)` 方法（根服务器豁免）
-- [ ] `server/ip_pool.go` — 启动后台 GC goroutine（每 30 min 调用一次，可 context 取消）
-- [ ] `cmd/rec53.go` — `Config.DNS` 新增 `IPPoolStaleDuration string`，解析并传入 IP 池
-- [ ] 单元测试 `server/ip_pool_gc_test.go`（含豁免验证）
-- [ ] 更新 `docs/architecture.md`
+- `server/ip_pool_quality_v2.go` — `lastSeen` 字段、`GetLastSeen()` 方法
+- `server/ip_pool.go` — `exemptIPs`/`lastPruneAt` 字段、`PruneStaleIPs()` 方法、常量、`StartProbeLoop` 签名变更
+- `server/server.go` — 调用方适配 `StartProbeLoop(utils.ExtractRootIPs())`
+- `utils/root.go` — `ExtractRootIPs()` 函数
+- `server/ip_pool_prune_test.go` — 9 个单元测试
+- `utils/root_test.go` — `TestExtractRootIPs` 测试
+- `docs/architecture.md` — IP Pool 段落更新
 
 ---
 
