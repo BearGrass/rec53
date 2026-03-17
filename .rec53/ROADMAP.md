@@ -2,12 +2,13 @@
 
 ## Version History
 
-| Version | Date     | Highlights                                                   |
-|---------|----------|--------------------------------------------------------------|
-| dev     | 2026-03  | Graceful shutdown, comprehensive tests, E2E test suite       |
-| -       | 2026-03  | IP quality tracking with prefetch                            |
-| -       | 2026-03  | Prometheus metrics integration                               |
-| -       | 2026-03  | Docker Compose deployment                                    |
+| Version | Date     | Highlights                                                                    |
+|---------|----------|-------------------------------------------------------------------------------|
+| dev     | 2026-03  | Hosts local authority, forwarding rules, rec53ctl ops script, /dev/stderr log |
+| dev     | 2026-03  | Graceful shutdown, comprehensive tests, E2E test suite                        |
+| -       | 2026-03  | IP quality tracking with prefetch                                             |
+| -       | 2026-03  | Prometheus metrics integration                                                |
+| -       | 2026-03  | Docker Compose deployment                                                     |
 
 ## Current Version: dev
 
@@ -22,60 +23,34 @@
 - Graceful shutdown with 5-second timeout
 - CNAME loop detection
 - EDNS0 support (4096-byte buffer)
+- **Hosts local authority** — serve static A/AAAA/CNAME records authoritatively (AA=true) before cache or upstream
+- **Forwarding rules** — forward queries for configured domain suffixes to designated upstream DNS servers (longest-suffix match)
+- **rec53ctl** — single-entry operational script: `build` / `install` / `upgrade` / `uninstall` / `run`
 
 ---
 
-## v0.1.0 — Hosts 本地权威 + Forwarding 转发规则
+## ~~v0.1.0~~ ✅ 已完成 — Hosts 本地权威 + Forwarding 转发规则
 
-**目标**：让 rec53 支持本地权威应答（`*.dev.local`）和内网 DNS 转发（`*.corp.example.com`），
-成为可替代 systemd-resolved 的本地解析器。
+**完成于**：2026-03
 
-### 状态机变更
+- `server/state_hosts.go` — `HOSTS_LOOKUP` 状态，支持 A / AAAA / CNAME，AA=true 权威应答
+- `server/state_forward.go` — `FORWARDING_CHECK` 状态，最长后缀匹配，结果不写缓存
+- 原子快照替换（`atomic.Pointer`）消除 hosts/forward 配置读写数据竞争
+- 配置格式：`hosts:` 和 `forwarding:` 块，支持精确域名匹配
 
-在 `STATE_INIT` 之后插入两个新状态：
+---
 
-```
-STATE_INIT → HOSTS_LOOKUP → FORWARDING_CHECK → CACHE_LOOKUP → CLASSIFY_RESP → ...
-```
+## ~~v0.5.0~~ ✅ 已完成 — rec53ctl 运维脚本
 
-新增终止态 `FORWARD_UPSTREAM`：转发查询结果**不写入** `globalDnsCache`，避免内外网数据污染。
+**完成于**：2026-03
 
-### 配置格式（新增 `hosts:` 和 `forwarding:` 块）
-
-```yaml
-hosts:
-  - domain: "*.dev.local"
-    type: A
-    value: "192.168.1.100"
-  - domain: "gateway.dev.local"
-    type: CNAME
-    value: "gateway.internal"   # target 由 rec53 继续递归解析，不直接返回 CNAME 记录
-
-forwarding:
-  - match: "corp.example.com"      # 匹配本身及所有子域（默认语义）
-    upstreams: ["10.0.0.1:53", "10.0.0.2:53"]
-    strategy: roundrobin
-  - match: "=corp.example.com"     # = 前缀：仅精确匹配本身
-    upstreams: ["10.0.0.1:53"]
-    strategy: roundrobin
-  - match: "*.corp.example.com"    # * 前缀：仅匹配子域，不含本身
-    upstreams: ["10.0.0.1:53"]
-    strategy: roundrobin
-```
-
-### 任务清单
-
-- [ ] `server/state_hosts.go` — 实现 `HOSTS_LOOKUP` 状态：精确匹配 + 通配符匹配
-  - A/AAAA 记录：直接构造应答
-  - CNAME 记录：将 target 入队递归解析，最终返回完整链
-- [ ] `server/state_forwarding.go` — 实现 `FORWARDING_CHECK` 状态：规则匹配 + `FORWARD_UPSTREAM` 终止态
-  - 匹配优先级：精确（`=`）> 通配子域（`*`）> 包含子域（默认）
-  - `strategy: roundrobin` — 轮询选择 upstream
-- [ ] `server/state_machine.go` — 在状态转移表中插入新状态，补充新状态常量
-- [ ] `cmd/rec53.go` — 扩展 `Config` 结构体，新增 `Hosts []HostsRule` 和 `Forwarding []ForwardingRule`
-- [ ] `config.yaml` — 补充示例配置（注释说明三种匹配语义）
-- [ ] 单元测试 `server/state_hosts_test.go` 和 `server/state_forwarding_test.go`
-- [ ] 更新 `docs/architecture.md`（状态机图）
+- `rec53ctl`（项目根目录）：单入口 bash 脚本，子命令覆盖完整运维生命周期
+- `build`：go 工具链检查 + `dist/rec53` 编译，支持 `GOOS`/`GOARCH` 交叉编译
+- `install`：build → 复制二进制 → 处理配置（`--force-config` 强制覆盖）→ 写 systemd unit → enable/start
+- `upgrade`：备份旧二进制 → build（`SKIP_BUILD=1` 可跳过）→ 热替换 → 启动失败自动回滚
+- `uninstall`：stop/disable → 删 unit/二进制/config.yaml → 保留非空 CONFIG_DIR
+- `run`：前台启动，`-rec53.log /dev/stderr` 日志输出到终端，`exec` 确保信号直传
+- `monitor/log.go` 修复：检测 `/dev/stderr`/`/dev/stdout` 时直接写对应 fd，跳过 lumberjack 轮转
 
 ---
 
@@ -182,47 +157,6 @@ goroutine 池**不适用**于本项目：查询路径本身是同步状态机，
 - [ ] `server/state_machine.go` — 全局入站 semaphore（容量可配置，默认 512）
 - [ ] 单元测试 `server/msg_pool_test.go`（验证并发场景下无 double-free）
 - [ ] 用 `go test -bench` 前后对比 `BenchmarkServeDNS` 分配次数（`-benchmem`）
-
----
-
-## v0.5.0 — systemd 集成
-
-**目标**：提供一键 install/uninstall 脚本，让 rec53 可作为 systemd 服务替代 systemd-resolved。
-
-
-### 默认监听地址
-
-从 `127.0.0.1:5353` 改为 `127.0.0.53:53`，与 systemd-resolved 默认地址保持一致。
-
-### 产物
-
-```
-deploy/
-├── rec53.service    # systemd 单元文件
-├── install.sh       # 安装脚本（支持非 root 用户通过 sudo 运行）
-└── uninstall.sh     # 卸载脚本
-```
-
-### `install.sh` 流程
-
-1. `go build -o /usr/local/bin/rec53 ./cmd`
-2. 停止并禁用 `systemd-resolved`
-3. 将 `/etc/resolv.conf` 指向 `127.0.0.53`
-4. 安装并启动 `rec53.service`
-
-### `uninstall.sh` 流程
-
-1. 停止并禁用 `rec53.service`
-2. 恢复并启动 `systemd-resolved`
-3. 恢复 `/etc/resolv.conf`
-
-### 任务清单
-
-- [ ] `deploy/rec53.service` — systemd 单元文件（`Restart=on-failure`，`After=network.target`）
-- [ ] `deploy/install.sh` — 安装脚本（含 sudo 权限检查）
-- [ ] `deploy/uninstall.sh` — 卸载脚本
-- [ ] `config.yaml` — 默认监听地址改为 `127.0.0.53:53`
-- [ ] 更新 `README.md`（安装步骤说明）
 
 ---
 
