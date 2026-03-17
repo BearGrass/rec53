@@ -2,9 +2,58 @@ package server
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/miekg/dns"
 )
+
+// hostsForwardSnapshot is an immutable snapshot of the hosts and forwarding
+// configuration. A new snapshot is created on each configuration update and
+// stored atomically, so readers never observe a partially-updated state.
+// Same pattern as globalDnsCache / globalIPPool but uses atomic.Pointer
+// because hosts/forward config is always replaced as a whole unit.
+type hostsForwardSnapshot struct {
+	hostsMap     map[string]*dns.Msg
+	hostsNames   map[string]bool
+	forwardZones []ForwardZone
+}
+
+// globalHostsForward holds the current configuration snapshot.
+// All reads and writes go through atomic Load/Store to avoid data races.
+var globalHostsForward atomic.Pointer[hostsForwardSnapshot]
+
+func init() {
+	// Ensure Load() is always non-nil; avoids nil checks in hot path.
+	globalHostsForward.Store(&hostsForwardSnapshot{})
+}
+
+func setGlobalHostsAndForward(hostsMap map[string]*dns.Msg, hostsNames map[string]bool, fwdZones []ForwardZone) {
+	globalHostsForward.Store(&hostsForwardSnapshot{
+		hostsMap:     hostsMap,
+		hostsNames:   hostsNames,
+		forwardZones: fwdZones,
+	})
+}
+
+// SetHostsAndForwardForTest compiles hosts entries and sorts forward zones,
+// then sets the package-level globals. Exported for e2e tests only.
+func SetHostsAndForwardForTest(hosts []HostEntry, forwarding []ForwardZone) {
+	hostsMap, hostsNames := compileHostsEntries(hosts)
+	fwdZones := sortForwardZones(forwarding)
+	setGlobalHostsAndForward(hostsMap, hostsNames, fwdZones)
+}
+
+// ResetHostsAndForwardForTest clears the package-level hosts and forward globals.
+// Exported for e2e test cleanup.
+func ResetHostsAndForwardForTest() {
+	globalHostsForward.Store(&hostsForwardSnapshot{})
+}
+
+// setSnapshotForTest atomically stores a pre-built snapshot.
+// For use by package-internal tests only; not exported.
+func setSnapshotForTest(snap *hostsForwardSnapshot) {
+	globalHostsForward.Store(snap)
+}
 
 // baseState holds the three fields common to every state struct and provides
 // default implementations of the getRequest / getResponse / getContext methods

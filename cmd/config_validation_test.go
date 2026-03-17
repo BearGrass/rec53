@@ -60,6 +60,112 @@ func TestValidateConfig(t *testing.T) {
 			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: "127.0.0.1:9999"}, Warmup: server.WarmupConfig{}},
 			wantErr: false,
 		},
+		// Hosts validation
+		{
+			name: "valid hosts entry A",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: "10.0.0.1"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid hosts entry AAAA",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "AAAA", Value: "::1"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid hosts entry CNAME",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "alias.local", Type: "CNAME", Value: "real.local"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "hosts empty name",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "", Type: "A", Value: "10.0.0.1"}},
+			},
+			wantErr: true,
+			errMsg:  "name must not be empty",
+		},
+		{
+			name: "hosts empty value",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: ""}},
+			},
+			wantErr: true,
+			errMsg:  "value must not be empty",
+		},
+		{
+			name: "hosts invalid IPv4 for A record",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: "not-an-ip"}},
+			},
+			wantErr: true,
+			errMsg:  "invalid IPv4 address",
+		},
+		{
+			name: "hosts invalid IPv6 for AAAA record",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "AAAA", Value: "not-an-ipv6"}},
+			},
+			wantErr: true,
+			errMsg:  "invalid IPv6 address",
+		},
+		{
+			name: "hosts unsupported record type",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Hosts: []server.HostEntry{{Name: "test.local", Type: "MX", Value: "mail.local"}},
+			},
+			wantErr: true,
+			errMsg:  "unsupported record type",
+		},
+		// Forwarding validation
+		{
+			name: "valid forwarding entry",
+			cfg: &Config{
+				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{"10.0.0.1:53"}}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "forwarding empty zone",
+			cfg: &Config{
+				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Forwarding: []server.ForwardZone{{Zone: "", Upstreams: []string{"10.0.0.1:53"}}},
+			},
+			wantErr: true,
+			errMsg:  "zone must not be empty",
+		},
+		{
+			name: "forwarding empty upstreams",
+			cfg: &Config{
+				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{}}},
+			},
+			wantErr: true,
+			errMsg:  "upstreams list must not be empty",
+		},
+		{
+			name: "forwarding invalid upstream address",
+			cfg: &Config{
+				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{"bad-address"}}},
+			},
+			wantErr: true,
+			errMsg:  "invalid address",
+		},
 	}
 
 	for _, tt := range tests {

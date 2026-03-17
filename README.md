@@ -7,9 +7,14 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 ## Features
 
 - **Full Iterative Resolution** — resolves from root servers, no upstream forwarding
+- **Hosts Local Authority** — serve static A/AAAA/CNAME records from config, with AA flag, before any cache or upstream lookup
+- **Forwarding Rules** — forward queries for specific domain suffixes to designated upstream DNS servers (longest-suffix match)
 - **UDP/TCP Support** — dual-protocol listeners on the same port
-- **State Machine Architecture** — clean, auditable resolution pipeline with 7 states
+- **State Machine Architecture** — clean, auditable resolution pipeline with 9 states
 - **IPQualityV2** — sliding-window latency histograms with automatic fault recovery
+- **Happy Eyeballs Concurrency** — simultaneous queries to best and secondary nameserver; first response wins
+- **Bad Rcode Failover** — automatic retry on secondary NS when primary returns SERVFAIL / REFUSED / FORMERR
+- **EDNS0 & UDP Truncation** — 4096-byte EDNS0 buffer; TC flag with progressive answer trimming on UDP overflow
 - **TTL-based Caching** — deep-copy safe cache with negative caching (NXDOMAIN/NODATA)
 - **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
 - **Prometheus Metrics** — per-query and per-nameserver observability
@@ -18,6 +23,55 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 ---
 
 ## Quick Start
+
+### Using rec53ctl (recommended)
+
+`rec53ctl` is the single-entry operational script covering the full lifecycle of rec53.
+
+```bash
+# 1. Generate default config (first run only)
+./generate-config.sh
+
+# 2. Build binary (outputs to dist/rec53)
+./rec53ctl build
+
+# 3. Run in foreground with terminal log output
+./rec53ctl run
+
+# 4. Install as systemd service (requires root)
+sudo ./rec53ctl install
+
+# 5. Upgrade running service (build + hot-swap + auto-rollback)
+sudo ./rec53ctl upgrade
+
+# 6. Uninstall service and files (requires root)
+sudo ./rec53ctl uninstall
+```
+
+Key options:
+
+```bash
+# Force overwrite existing /etc/rec53/config.yaml on install
+sudo ./rec53ctl install --force-config
+
+# Upgrade without recompiling (use pre-built dist/rec53)
+SKIP_BUILD=1 sudo ./rec53ctl upgrade
+
+# Run with a custom config file
+CONFIG_FILE=./my-config.yaml ./rec53ctl run
+```
+
+Override default paths via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INSTALL_DIR` | `/usr/local/bin` | Binary installation directory |
+| `CONFIG_DIR` | `/etc/rec53` | Config directory |
+| `BINARY_NAME` | `rec53` | Binary file name |
+| `SERVICE_NAME` | `rec53` | Systemd service name |
+| `BUILD_OUTPUT` | `dist/rec53` | Build output path |
+
+### Manual (without rec53ctl)
 
 ```bash
 # Build
@@ -35,6 +89,9 @@ go build -o rec53 ./cmd
 # Test resolution
 dig @127.0.0.1 -p 5353 google.com
 dig @127.0.0.1 -p 5353 google.com AAAA
+
+# View logs (written to file, not stdout)
+tail -f ./log/rec53.log
 ```
 
 ---
@@ -44,13 +101,14 @@ dig @127.0.0.1 -p 5353 google.com AAAA
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | *(required)* | Path to YAML config file |
-| `-listen` | `127.0.0.1:5353` | DNS listen address (overrides config) |
-| `-metric` | `:9999` | Prometheus metrics address (overrides config) |
+| `-listen` | `127.0.0.1:5353` | DNS listen address |
+| `-metric` | `:9999` | Prometheus metrics address |
 | `-log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `-no-warmup` | `false` | Disable NS warmup on startup |
+| `-rec53.log` | `./log/rec53.log` | Log file path (`/dev/stderr` writes to terminal) |
 | `-version` | `false` | Print version and exit |
 
-CLI flags take precedence over config file values.
+> **Note**: `-listen`, `-metric`, and `-log-level` only override the config file when their value differs from the default. For example, `-log-level info` cannot override a config file that sets `log_level: debug`.
 
 ---
 
@@ -61,6 +119,9 @@ dns:
   listen: "127.0.0.1:5353"
   metric: ":9999"
   log_level: "info"
+  # upstream_timeout: 1500ms  # Per-query timeout for iterative resolution.
+                              # Default: 1.5s. Increase to 3-5s on high-latency networks.
+                              # Minimum: 100ms.
 
 warmup:
   enabled: true
@@ -71,6 +132,33 @@ warmup:
     - com
     - net
     - org
+
+# Static local DNS records — answered authoritatively (AA=true) before cache or iterative.
+# Priority: hosts > forwarding > cache > iterative.
+# Supported types: A, AAAA, CNAME. TTL defaults to 60s if omitted.
+hosts:
+  - name: db.internal
+    type: A
+    value: 10.0.0.5
+    ttl: 300
+  - name: ipv6.internal
+    type: AAAA
+    value: "fd00::1"
+  - name: alias.internal
+    type: CNAME
+    value: real.internal
+
+# Forward queries for specific domain suffixes to dedicated upstream DNS servers.
+# Longest-suffix match wins. Results are NOT cached. All upstreams tried in order;
+# SERVFAIL returned if all fail (no iterative fallback).
+forwarding:
+  - zone: corp.example.com
+    upstreams:
+      - 192.168.1.1:53
+      - 192.168.1.2:53
+  - zone: internal
+    upstreams:
+      - 10.0.0.53:53
 ```
 
 By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registrations. To use a custom list, specify `warmup.tlds`. Leave empty for the curated defaults.
@@ -83,11 +171,12 @@ By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registra
 # Build image
 docker build -t rec53 .
 
-# Run standalone
+# Run standalone (mount log directory to access logs from host)
 docker run -d \
   -p 5353:5353/udp \
   -p 5353:5353/tcp \
   -p 9999:9999 \
+  -v $(pwd)/log:/dist/log \
   rec53
 
 # Run with Docker Compose (includes Prometheus + node-exporter)
@@ -101,6 +190,7 @@ cd single_machine && docker-compose up -d
 - DNSSEC validation not implemented
 - DoT / DoH not supported
 - `www.huawei.com` and similar complex CNAME chains may return SERVFAIL when the final A/AAAA resolution fails
+- Logs are written **only to file** (default `./log/rec53.log`), not to stdout/stderr by default. Use `-rec53.log /dev/stderr` to write logs to the terminal instead. In Docker, mount the log directory (e.g. `-v $(pwd)/log:/dist/log`) to access logs from the host.
 
 ---
 

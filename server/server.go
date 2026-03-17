@@ -16,6 +16,9 @@ import (
 type server struct {
 	listen       string
 	warmupCfg    WarmupConfig
+	hostsMap     map[string]*dns.Msg // pre-compiled "fqdn:qtype" → authoritative response
+	hostsNames   map[string]bool     // set of FQDNs in hosts (for NODATA detection)
+	forwardZones []ForwardZone       // zones sorted by zone length desc (longest match first)
 	udpSrv       *dns.Server
 	tcpSrv       *dns.Server
 	wg           sync.WaitGroup
@@ -44,6 +47,23 @@ func NewServerWithConfig(listen string, warmupCfg WarmupConfig) *server {
 		listen:    listen,
 		warmupCfg: warmupCfg,
 	}
+}
+
+// NewServerWithFullConfig creates a server with hosts and forwarding configuration.
+// Hosts entries are pre-compiled into a lookup map; forwarding zones are sorted by
+// zone length descending for longest-suffix matching.
+func NewServerWithFullConfig(listen string, warmupCfg WarmupConfig, hosts []HostEntry, forwarding []ForwardZone) *server {
+	hostsMap, hostsNames := compileHostsEntries(hosts)
+	fwdZones := sortForwardZones(forwarding)
+	s := &server{
+		listen:       listen,
+		warmupCfg:    warmupCfg,
+		hostsMap:     hostsMap,
+		hostsNames:   hostsNames,
+		forwardZones: fwdZones,
+	}
+	setGlobalHostsAndForward(hostsMap, hostsNames, fwdZones)
+	return s
 }
 
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {

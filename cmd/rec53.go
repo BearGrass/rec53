@@ -30,8 +30,10 @@ var (
 
 // Config represents the overall application configuration
 type Config struct {
-	DNS    DNSConfig           `yaml:"dns"`
-	Warmup server.WarmupConfig `yaml:"warmup"`
+	DNS        DNSConfig            `yaml:"dns"`
+	Warmup     server.WarmupConfig  `yaml:"warmup"`
+	Hosts      []server.HostEntry   `yaml:"hosts"`
+	Forwarding []server.ForwardZone `yaml:"forwarding"`
 }
 
 // DNSConfig represents DNS server configuration
@@ -136,6 +138,64 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("dns.upstream_timeout must be at least 100ms, got %v", cfg.DNS.UpstreamTimeout)
 	}
 
+	// Validate hosts entries
+	if err := validateHostsConfig(cfg.Hosts); err != nil {
+		return err
+	}
+
+	// Validate forwarding entries
+	if err := validateForwardingConfig(cfg.Forwarding); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateHostsConfig validates all hosts entries in the configuration.
+// Supported record types: A, AAAA, CNAME.
+func validateHostsConfig(hosts []server.HostEntry) error {
+	for i, h := range hosts {
+		if strings.TrimSpace(h.Name) == "" {
+			return fmt.Errorf("hosts[%d]: name must not be empty", i)
+		}
+		if strings.TrimSpace(h.Value) == "" {
+			return fmt.Errorf("hosts[%d] (%s): value must not be empty", i, h.Name)
+		}
+		switch strings.ToUpper(h.Type) {
+		case "A":
+			ip := net.ParseIP(h.Value)
+			if ip == nil || ip.To4() == nil {
+				return fmt.Errorf("hosts[%d] (%s): invalid IPv4 address %q for A record", i, h.Name, h.Value)
+			}
+		case "AAAA":
+			ip := net.ParseIP(h.Value)
+			if ip == nil || ip.To4() != nil {
+				return fmt.Errorf("hosts[%d] (%s): invalid IPv6 address %q for AAAA record", i, h.Name, h.Value)
+			}
+		case "CNAME":
+			// CNAME value is a domain name; basic non-empty check is sufficient here.
+		default:
+			return fmt.Errorf("hosts[%d] (%s): unsupported record type %q (supported: A, AAAA, CNAME)", i, h.Name, h.Type)
+		}
+	}
+	return nil
+}
+
+// validateForwardingConfig validates all forwarding zone entries in the configuration.
+func validateForwardingConfig(zones []server.ForwardZone) error {
+	for i, z := range zones {
+		if strings.TrimSpace(z.Zone) == "" {
+			return fmt.Errorf("forwarding[%d]: zone must not be empty", i)
+		}
+		if len(z.Upstreams) == 0 {
+			return fmt.Errorf("forwarding[%d] (%s): upstreams list must not be empty", i, z.Zone)
+		}
+		for j, up := range z.Upstreams {
+			if _, _, err := net.SplitHostPort(up); err != nil {
+				return fmt.Errorf("forwarding[%d] (%s) upstream[%d]: invalid address %q: %v", i, z.Zone, j, up, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -250,7 +310,7 @@ func main() {
 
 	// Create and start the DNS server.
 	monitor.Rec53Log.Debugf("creating DNS server on %s", cfg.DNS.Listen)
-	rec53 := server.NewServerWithConfig(cfg.DNS.Listen, cfg.Warmup)
+	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.Warmup, cfg.Hosts, cfg.Forwarding)
 	monitor.Rec53Log.Debugf("starting DNS server")
 	errChan := rec53.Run()
 

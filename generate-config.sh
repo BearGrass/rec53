@@ -87,6 +87,35 @@ warmup:
     - online
     - biz
     - app
+
+# hosts: Static local DNS records answered authoritatively before cache or iterative resolution.
+# Priority: hosts > forwarding > cache > iterative.
+# Supported types: A, AAAA, CNAME. TTL defaults to 60 seconds if omitted.
+#
+# hosts:
+#   - name: db.internal
+#     type: A
+#     value: 10.0.0.5
+#     ttl: 300
+#   - name: ipv6.internal
+#     type: AAAA
+#     value: "::1"
+#   - name: alias.internal
+#     type: CNAME
+#     value: real.internal
+
+# forwarding: Forward queries for specific domain suffixes to dedicated upstream DNS servers.
+# Longest-suffix match wins. Forwarded results are NOT written to the global cache.
+# All upstreams are tried in order; SERVFAIL is returned if all fail (no iterative fallback).
+#
+# forwarding:
+#   - zone: corp.example.com
+#     upstreams:
+#       - 192.168.1.1:53
+#       - 192.168.1.2:53
+#   - zone: internal
+#     upstreams:
+#       - 10.0.0.53:53
 EOF
 
 if [ $? -eq 0 ]; then

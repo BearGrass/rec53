@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# rec53ctl — operational lifecycle script for rec53
+# Usage: ./rec53ctl <command> [options]
+set -euo pipefail
+
+## --- Shared Variables ---
+
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/rec53}"
+BINARY_NAME="${BINARY_NAME:-rec53}"
+SERVICE_NAME="${SERVICE_NAME:-rec53}"
+BUILD_OUTPUT="${BUILD_OUTPUT:-dist/rec53}"
+
+UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+
+## --- Helper Functions ---
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        die "this command requires root privileges. Run with sudo."
+    fi
+}
+
+require_systemctl() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        die "systemctl not found. This command requires systemd."
+    fi
+}
+
+## --- build ---
+
+cmd_build() {
+    if ! command -v go >/dev/null 2>&1; then
+        die "go toolchain not found. Please install Go: https://go.dev/dl/"
+    fi
+
+    local outdir
+    outdir="$(dirname "${BUILD_OUTPUT}")"
+    mkdir -p "${outdir}"
+
+    echo "Building rec53 -> ${BUILD_OUTPUT} ..."
+    if go build -o "${BUILD_OUTPUT}" ./cmd; then
+        echo "Build successful: ${BUILD_OUTPUT}"
+    else
+        die "Build failed."
+    fi
+}
+
+## --- install ---
+
+cmd_install() {
+    require_root
+    require_systemctl
+
+    local force_config=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --force-config) force_config=1 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+        shift
+    done
+
+    # Config check: decide whether to copy config.yaml
+    local need_config_copy=0
+    if [ -f "${CONFIG_DIR}/config.yaml" ] && [ "${force_config}" -eq 0 ]; then
+        echo "Config ${CONFIG_DIR}/config.yaml already exists; skipping config copy."
+    else
+        # Target missing OR --force-config specified: require source config.yaml
+        if [ ! -f "./config.yaml" ]; then
+            die "config.yaml not found. Run ./generate-config.sh first, then re-run install."
+        fi
+        need_config_copy=1
+    fi
+
+    # Build
+    cmd_build
+
+    # Deploy binary
+    mkdir -p "${INSTALL_DIR}"
+    cp "${BUILD_OUTPUT}" "${INSTALL_DIR}/${BINARY_NAME}"
+    chmod 755 "${INSTALL_DIR}/${BINARY_NAME}"
+    echo "Installed binary: ${INSTALL_DIR}/${BINARY_NAME}"
+
+    # Deploy config
+    mkdir -p "${CONFIG_DIR}"
+    if [ "${need_config_copy}" -eq 1 ]; then
+        cp "./config.yaml" "${CONFIG_DIR}/config.yaml"
+        echo "Installed config: ${CONFIG_DIR}/config.yaml"
+    fi
+
+    # Generate systemd unit file
+    cat > "${UNIT_FILE}" <<EOF
+[Unit]
+Description=rec53 Recursive DNS Resolver
+After=network.target
+
+[Service]
+ExecStart=${INSTALL_DIR}/${BINARY_NAME} --config ${CONFIG_DIR}/config.yaml
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo "Installed unit file: ${UNIT_FILE}"
+
+    # Enable and start
+    systemctl daemon-reload
+    systemctl enable --now "${SERVICE_NAME}"
+    echo ""
+    systemctl status "${SERVICE_NAME}" || true
+}
+
+## --- upgrade ---
+
+cmd_upgrade() {
+    require_root
+    require_systemctl
+
+    # Verify installation exists
+    if [ ! -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        die "${INSTALL_DIR}/${BINARY_NAME} not found. Run install first."
+    fi
+    if [ ! -f "${UNIT_FILE}" ]; then
+        die "${UNIT_FILE} not found. Run install first."
+    fi
+
+    # Backup current binary
+    cp "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}.bak"
+    echo "Backed up binary to ${INSTALL_DIR}/${BINARY_NAME}.bak"
+
+    # Build (unless SKIP_BUILD=1)
+    if [ "${SKIP_BUILD:-0}" = "1" ]; then
+        echo "SKIP_BUILD=1: skipping compilation."
+        if [ ! -f "${BUILD_OUTPUT}" ]; then
+            rm -f "${INSTALL_DIR}/${BINARY_NAME}.bak"
+            die "SKIP_BUILD=1 but ${BUILD_OUTPUT} not found. Build first."
+        fi
+    else
+        cmd_build
+    fi
+
+    # Stop service
+    echo "Stopping ${SERVICE_NAME} ..."
+    systemctl stop "${SERVICE_NAME}"
+
+    # Replace binary
+    cp "${BUILD_OUTPUT}" "${INSTALL_DIR}/${BINARY_NAME}"
+    chmod 755 "${INSTALL_DIR}/${BINARY_NAME}"
+    echo "Replaced binary: ${INSTALL_DIR}/${BINARY_NAME}"
+
+    # Start service; rollback on failure
+    echo "Starting ${SERVICE_NAME} ..."
+    if ! systemctl start "${SERVICE_NAME}"; then
+        echo "Start failed. Rolling back ..." >&2
+        cp "${INSTALL_DIR}/${BINARY_NAME}.bak" "${INSTALL_DIR}/${BINARY_NAME}"
+        systemctl start "${SERVICE_NAME}" || true
+        echo "Rollback complete. Old binary restored." >&2
+        die "Upgrade failed. Service restored to previous version."
+    fi
+
+    # Cleanup and summary
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}.bak"
+    echo ""
+    echo "Upgrade complete."
+    systemctl status "${SERVICE_NAME}" || true
+}
+
+## --- uninstall ---
+
+cmd_uninstall() {
+    require_root
+
+    # Stop and disable service if unit file exists
+    if [ -f "${UNIT_FILE}" ]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl stop "${SERVICE_NAME}" || true
+            systemctl disable "${SERVICE_NAME}" || true
+            rm -f "${UNIT_FILE}"
+            systemctl daemon-reload || true
+            echo "Removed unit file: ${UNIT_FILE}"
+        fi
+    else
+        echo "Unit file not found; skipping systemctl steps."
+    fi
+
+    # Remove binary
+    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+        echo "Removed binary: ${INSTALL_DIR}/${BINARY_NAME}"
+    else
+        echo "Binary not found at ${INSTALL_DIR}/${BINARY_NAME}; skipping."
+    fi
+
+    # Remove config.yaml only; preserve CONFIG_DIR if non-empty
+    if [ -f "${CONFIG_DIR}/config.yaml" ]; then
+        rm -f "${CONFIG_DIR}/config.yaml"
+        echo "Removed config: ${CONFIG_DIR}/config.yaml"
+    fi
+
+    if [ -d "${CONFIG_DIR}" ]; then
+        if [ -z "$(ls -A "${CONFIG_DIR}" 2>/dev/null)" ]; then
+            rmdir "${CONFIG_DIR}"
+            echo "Removed empty directory: ${CONFIG_DIR}"
+        else
+            echo "Notice: ${CONFIG_DIR} contains other files and was not removed."
+        fi
+    fi
+
+    echo "Uninstall complete."
+}
+
+## --- run ---
+
+cmd_run() {
+    # Locate binary
+    local bin=""
+    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        bin="${INSTALL_DIR}/${BINARY_NAME}"
+    elif [ -f "${BUILD_OUTPUT}" ]; then
+        bin="${BUILD_OUTPUT}"
+    else
+        die "rec53 binary not found at ${INSTALL_DIR}/${BINARY_NAME} or ${BUILD_OUTPUT}. Run build or install first."
+    fi
+
+    # Locate config
+    local cfg=""
+    if [ -n "${CONFIG_FILE:-}" ]; then
+        cfg="${CONFIG_FILE}"
+    elif [ -f "${CONFIG_DIR}/config.yaml" ]; then
+        cfg="${CONFIG_DIR}/config.yaml"
+    elif [ -f "./config.yaml" ]; then
+        cfg="./config.yaml"
+    else
+        die "No config file found. Set CONFIG_FILE, or place config.yaml in ${CONFIG_DIR} or the current directory."
+    fi
+
+    echo "Starting rec53: ${bin} --config ${cfg}"
+    exec "${bin}" --config "${cfg}" -rec53.log /dev/stderr "$@"
+}
+
+## --- help ---
+
+cmd_help() {
+    cat <<EOF
+Usage: rec53ctl <command> [options]
+
+Commands:
+  build      Compile rec53 binary to \${BUILD_OUTPUT} (default: dist/rec53)
+  install    Build, deploy binary, write config, install and start systemd service
+  upgrade    Build new binary and hot-swap the running service (with auto-rollback)
+  uninstall  Stop/disable service, remove binary and config
+  run        Run rec53 in the foreground with terminal log output
+  help       Show this help message
+
+Environment variables (override defaults):
+  INSTALL_DIR   Installation directory          (default: /usr/local/bin)
+  CONFIG_DIR    Config directory                (default: /etc/rec53)
+  BINARY_NAME   Binary file name               (default: rec53)
+  SERVICE_NAME  Systemd service name           (default: rec53)
+  BUILD_OUTPUT  Build output path              (default: dist/rec53)
+  SKIP_BUILD    Set to 1 to skip build in upgrade  (default: 0)
+  CONFIG_FILE   Config file path for run command   (default: auto-detect)
+
+Examples:
+  ./rec53ctl build
+  sudo ./rec53ctl install
+  sudo ./rec53ctl install --force-config
+  sudo ./rec53ctl upgrade
+  SKIP_BUILD=1 sudo ./rec53ctl upgrade
+  sudo ./rec53ctl uninstall
+  ./rec53ctl run
+  CONFIG_FILE=./my-config.yaml ./rec53ctl run
+EOF
+}
+
+## --- Dispatch ---
+
+COMMAND="${1:-help}"
+shift || true
+
+case "${COMMAND}" in
+    build)     cmd_build "$@" ;;
+    install)   cmd_install "$@" ;;
+    upgrade)   cmd_upgrade "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    run)       cmd_run "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *)
+        echo "error: unknown command '${COMMAND}'" >&2
+        echo "" >&2
+        cmd_help >&2
+        exit 1
+        ;;
+esac

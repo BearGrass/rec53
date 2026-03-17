@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Hosts local authority**: serve static A/AAAA/CNAME records from config with AA flag, before any cache or upstream lookup. Name + type match returns authoritative response; name match with type mismatch returns NODATA.
+- **Forwarding rules**: forward queries for specific domain suffixes to designated upstream DNS servers. Longest-suffix match, sequential upstream failover, SERVFAIL on all-fail (no iterative fallback). Forwarded results are not cached.
+- New `HOSTS_LOOKUP` and `FORWARD_LOOKUP` states in the state machine: `STATE_INIT → HOSTS_LOOKUP → FORWARD_LOOKUP → CACHE_LOOKUP → ... → RETURN_RESP`
+- `NewServerWithFullConfig()` constructor for injecting hosts and forwarding config
 - Architecture documentation (ARCHITECTURE.md)
 - Test plan documentation (TEST_PLAN.md)
 - Task management documentation (TODO.md)

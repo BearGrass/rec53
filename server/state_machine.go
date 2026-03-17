@@ -152,7 +152,41 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			if ret == STATE_INIT_FORMERR {
 				return stm.getResponse(), nil
 			}
-			stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
+			stm = newHostsLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
+		case HOSTS_LOOKUP:
+			ret, err := handleState(stm)
+			if err != nil {
+				monitor.Rec53Log.Errorf("%v", err)
+				return nil, err
+			}
+			switch ret {
+			case HOSTS_LOOKUP_HIT:
+				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case HOSTS_LOOKUP_MISS:
+				stm = newForwardLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
+			default:
+				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
+			}
+		case FORWARD_LOOKUP:
+			ret, err := handleState(stm)
+			if err != nil {
+				monitor.Rec53Log.Errorf("%v", err)
+				return nil, err
+			}
+			switch ret {
+			case FORWARD_LOOKUP_HIT:
+				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case FORWARD_LOOKUP_MISS:
+				stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
+			case FORWARD_LOOKUP_SERVFAIL:
+				msg := new(dns.Msg)
+				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
+				return msg, nil
+			default:
+				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
+				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
+			}
 		case CACHE_LOOKUP:
 			ret, err := handleState(stm)
 			if err != nil {

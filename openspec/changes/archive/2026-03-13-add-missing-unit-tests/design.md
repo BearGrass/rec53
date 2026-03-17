@@ -8,7 +8,7 @@
 | `resolveNSIPs` | 0% | 同上 |
 | `updateNSIPsCache` | 0% | 异步 fire-and-forget，集成测试不覆盖 |
 | `classifyRespState.handle` | 62.5% | NODATA、优先级 4/5 分支未测 |
-| `queryUpstreamState.handle` | 50.9% | bad rcode retry、question mismatch 等分支未测 |
+| `.handle` | 50.9% | bad rcode retry、question mismatch 等分支未测 |
 
 现有测试基础设施（`MockDNSHandler`、`MockDNSServer`、`init()` logger）已在 `state_query_upstream_test.go` 中定义，可直接复用。
 
@@ -17,7 +17,7 @@
 **Goals:**
 - 对 `getNSNamesFromResponse`、`resolveNSIPs`、`updateNSIPsCache` 补充直接单元测试
 - 对 `classifyRespState.handle` 覆盖所有 5 个优先级分支
-- 对 `queryUpstreamState.handle` 覆盖 bad rcode retry、question mismatch、NXDOMAIN 等缺失分支
+- 对 `.handle` 覆盖 bad rcode retry、question mismatch、NXDOMAIN 等缺失分支
 - `server` 包覆盖率提升至 ≥ 82%
 
 **Non-Goals:**

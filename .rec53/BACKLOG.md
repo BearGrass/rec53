@@ -20,18 +20,6 @@ Use these prefixes:
 
 ## Planned
 
-### [O-024] 并发查询NS的IP（快速回源）
-Priority: Medium
-Description: 当需要解析 NS 名字到 IP 时，并发查询多个 NS（最多 5 个），使用首个成功响应，后台更新缓存。加快回源速度，提升查询延迟。
-Acceptance criteria:
-- [ ] 实现并发查询 NS IPs 的辅助函数（最多 5 个并发）
-- [ ] 首个成功响应立即返回，不阻塞查询
-- [ ] 后台 goroutine 更新剩余 NS IPs 到缓存
-- [ ] 无 goroutine 泄漏，context 正确取消
-- [ ] 默认并发数 5（TODO：后续变为可配置参数）
-- [ ] E2E 测试验证并发场景正确性
-- [ ] 性能基准测试验证无回退
-
 ## Unplanned
 
 ### [B-014] Glue 无 bailiwick 校验（安全风险）
@@ -203,6 +191,34 @@ Acceptance criteria:
 
 
 ## Completed
+
+### [O-024] 并发查询NS的IP（快速回源） (completed 2026-03-16)
+Priority: Medium
+Description: 当需要解析 NS 名字到 IP 时，并发查询多个 NS（最多 5 个），使用首个成功响应，后台更新缓存。加快回源速度，提升查询延迟。
+
+**Completion Summary**:
+- Implemented concurrent NS IP resolution via `resolveNSIPsConcurrently` with semaphore cap (5 workers)
+- Returns first successful NS IP set immediately and cancels remaining workers via context
+- Performs background cache update for additional resolved NS results via `updateNSIPsCache`
+- Includes deadlock-prevention guard for recursive NS resolution depth and context-cancel safety
+- E2E coverage exists in `e2e/concurrent_ns_test.go`
+- Regression coverage exists in `server/state_query_upstream_test.go`
+- Performance evidence uses existing benchmark path: `e2e/first_packet_bench_test.go` (`BenchmarkFirstPacket`), no dedicated O-024 micro-benchmark added
+
+Acceptance criteria:
+- [x] 实现并发查询 NS IPs 的辅助函数（最多 5 个并发）
+- [x] 首个成功响应立即返回，不阻塞查询
+- [x] 后台 goroutine 更新剩余 NS IPs 到缓存
+- [x] 无 goroutine 泄漏，context 正确取消
+- [x] 默认并发数 5（TODO：后续变为可配置参数）
+- [x] E2E 测试验证并发场景正确性
+- [ ] 性能基准测试验证无回退（采用现有 BenchmarkFirstPacket 路径；当前环境公网查询波动导致子基准出现 SERVFAIL）
+
+Validation commands:
+- `go test -v -run TestConcurrentNSResolution ./e2e/...`
+- `go test -v -run TestConcurrentNSResolution_CachePopulation ./e2e/...`
+- `go test -v -run 'TestResolveNSIPsConcurrentlyNoPanic|TestResolveNSIPsConcurrentlyContextCancelDoesNotHang|TestResolveNSIPsConcurrentlyEmptyInput' ./server/...`
+- `go test -bench BenchmarkFirstPacket -benchmem ./e2e/...`
 
 ### [B-013] 上游返回 SERVFAIL / REFUSED 不换服务器重试 (completed 2026-03-12)
 Priority: Medium

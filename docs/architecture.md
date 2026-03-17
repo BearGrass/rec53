@@ -2,7 +2,7 @@
 
 ## Overview
 
-rec53 is a recursive DNS resolver implemented in Go with a state machine architecture. It performs iterative DNS resolution from root servers, featuring IP quality tracking for optimal upstream server selection, TTL-based caching, and Prometheus metrics for monitoring.
+rec53 is a recursive DNS resolver implemented in Go with a state machine architecture. It performs iterative DNS resolution from root servers, featuring local hosts authority, forwarding rules, IP quality tracking for optimal upstream server selection, TTL-based caching, and Prometheus metrics for monitoring.
 
 ## Directory Structure
 
@@ -17,6 +17,11 @@ rec53/
 │   ├── state_machine.go    # Change() loop, CNAME chain, iteration guard
 │   ├── state_define.go     # State constants, return codes, state constructors
 │   ├── state.go            # State handler implementations (handle() methods)
+│   ├── state_hosts.go      # HOSTS_LOOKUP state: local authority lookup
+│   ├── state_forward.go    # FORWARD_LOOKUP state: forwarding rules
+│   ├── state_shared.go     # Global accessors for hosts/forwarding config
+│   ├── hosts_config.go     # HostEntry type, hosts compilation to dns.Msg map
+│   ├── forward_config.go   # ForwardZone type, zone sorting
 │   ├── cache.go            # TTL cache wrapper (go-cache)
 │   ├── ip_pool.go          # IPQualityV2 ring buffer, scoring, probe loop
 │   ├── warmup.go           # WarmupNSRecords(), TLD list
@@ -34,7 +39,8 @@ rec53/
 │   ├── resolver_test.go    # End-to-end resolution tests
 │   ├── cache_test.go       # Cache behavior tests
 │   ├── server_test.go      # Server lifecycle tests
-│   └── error_test.go       # Error handling tests
+│   ├── error_test.go       # Error handling tests
+│   └── hosts_forward_test.go # Hosts authority & forwarding E2E tests
 ├── etc/                    # Configuration
 │   └── prometheus.yml      # Prometheus config for Docker
 └── single_machine/         # Docker Compose deployment
@@ -72,7 +78,9 @@ Client UDP/TCP query
 |-----------|------|------|
 | `server` | `server/server.go` | UDP/TCP listener, request entry point |
 | `Change()` | `server/state_machine.go` | State machine loop orchestrator |
-| State handlers | `server/state_define.go`, `state.go` | Per-state `handle()` logic |
+| State handlers | `server/state_define.go`, `state.go`, `state_hosts.go`, `state_forward.go` | Per-state `handle()` logic |
+| `globalHostsMap` | `server/state_shared.go` | Pre-compiled hosts → `*dns.Msg` map |
+| `globalForwardZones` | `server/state_shared.go` | Sorted forwarding zones (longest-suffix first) |
 | `globalDnsCache` | `server/cache.go` | TTL response cache |
 | `globalIPPool` | `server/ip_pool.go` | Nameserver latency tracking & selection |
 | `WarmupNSRecords` | `server/warmup.go` | Startup IP pool bootstrap |
@@ -103,16 +111,29 @@ type stateMachine interface {
 | State | Constant | Purpose |
 |-------|----------|---------|
 | `STATE_INIT` | `0` | Validate request; initialize response header |
-| `CACHE_LOOKUP` | `1` | Look up query in `globalDnsCache` |
-| `CLASSIFY_RESP` | `2` | Classify current response: Answer / CNAME / NS referral |
-| `EXTRACT_GLUE` | `3` | Extract nameserver IPs from glue records in current response |
-| `LOOKUP_NS_CACHE` | `4` | Fall back to cache or root servers if no glue IPs found |
-| `QUERY_UPSTREAM` | `5` | Send query to best nameserver IP; record latency or failure |
-| `RETURN_RESP` | `6` | Prepend CNAME chain; write final response |
+| `HOSTS_LOOKUP` | `1` | Look up query in pre-compiled hosts map (local authority) |
+| `FORWARD_LOOKUP` | `2` | Match query against forwarding zones; forward to upstream if matched |
+| `CACHE_LOOKUP` | `3` | Look up query in `globalDnsCache` |
+| `CLASSIFY_RESP` | `4` | Classify current response: Answer / CNAME / NS referral |
+| `EXTRACT_GLUE` | `5` | Extract nameserver IPs from glue records in current response |
+| `LOOKUP_NS_CACHE` | `6` | Fall back to cache or root servers if no glue IPs found |
+| `QUERY_UPSTREAM` | `7` | Send query to best and secondary nameserver concurrently (Happy Eyeballs); first response wins. Retries on secondary if primary returns a bad rcode (SERVFAIL/REFUSED/FORMERR/NOTIMPL) |
+| `RETURN_RESP` | `8` | Prepend CNAME chain; write final response |
+
+### Query Processing Chain
+
+```
+STATE_INIT → HOSTS_LOOKUP → FORWARD_LOOKUP → CACHE_LOOKUP → ... → RETURN_RESP
+```
+
+**Priority order**: Hosts (local authority) > Forwarding rules > Cache > Iterative resolution.
+
+- **HOSTS_LOOKUP**: If the query matches a hosts entry (exact name + type), returns an authoritative response (AA=true) immediately. If the name exists but type doesn't match, returns NODATA (NOERROR + empty answer). On miss, falls through to `FORWARD_LOOKUP`.
+- **FORWARD_LOOKUP**: If the query's domain matches a forwarding zone (longest-suffix wins), forwards to configured upstreams sequentially. Results are NOT cached. All upstreams fail → SERVFAIL (no iterative fallback). On no zone match, falls through to `CACHE_LOOKUP`.
 
 ### Transition Diagram
 
-Three loop paths run through the state machine:
+Four paths run through the state machine:
 
 ```
                       ┌─────────────────────────────────────────────────┐
@@ -128,19 +149,31 @@ Three loop paths run through the state machine:
     └──────┬──────┘   │  │                                      │       │
            │ always   │  │                                      │       │
            ▼          │  │                                      │       │
-    ┌─────────────┐   │  │   hit                                │       │
-    │ CACHE_LOOKUP│───┼──┼──────────────────┐                   │       │
-    └──────┬──────┘   │  │                  ▼                   │       │
-           │ miss     │  │         ┌──────────────────┐         │       │
-           ▼          │  │         │  CLASSIFY_RESP   │         │       │
-    ┌─────────────┐   │  │         └────────┬─────────┘         │       │
-    │ EXTRACT_GLUE│◄──┼──┼──────────────────┤ NS referral       │       │
-    └──────┬──────┘   │  │                  │                   │       │
-           │          │  │                  │ CNAME ────────────┘       │
-           │ glue IPs │  │                  │                           │
-           │ found    │  │                  │ answer / negative         │
-           │          │  │                  ▼                           │
-           │          │  │         ┌──────────────────┐                 │
+    ┌──────────────┐  │  │                                      │       │
+    │ HOSTS_LOOKUP │  │  │                                      │       │
+    └──────┬───────┘  │  │                                      │       │
+           │ hit ──────┼──┼───────────────────────────────────┐ │       │
+           │ miss     │  │                                    │ │       │
+           ▼          │  │                                    │ │       │
+    ┌───────────────┐ │  │                                    │ │       │
+    │FORWARD_LOOKUP │ │  │                                    │ │       │
+    └──────┬────────┘ │  │                                    │ │       │
+           │ hit ──────┼──┼───────────────────────────────────┤ │       │
+           │ miss     │  │                                    │ │       │
+           ▼          │  │                                    │ │       │
+    ┌─────────────┐   │  │   hit                              │ │       │
+    │ CACHE_LOOKUP│───┼──┼──────────────────┐                 │ │       │
+    └──────┬──────┘   │  │                  ▼                 ▼ │       │
+           │ miss     │  │         ┌──────────────────┐       │ │       │
+           ▼          │  │         │  CLASSIFY_RESP   │       │ │       │
+    ┌─────────────┐   │  │         └────────┬─────────┘       │ │       │
+    │ EXTRACT_GLUE│◄──┼──┼──────────────────┤ NS referral     │ │       │
+    └──────┬──────┘   │  │                  │                 │ │       │
+           │          │  │                  │ CNAME ──────────┘ │       │
+           │ glue IPs │  │                  │                   │       │
+           │ found    │  │                  │ answer / negative │       │
+           │          │  │                  ▼                   │       │
+           │          │  │         ┌──────────────────┐         │       │
            │          │  │         │   RETURN_RESP    │ ──► (done)      │
            │          │  │         └──────────────────┘                 │
            │ no glue  │  │                                              │
@@ -158,6 +191,12 @@ Three loop paths run through the state machine:
            │
            │ error → SERVFAIL (terminal)
 ```
+
+**Fast paths — HOSTS_LOOKUP and FORWARD_LOOKUP** (short-circuit before iterative)
+
+`HOSTS_LOOKUP` checks the pre-compiled hosts map. On exact match (name + type), it returns immediately via `RETURN_RESP` with AA=true. On name match but type mismatch, it returns NODATA. On complete miss, it falls through to `FORWARD_LOOKUP`.
+
+`FORWARD_LOOKUP` checks forwarding zones using longest-suffix match. On match, it queries configured upstreams sequentially and returns the result via `RETURN_RESP`. Forwarded results are never cached. On all-upstreams-fail, it returns SERVFAIL without iterative fallback. On no zone match, it falls through to `CACHE_LOOKUP`.
 
 **Loop A — iterative delegation** (main loop, up to 50 iterations)
 
@@ -205,6 +244,12 @@ Return codes are defined in `server/state_machine.go` and `server/state_define.g
 
 | Code | Meaning |
 |------|---------|
+| `HOSTS_HIT` | Hosts exact match — go to `RETURN_RESP` |
+| `HOSTS_NODATA` | Hosts name match, type mismatch — go to `RETURN_RESP` (NODATA) |
+| `HOSTS_MISS` | Hosts miss — go to `FORWARD_LOOKUP` |
+| `FORWARD_HIT` | Forwarding zone match, upstream success — go to `RETURN_RESP` |
+| `FORWARD_FAIL` | Forwarding zone match, all upstreams failed — SERVFAIL |
+| `FORWARD_MISS` | No forwarding zone match — go to `CACHE_LOOKUP` |
 | `CACHE_LOOKUP_HIT` | Cache hit — go to `CLASSIFY_RESP` |
 | `CACHE_LOOKUP_MISS` | Cache miss — go to `EXTRACT_GLUE` |
 | `CLASSIFY_RESP_GET_ANS` | Final answer ready — go to `RETURN_RESP` |

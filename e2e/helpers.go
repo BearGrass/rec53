@@ -781,6 +781,7 @@ func setupResolverWithMockRoot(t *testing.T, mockSrv *MultiZoneMockServer, rootG
 		mockSrv.Stop()
 		utils.ResetRootGlue()
 		server.ResetIterPort()
+		server.ResetHostsAndForwardForTest()
 		server.FlushCacheForTest()
 		server.ResetIPPoolForTest()
 	})

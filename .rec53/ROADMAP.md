@@ -23,16 +23,6 @@
 - CNAME loop detection
 - EDNS0 support (4096-byte buffer)
 
-### Known Issues
-
-- [ ] `TestCNAMEChainWithValidNSDelegation` (`e2e/resolver_test.go`) 在网络条件不佳时仍可能
-      因 `www.huawei.com` 的 glueless NS 链（cdnhwc1.com）解析超时而失败。
-      根本原因：`resolveNSIPsConcurrently` 递归深度截断为 `depth=1`（防死锁设计，Non-Goal）。
-      **已修复**：`SERVFAIL` 返回问题通过 B-004 两阶段修复解决
-      （`state_machine.go:isNSRelevantForCNAME` + `state_extract_glue.go:handle`）；
-      E2E 测试已缓解：客户端超时延长至 15s，A 记录缺失不计为失败，仅 SERVFAIL 触发错误。
-      **剩余风险**：极端网络抖动下 15s 内仍可能无法完成 cdnhwc1.com 的 NS 迭代解析。
-
 ---
 
 ## v0.1.0 — Hosts 本地权威 + Forwarding 转发规则

@@ -8,7 +8,7 @@ ENV GO111MODULE=on \
 # 移动到工作目录：/build
 WORKDIR /build
 COPY . .
-RUN go build cmd/rec53.go
+RUN go build -o rec53 ./cmd
 
 WORKDIR /dist
 RUN cp /build/rec53 .

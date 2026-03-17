@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"flag"
+	"os"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -29,15 +30,24 @@ func getEncoder() zapcore.Encoder {
 	return zapcore.NewConsoleEncoder(encoderConfig)
 }
 
+// getLogWriter returns a WriteSyncer for the configured log destination.
+// When logFile is /dev/stderr or /dev/stdout, writes directly to the
+// corresponding os.File to avoid lumberjack rotation on special files.
 func getLogWriter() zapcore.WriteSyncer {
-	lumberJackmonitor := &lumberjack.Logger{
-		Filename:   *logFile,
-		MaxSize:    1,
-		MaxBackups: 5,
-		MaxAge:     30,
-		Compress:   false,
+	switch *logFile {
+	case "/dev/stderr":
+		return zapcore.AddSync(os.Stderr)
+	case "/dev/stdout":
+		return zapcore.AddSync(os.Stdout)
+	default:
+		return zapcore.AddSync(&lumberjack.Logger{
+			Filename:   *logFile,
+			MaxSize:    1,
+			MaxBackups: 5,
+			MaxAge:     30,
+			Compress:   false,
+		})
 	}
-	return zapcore.AddSync(lumberJackmonitor)
 }
 
 func SetLogLevel(level zapcore.Level) {

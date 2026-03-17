@@ -7,9 +7,14 @@
 ## 功能特性
 
 - **完整迭代解析** — 从根服务器出发逐级解析，不依赖上游转发
+- **本地 Hosts 权威应答** — 从配置文件直接返回 A/AAAA/CNAME 静态记录（带 AA 标志），优先于缓存和上游查询
+- **转发规则** — 将指定域名后缀的查询转发至专用上游 DNS 服务器（最长后缀匹配）
 - **UDP/TCP 双协议** — 同一端口同时监听 UDP 和 TCP
-- **状态机架构** — 清晰可审计的 7 状态解析流水线
+- **状态机架构** — 清晰可审计的 9 状态解析流水线
 - **IPQualityV2** — 基于滑动窗口的延迟直方图，支持自动故障恢复
+- **Happy Eyeballs 并发查询** — 同时向最优和次优 NS 发起查询，取最先响应的结果
+- **Bad Rcode 故障切换** — 主 NS 返回 SERVFAIL / REFUSED / FORMERR 时自动切换备用 NS 重试
+- **EDNS0 与 UDP 截断** — 4096 字节 EDNS0 缓冲区；UDP 超限时设置 TC 标志并逐步裁剪 Answer
 - **基于 TTL 的缓存** — 深拷贝安全缓存，支持否定缓存（NXDOMAIN/NODATA）
 - **NS 预热** — 启动时预填充 IP 池，降低冷启动延迟
 - **Prometheus 指标** — 每次查询和每个 NS 服务器均可观测
@@ -35,6 +40,9 @@ go build -o rec53 ./cmd
 # 测试解析
 dig @127.0.0.1 -p 5353 google.com
 dig @127.0.0.1 -p 5353 google.com AAAA
+
+# 查看日志（日志写入文件，不输出到 stdout）
+tail -f ./log/rec53.log
 ```
 
 ---
@@ -44,13 +52,14 @@ dig @127.0.0.1 -p 5353 google.com AAAA
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--config` | *(必填)* | YAML 配置文件路径 |
-| `-listen` | `127.0.0.1:5353` | DNS 监听地址（覆盖配置文件） |
-| `-metric` | `:9999` | Prometheus 指标地址（覆盖配置文件） |
+| `-listen` | `127.0.0.1:5353` | DNS 监听地址 |
+| `-metric` | `:9999` | Prometheus 指标地址 |
 | `-log-level` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
 | `-no-warmup` | `false` | 禁用启动时 NS 预热 |
+| `-rec53.log` | `./log/rec53.log` | 日志文件路径（日志仅写入文件，不输出到 stdout） |
 | `-version` | `false` | 打印版本号后退出 |
 
-CLI 参数优先级高于配置文件。
+> **注意**：`-listen`、`-metric`、`-log-level` 仅在其值与默认值不同时才覆盖配置文件。例如，若配置文件中已设置 `log_level: debug`，使用 `-log-level info` 无法将其覆盖回 `info`。
 
 ---
 
@@ -61,6 +70,9 @@ dns:
   listen: "127.0.0.1:5353"
   metric: ":9999"
   log_level: "info"
+  # upstream_timeout: 1500ms  # 迭代解析时每次上游查询的超时时间。
+                              # 默认值：1.5s。高延迟网络可调高至 3-5s。
+                              # 最小值：100ms。
 
 warmup:
   enabled: true
@@ -71,6 +83,33 @@ warmup:
     - com
     - net
     - org
+
+# 本地静态 DNS 记录 — 权威应答（AA=true），优先于缓存和迭代解析。
+# 优先级：hosts > forwarding > cache > 迭代解析。
+# 支持类型：A、AAAA、CNAME。TTL 默认 60 秒。
+hosts:
+  - name: db.internal
+    type: A
+    value: 10.0.0.5
+    ttl: 300
+  - name: ipv6.internal
+    type: AAAA
+    value: "fd00::1"
+  - name: alias.internal
+    type: CNAME
+    value: real.internal
+
+# 将指定域名后缀的查询转发至专用上游 DNS 服务器。
+# 最长后缀匹配。转发结果不写入缓存。按顺序尝试所有上游；
+# 全部失败时返回 SERVFAIL（不回退迭代解析）。
+forwarding:
+  - zone: corp.example.com
+    upstreams:
+      - 192.168.1.1:53
+      - 192.168.1.2:53
+  - zone: internal
+    upstreams:
+      - 10.0.0.53:53
 ```
 
 默认预热 30 个高流量 TLD，覆盖全球 85%+ 的域名注册量。如需自定义列表，请在 `warmup.tlds` 中指定；留空则使用内置默认值。
@@ -83,11 +122,12 @@ warmup:
 # 构建镜像
 docker build -t rec53 .
 
-# 独立运行
+# 独立运行（挂载日志目录以便从宿主机访问日志）
 docker run -d \
   -p 5353:5353/udp \
   -p 5353:5353/tcp \
   -p 9999:9999 \
+  -v $(pwd)/log:/dist/log \
   rec53
 
 # 使用 Docker Compose 运行（含 Prometheus + node-exporter）
@@ -101,6 +141,7 @@ cd single_machine && docker-compose up -d
 - 未实现 DNSSEC 验证
 - 不支持 DoT / DoH
 - `www.huawei.com` 等复杂 CNAME 链在最终 A/AAAA 解析失败时可能返回 SERVFAIL
+- 日志**仅写入文件**（默认路径 `./log/rec53.log`），不输出到 stdout/stderr。可通过 `-rec53.log /path/to/file.log` 修改路径。Docker 部署时需挂载日志目录（如 `-v $(pwd)/log:/dist/log`）才能从宿主机访问日志。
 
 ---
 
