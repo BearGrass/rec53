@@ -3,6 +3,7 @@
 English | [中文](README.zh.md)
 
 A recursive DNS resolver implemented in Go with state machine architecture, IP quality tracking, and Prometheus metrics.
+rec53 is positioned as a lightweight, endpoint-side recursive resolver for personal devices and production cluster nodes (including host machines). It is intended to replace the OS-provided resolver at the node level to improve local DNS capability and offload centralized enterprise or ISP recursive DNS infrastructure, rather than serving as a centralized recursive cluster itself.
 
 ## Features
 
@@ -17,7 +18,7 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 - **EDNS0 & UDP Truncation** — 4096-byte EDNS0 buffer; TC flag with progressive answer trimming on UDP overflow
 - **TTL-based Caching** — deep-copy safe cache with negative caching (NXDOMAIN/NODATA)
 - **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
-- **NS Cache Snapshot** — persists NS delegation cache on shutdown and restores it before first query, eliminating cold-start latency after restart
+- **Cache Snapshot** — persists full DNS cache on shutdown and restores it before first query, eliminating cold-start latency after restart
 - **Prometheus Metrics** — per-query and per-nameserver observability
 - **Graceful Shutdown** — context-based cancellation with 5-second timeout
 
@@ -164,12 +165,12 @@ forwarding:
     upstreams:
       - 10.0.0.53:53
 
-# NS cache snapshot: persist NS delegation entries on shutdown and restore on startup.
-# Eliminates cold-start latency (typically 300ms+) caused by rebuilding the NS
-# delegation chain after a restart. Disabled by default; file must be set to enable.
+# Cache snapshot: persist all DNS cache entries on shutdown and restore on startup.
+# Eliminates cold-start latency (typically 300ms+) caused by rebuilding the cache
+# after a restart. Disabled by default; file must be set to enable.
 # snapshot:
 #   enabled: false
-#   file: ""   # e.g. /var/lib/rec53/ns-cache.json  or  ~/.rec53/ns-cache.json
+#   file: ""   # e.g. /var/lib/rec53/cache-snapshot.json  or  ~/.rec53/cache-snapshot.json
 ```
 
 | `snapshot` field | Type | Default | Description |

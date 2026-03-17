@@ -28,6 +28,9 @@ log/*.log
 .env.*.local
 config.yaml
 
+# Runtime data
+ns-cache.json
+
 # Go and Dependencies
 vendor/
 go.sum.bak

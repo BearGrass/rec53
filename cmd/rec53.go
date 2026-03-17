@@ -312,14 +312,14 @@ func main() {
 	// Create and start the DNS server.
 	monitor.Rec53Log.Debugf("creating DNS server on %s", cfg.DNS.Listen)
 	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding)
-	// Restore NS cache from snapshot before starting listeners so the cache is
+	// Restore cache from snapshot before starting listeners so the cache is
 	// warm before the first DNS query arrives.  This is synchronous and completes
 	// in < 5 ms on typical snapshot files.  Missing file → silent no-op; any
 	// other error → warn and continue (degraded to cold-cache behaviour).
 	if n, err := server.LoadSnapshot(cfg.Snapshot); err != nil {
 		monitor.Rec53Log.Warnf("[SNAPSHOT] failed to load snapshot, starting with cold cache: %v", err)
 	} else if n > 0 {
-		monitor.Rec53Log.Infof("[SNAPSHOT] restored %d NS entries from %s", n, cfg.Snapshot.File)
+		monitor.Rec53Log.Infof("[SNAPSHOT] restored %d cache entries from %s", n, cfg.Snapshot.File)
 	}
 
 	monitor.Rec53Log.Debugf("starting DNS server")

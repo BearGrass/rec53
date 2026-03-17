@@ -117,18 +117,18 @@ warmup:
 #     upstreams:
 #       - 10.0.0.53:53
 
-# snapshot: Persist NS delegation cache on graceful shutdown and restore it on startup.
-# This eliminates the cold-start latency (typically 300ms+) caused by rebuilding the
-# NS delegation chain after a restart.  Completely optional — omitting this block or
+# snapshot: Persist DNS cache on graceful shutdown and restore it on startup.
+# This eliminates the cold-start latency (typically 300ms+) caused by rebuilding
+# the cache after a restart.  Completely optional — omitting this block or
 # setting enabled: false leaves existing behaviour unchanged.
 # File must be set to a writable path; an empty or missing file field disables the feature
 # even when enabled: true.  Recommended paths:
-#   Desktop / user service:  ~/.rec53/ns-cache.json
-#   System service (root):   /var/lib/rec53/ns-cache.json
+#   Desktop / user service:  ~/.rec53/cache-snapshot.json
+#   System service (root):   /var/lib/rec53/cache-snapshot.json
 #
 # snapshot:
 #   enabled: false
-#   file: ""       # e.g. /var/lib/rec53/ns-cache.json
+#   file: ""       # e.g. /var/lib/rec53/cache-snapshot.json
 EOF
 
 if [ $? -eq 0 ]; then

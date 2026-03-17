@@ -193,6 +193,9 @@ Update these docs **in the same commit** as the code change:
 - New dependency → this file + `docs/architecture.md`
 - New patterns → `.rec53/CONVENTIONS.md`
 - User-facing changes → `README.md` + `README.zh.md`
+- README sync policy:
+  - Any change to features, behavior, config, CLI flags, examples, or operational notes in one README must be mirrored in the other (`README.md` and `README.zh.md`) in the same commit.
+  - If a change is intentionally language-specific, add a short rationale in the commit/PR description; otherwise treat single-sided README edits as incomplete.
 
 Related: `docs/architecture.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
 

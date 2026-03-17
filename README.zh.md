@@ -1,6 +1,7 @@
 # rec53
 
 用 Go 实现的迭代 DNS 解析器，采用状态机架构，内置 IP 质量追踪和 Prometheus 指标。
+rec53 的产品定位是轻量级端侧递归解析器，面向个人设备与生产集群终端节点（含宿主机）部署。它用于替代节点上的操作系统内置递归解析器，增强本地解析能力并分担企业内或运营商集中式递归 DNS 基础设施压力，而非作为集中式递归集群本身。
 
 [English](README.md) | 中文
 
@@ -17,6 +18,7 @@
 - **EDNS0 与 UDP 截断** — 4096 字节 EDNS0 缓冲区；UDP 超限时设置 TC 标志并逐步裁剪 Answer
 - **基于 TTL 的缓存** — 深拷贝安全缓存，支持否定缓存（NXDOMAIN/NODATA）
 - **NS 预热** — 启动时预填充 IP 池，降低冷启动延迟
+- **缓存快照** — 优雅关闭时持久化全量 DNS 缓存，重启时自动恢复，消除冷启动延迟
 - **Prometheus 指标** — 每次查询和每个 NS 服务器均可观测
 - **优雅关闭** — 基于 context 的取消机制，5 秒超时
 
@@ -164,7 +166,18 @@ forwarding:
   - zone: internal
     upstreams:
       - 10.0.0.53:53
+
+# 缓存快照：优雅关闭时持久化全量 DNS 缓存，下次启动时自动恢复。
+# 消除重启后的冷启动延迟（通常 300ms+）。默认禁用；需设置 file 路径方可生效。
+# snapshot:
+#   enabled: false
+#   file: ""   # 例如 /var/lib/rec53/cache-snapshot.json 或 ~/.rec53/cache-snapshot.json
 ```
+
+| `snapshot` 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | `false` | 启用快照保存/恢复 |
+| `file` | string | `""` | 快照文件路径；为空则即使 `enabled: true` 也不生效 |
 
 默认预热 30 个高流量 TLD，覆盖全球 85%+ 的域名注册量。如需自定义列表，请在 `warmup.tlds` 中指定；留空则使用内置默认值。
 
