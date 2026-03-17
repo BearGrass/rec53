@@ -84,6 +84,7 @@ Client UDP/TCP query
 | `globalDnsCache` | `server/cache.go` | TTL response cache |
 | `globalIPPool` | `server/ip_pool.go` | Nameserver latency tracking & selection |
 | `WarmupNSRecords` | `server/warmup.go` | Startup IP pool bootstrap |
+| `SaveSnapshot` / `LoadSnapshot` | `server/snapshot.go` | NS cache persistence and restore |
 | `Rec53Metric` | `monitor/metric.go` | Prometheus counters / histograms / gauges |
 | `Rec53Log` | `monitor/log.go` | Zap structured logger |
 
@@ -384,6 +385,52 @@ globalIPPool.RecordFailure(ip)
 ### Warmup Bootstrap
 
 On startup, `WarmupNSRecords()` resolves NS records for a configurable TLD list. All resolved nameserver IPs are fed into `globalIPPool` via `RecordLatency`, giving the pool measured baselines before the first user query arrives. This eliminates the cold-start penalty where all IPs have 0% confidence.
+
+---
+
+## Core Subsystem: Full Cache Snapshot
+
+### Overview
+
+`server/snapshot.go` implements optional full cache persistence. On graceful shutdown, `SaveSnapshot()` serialises **all** cache entries from `globalDnsCache` (A/AAAA answers, CNAME chains, NS delegations, and any other cached `dns.Msg`) to a JSON file. On the next startup, `LoadSnapshot()` reads that file and restores unexpired entries into `globalDnsCache` **before `server.Run()` is called**, guaranteeing the cache is warm before the first DNS query arrives. This eliminates cold-start latency for both delegation lookups and direct answer queries.
+
+### Startup Sequence
+
+```
+cmd/main()
+  ├─ NewServerWithFullConfig(...)     ← creates server with snapshotCfg
+  ├─ server.LoadSnapshot(cfg.Snapshot) ← synchronous, < 5ms, before any listener starts
+  └─ rec53.Run()
+       ├─ goroutine: warmupNSOnStartup()   ← Round 1 TLD warmup (unchanged)
+       ├─ goroutine: udp.ListenAndServe()
+       └─ goroutine: tcp.ListenAndServe()
+```
+
+`LoadSnapshot` runs on the calling goroutine and returns before `Run()` starts any listener. There is no race between cache writes and incoming queries.
+
+### Snapshot File Format
+
+Each entry is a JSON object:
+
+```json
+{ "key": "github.com.:2", "msg_b64": "<wire-format base64>", "saved_at": 1710000000 }
+```
+
+- `key` — cache key in `"name.:qtype"` format
+- `msg_b64` — `dns.Msg.Pack()` wire bytes, base64-encoded; preserves all RR fields including TTL
+- `saved_at` — Unix timestamp (seconds) when the snapshot was written
+
+On restore, remaining TTL = `rr.Ttl - (now - saved_at)`. `remainingTTL()` scans all three message sections (Answer, Ns, Extra) and returns the maximum remaining TTL found. Entries where all RRs are expired are skipped.
+
+### Configuration
+
+```yaml
+snapshot:
+  enabled: false
+  file: ""   # e.g. /var/lib/rec53/cache-snapshot.json
+```
+
+`enabled: false` (default) is a complete no-op. `file: ""` disables the feature even when `enabled: true`. Write failures on shutdown are logged as errors but do not affect the `Shutdown()` return value.
 
 ---
 

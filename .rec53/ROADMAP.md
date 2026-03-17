@@ -2,30 +2,57 @@
 
 ## Version History
 
-| Version | Date     | Highlights                                                                    |
-|---------|----------|-------------------------------------------------------------------------------|
-| dev     | 2026-03  | Hosts local authority, forwarding rules, rec53ctl ops script, /dev/stderr log |
-| dev     | 2026-03  | Graceful shutdown, comprehensive tests, E2E test suite                        |
-| -       | 2026-03  | IP quality tracking with prefetch                                             |
-| -       | 2026-03  | Prometheus metrics integration                                                |
-| -       | 2026-03  | Docker Compose deployment                                                     |
+| Version | Date     | Highlights                                                                        |
+|---------|----------|-----------------------------------------------------------------------------------|
+| dev     | 2026-03  | NS 缓存快照持久化，消除重启冷启动延迟                                             |
+| dev     | 2026-03  | 并发 NS 解析（O-024），最多 5 worker，首个成功即返回                               |
+| dev     | 2026-03  | Happy Eyeballs 并发上游查询，先到先得                                              |
+| dev     | 2026-03  | IPQualityV2 — 滑动窗口环形缓冲 + P50/P95/P99 + 4 状态健康模型                     |
+| dev     | 2026-03  | 负缓存（NXDOMAIN/NODATA）+ Bad Rcode 重试（SERVFAIL/REFUSED 换服务器）             |
+| dev     | 2026-03  | NS 预热 — 30 个高流量 TLD，CPU 感知动态并发                                       |
+| dev     | 2026-03  | 状态机重构 — 单文件拆分、baseState 嵌入、语义命名                                  |
+| dev     | 2026-03  | Hosts 本地权威、Forwarding 转发规则、rec53ctl 运维脚本、/dev/stderr 日志           |
+| dev     | 2026-03  | Graceful shutdown、综合测试套件、E2E 测试框架                                      |
+| dev     | 2026-03  | IP 质量追踪 + 预取、Prometheus 指标、Docker Compose 部署                           |
 
 ## Current Version: dev
 
-### Features
+### 核心功能
 
-- Recursive DNS resolution from root servers
-- UDP/TCP dual protocol support
-- LRU cache with TTL-based expiration (5 min default)
-- IP quality tracking for optimal upstream server selection
-- IP prefetch for candidate servers
-- Prometheus metrics endpoint
-- Graceful shutdown with 5-second timeout
-- CNAME loop detection
-- EDNS0 support (4096-byte buffer)
-- **Hosts local authority** — serve static A/AAAA/CNAME records authoritatively (AA=true) before cache or upstream
-- **Forwarding rules** — forward queries for configured domain suffixes to designated upstream DNS servers (longest-suffix match)
-- **rec53ctl** — single-entry operational script: `build` / `install` / `upgrade` / `uninstall` / `run`
+- 从根服务器开始的完整递归 DNS 解析
+- UDP/TCP 双协议支持
+- LRU 缓存 + TTL 过期（默认 5 分钟）
+- CNAME 链追踪与循环检测（MaxIterations=50）
+- Glue 记录处理
+- EDNS0 支持（4096 字节缓冲区）
+- UDP 截断响应（TC 标志）
+- 优雅关闭（5 秒超时）
+
+### IP 质量与上游选择
+
+- **IPQualityV2** — 64 样本滑动窗口环形缓冲区，P50/P95/P99 百分位延迟
+- **4 状态健康模型** — ACTIVE → DEGRADED → SUSPECT → RECOVERED，指数退避 + 30s 后台探测
+- **Happy Eyeballs** — 并发向最优 + 次优 IP 发送查询，先到先得（超时默认 1.5s）
+- **IP 预取** — 候选服务器预取加速后续查询
+- **Bad Rcode 重试** — SERVFAIL/REFUSED 时标记 bad server，自动切换备用 IP
+
+### 缓存与预热
+
+- **负缓存** — NXDOMAIN/NODATA 检测与缓存（基于 SOA Minttl，默认回退 60s）
+- **NS 预热** — 启动时查询 30 个高流量 TLD 的 NS 记录，CPU 感知动态并发
+- **NS 缓存快照持久化** — 关闭时保存 NS 委派缓存到 JSON 文件，启动时恢复未过期条目
+
+### 本地策略
+
+- **Hosts 本地权威** — A/AAAA/CNAME 静态记录，AA=true 权威应答，优先于缓存和上游
+- **Forwarding 转发规则** — 最长后缀匹配转发到指定上游 DNS，结果不写缓存
+
+### 运维与可观测性
+
+- **rec53ctl** — 单入口运维脚本：`build` / `install` / `upgrade` / `uninstall` / `run`
+- **Prometheus 指标端点** — 查询计数、延迟、缓存命中率、IP 池状态
+- **Docker Compose 部署** — 一键容器化部署
+- **并发 NS 解析** — 最多 5 个 worker 并发解析 NS IP，首个成功即返回
 
 ---
 
@@ -54,39 +81,101 @@
 
 ---
 
-## v0.2.0 — 学习型预热 Round 2
+## ~~F-003~~ ✅ 已完成 — IPQualityV2 + Happy Eyeballs
 
-**目标**：跨重启记忆热点注册域名的 NS 记录，缩短冷启动时的首次查询延迟。
+**完成于**：2026-03-13
+
+- **IPQualityV2** — 全面重写 IP 质量追踪系统
+  - 64 样本滑动窗口环形缓冲区，替代简单均值
+  - P50/P95/P99 百分位延迟计算，导出到 Prometheus
+  - 复合评分 + 4 状态健康模型（ACTIVE → DEGRADED → SUSPECT → RECOVERED）
+  - 指数退避 + 30 秒后台探测循环
+  - 线程安全：原子操作（无锁快速路径）
+- **Happy Eyeballs 并发查询** — 同时向最优 + 次优 IP 发送查询，先到先得，超时可配置（默认 1.5s）
+
+---
+
+## ~~B-012~~ ✅ 已完成 — 负缓存 + Bad Rcode 重试
+
+**完成于**：2026-03-12
+
+- **负缓存（B-012）** — NXDOMAIN/NODATA 检测和缓存，基于 SOA Minttl，默认回退 60 秒
+- **Bad Rcode 重试（B-013）** — SERVFAIL/REFUSED 时标记 bad server 并尝试备用 IP
+
+---
+
+## ~~O-024~~ ✅ 已完成 — 并发 NS 解析
+
+**完成于**：2026-03-16
+
+- 最多 5 个并发 worker 解析 NS IP，首个成功立即返回
+- 后台更新缓存，减少后续查询延迟
+- NS 递归解析深度限制，防止栈溢出
+
+---
+
+## ~~O-025/026/027~~ ✅ 已完成 — NS 预热优化
+
+**完成于**：2026-03-12
+
+- 启动时查询 30 个高流量 TLD 的 NS 记录（Round 1 之后）
+- CPU 感知动态并发控制
+- 精选 TLD 列表，优化内存使用
+
+---
+
+## ✅ 已完成 — NS 缓存快照持久化
+
+**完成于**：2026-03-17
+
+- 关闭时保存 NS 委派缓存条目到 JSON 文件
+- 启动时恢复未过期条目，消除冷启动延迟
+- 配置项：`dns.cache_snapshot_path`
+
+---
+
+## ✅ 已完成 — 状态机重构
+
+**完成于**：2026-03-13
+
+- 状态文件拆分为单文件（每个状态独立源文件）
+- 语义命名（`state_hosts.go`、`state_forward.go`、`state_check_resp.go` 等）
+- `baseState` 嵌入，消除状态结构体重复字段
+- 辅助函数提取，提升可读性
+
+---
+
+## v0.2.0 — 全量缓存快照
+
+**目标**：快照从仅保存 NS 委派扩展到保存全部缓存条目，重启后所有域名首次查询即缓存命中。
+
+> **背景**：当前快照仅保存 NS 委派条目，恢复后每个域名的最终 A/AAAA 答案仍需 1-2 次上游往返。
+> 对于单机生产部署（应用 + Docker + 爬虫），重启后爬虫批量请求数千域名时，
+> 全部缓存 miss 会导致前几分钟吞吐量下降。全量快照可让爬虫重启后第一秒即全速运行。
+>
+> 原「学习型预热 Round 2」方案（衰减 LFU + `publicsuffix` + ~500 行代码）已废弃，
+> NS 缓存快照持久化已覆盖其 80-90% 的价值，剩余增量由本改动以 ~20 行代码完成。
 
 ### 设计
 
-- **统计粒度**：eTLD+1（注册域名级别，如 `github.com`）
-  - 使用 `golang.org/x/net/publicsuffix` 提取
-- **衰减 LFU**：每次查询 `score += 1.0`；后台每小时 `score × decay_factor`（默认 0.9）
-- **两级预热**：
-  - Round 1（已有）：13 个根服务器 TLD NS 查询
-  - Round 2（新增）：从学习文件读取热点域名，并发查询其 NS 记录
-- **学习文件**：JSON，覆写（非追加），防止磁盘无限增长；默认路径 `~/.rec53/learned.json`
+改动集中在 `server/snapshot.go` 的保存过滤逻辑：
 
-### 配置格式（新增 `learned_warmup:` 块）
+- **保存时**：移除"必须含 NS RR"的过滤条件，改为保存所有缓存条目（A/AAAA 答案、NS 委派、CNAME、负缓存等）
+- **恢复时**：逻辑不变——遍历条目、计算剩余 TTL、丢弃过期条目、`setCacheCopy()` 写入缓存
+- **无新配置项**：复用现有 `dns.cache_snapshot_path`
 
-```yaml
-learned_warmup:
-  enabled: true
-  file: "~/.rec53/learned.json"
-  top_n: 200            # 只预热得分最高的 N 个域名
-  decay_factor: 0.9     # 每小时衰减系数
-  flush_interval: 300   # 秒，每隔多久将内存中的统计覆写到文件
-```
+### 规模评估（单机生产场景）
+
+| 负载类型 | 缓存条目 | 快照文件 | 恢复耗时 |
+|----------|---------|---------|---------|
+| 纯应用（50-200 域名） | 1,000-4,000 | 1-4 MB | < 50 ms |
+| 应用 + 垂类爬虫（200-500 站点） | 4,000-10,000 | 4-10 MB | < 100 ms |
+| 应用 + 多垂类爬虫（500-2,000 站点） | 10,000-40,000 | 10-40 MB | < 500 ms |
 
 ### 任务清单
 
-- [ ] 引入依赖 `golang.org/x/net/publicsuffix`（`go.mod` + `go.sum`）
-- [ ] `server/learned_warmup.go` — 实现衰减 LFU 计数器（读/写/衰减/flush）
-- [ ] `server/warmup.go` — 在 Round 1 结束后启动 Round 2 并发 NS 查询
-- [ ] `cmd/rec53.go` — 扩展 `Config`，新增 `LearnedWarmup LearnedWarmupConfig`
-- [ ] 在 DNS 查询成功返回路径上记录 eTLD+1 命中（`state_query_upstream.go` 或 `state_machine.go`）
-- [ ] 单元测试 `server/learned_warmup_test.go`
+- [ ] `server/snapshot.go` — 移除 NS-only 过滤，保存全部缓存条目
+- [ ] 单元测试 `server/snapshot_test.go` — 验证 A/AAAA/CNAME/负缓存条目的保存与恢复
 - [ ] 更新 `docs/architecture.md`
 
 ---
@@ -171,6 +260,47 @@ goroutine 池**不适用**于本项目：查询路径本身是同步状态机，
 - [ ] DNS over HTTPS (DoH) 支持（RFC 8484）
 - [ ] 并发向多个 nameserver 查询（减少单点超时影响）
 - [ ] 查询频率限制（防滥用）
+
+---
+
+## 开放 Backlog
+
+以下为已识别但未排期的工作项，详见 `.rec53/BACKLOG.md`：
+
+### 功能增强（高优先级）
+
+| ID    | 标题                                    | 说明                                           |
+|-------|-----------------------------------------|------------------------------------------------|
+| O-016 | AAAA (IPv6) 上游选择支持                | 当前仅使用 A 记录选择上游 IP                   |
+| O-006 | TCP 重试截断响应（RFC 1035）            | UDP 响应被截断时自动 TCP 重试                  |
+
+### 安全与健壮性
+
+| ID    | 标题                                    | 说明                                           |
+|-------|-----------------------------------------|------------------------------------------------|
+| B-014 | Glue 无 bailiwick 校验                  | 防止缓存投毒风险                               |
+| O-022 | Response ID 未校验                      | 应验证 DNS 响应 ID 匹配请求                    |
+| O-018 | 状态机死循环保护增强                    | 当前仅 MaxIterations=50，可增加更细粒度检测    |
+
+### 缓存优化
+
+| ID    | 标题                                    | 说明                                           |
+|-------|-----------------------------------------|------------------------------------------------|
+| O-021 | 无 glue 时委派 NS 不缓存               | 避免缓存不完整的委派信息                       |
+| O-005 | 负缓存 TTL 可配置化                    | `DefaultNegativeCacheTTL=60` 应从配置读取      |
+
+### 测试覆盖增强
+
+| ID    | 标题                                    | 优先级 |
+|-------|-----------------------------------------|--------|
+| T-003 | 负缓存 E2E 测试                        | High   |
+| T-004 | 查询预算耗尽测试                        | High   |
+| T-005 | 超时重试与服务器切换测试                | High   |
+| T-006 | SERVFAIL 与服务器黑名单测试             | High   |
+| T-007 | Response ID 不匹配测试                  | Medium |
+| T-008 | CNAME + NXDOMAIN 组合测试               | Medium |
+| T-009 | Referral 循环检测测试                   | Medium |
+| T-010 | 全部 NS 不可达测试                      | Medium |
 
 ---
 

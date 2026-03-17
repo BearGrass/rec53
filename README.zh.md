@@ -24,6 +24,60 @@
 
 ## 快速开始
 
+### 使用 rec53ctl（推荐）
+
+`rec53ctl` 是 rec53 的单入口运维脚本，覆盖构建、运行、安装、升级、卸载等完整生命周期。
+推荐流程是先通过 `./generate-config.sh` 生成配置模板，检查并修改 `config.yaml`，再使用 `rec53ctl` 运行或安装服务。
+
+```bash
+# 1. 生成默认配置（首次运行）
+./generate-config.sh
+
+# 2. 按环境修改 config.yaml
+
+# 3. 构建二进制（输出到 dist/rec53）
+./rec53ctl build
+
+# 4. 前台运行，便于验证配置
+./rec53ctl run
+
+# 5. 安装为 systemd 服务（需要 root）
+sudo ./rec53ctl install
+
+# 6. 升级运行中的服务（构建 + 热替换 + 自动回滚）
+sudo ./rec53ctl upgrade
+
+# 7. 卸载服务和文件（需要 root）
+sudo ./rec53ctl uninstall
+```
+
+常用选项：
+
+```bash
+# 安装时强制覆盖已有 /etc/rec53/config.yaml
+sudo ./rec53ctl install --force-config
+
+# 跳过编译，直接用已有 dist/rec53 升级
+SKIP_BUILD=1 sudo ./rec53ctl upgrade
+
+# 使用自定义配置文件前台运行
+CONFIG_FILE=./my-config.yaml ./rec53ctl run
+```
+
+环境变量可覆盖默认路径：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `INSTALL_DIR` | `/usr/local/bin` | 二进制安装目录 |
+| `CONFIG_DIR` | `/etc/rec53` | 配置目录 |
+| `BINARY_NAME` | `rec53` | 二进制文件名 |
+| `SERVICE_NAME` | `rec53` | systemd 服务名 |
+| `BUILD_OUTPUT` | `dist/rec53` | 构建输出路径 |
+
+### 手动运行（不使用 rec53ctl）
+
+手动运行时也建议沿用同样的配置流程：先生成 `config.yaml`，按环境修改后，再通过 `--config` 启动 `rec53`。
+
 ```bash
 # 构建
 go build -o rec53 ./cmd

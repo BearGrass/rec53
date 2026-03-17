@@ -192,7 +192,7 @@ Update these docs **in the same commit** as the code change:
 - New package/dir → `docs/architecture.md`
 - New dependency → this file + `docs/architecture.md`
 - New patterns → `.rec53/CONVENTIONS.md`
-- User-facing changes → `README.md`
+- User-facing changes → `README.md` + `README.zh.md`
 
 Related: `docs/architecture.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
 

@@ -16,6 +16,7 @@ import (
 type server struct {
 	listen       string
 	warmupCfg    WarmupConfig
+	snapshotCfg  SnapshotConfig
 	hostsMap     map[string]*dns.Msg // pre-compiled "fqdn:qtype" → authoritative response
 	hostsNames   map[string]bool     // set of FQDNs in hosts (for NODATA detection)
 	forwardZones []ForwardZone       // zones sorted by zone length desc (longest match first)
@@ -52,12 +53,13 @@ func NewServerWithConfig(listen string, warmupCfg WarmupConfig) *server {
 // NewServerWithFullConfig creates a server with hosts and forwarding configuration.
 // Hosts entries are pre-compiled into a lookup map; forwarding zones are sorted by
 // zone length descending for longest-suffix matching.
-func NewServerWithFullConfig(listen string, warmupCfg WarmupConfig, hosts []HostEntry, forwarding []ForwardZone) *server {
+func NewServerWithFullConfig(listen string, warmupCfg WarmupConfig, snapshotCfg SnapshotConfig, hosts []HostEntry, forwarding []ForwardZone) *server {
 	hostsMap, hostsNames := compileHostsEntries(hosts)
 	fwdZones := sortForwardZones(forwarding)
 	s := &server{
 		listen:       listen,
 		warmupCfg:    warmupCfg,
+		snapshotCfg:  snapshotCfg,
 		hostsMap:     hostsMap,
 		hostsNames:   hostsNames,
 		forwardZones: fwdZones,
@@ -290,6 +292,15 @@ func (s *server) Shutdown(ctx context.Context) error {
 	// Shutdown IP pool prefetch goroutines
 	if err := globalIPPool.Shutdown(ctx); err != nil {
 		errs = append(errs, err)
+	}
+
+	// Write NS cache snapshot on graceful shutdown (SIGTERM, SIGINT, or programmatic Shutdown).
+	// Runs after listeners and IP pool are stopped to avoid concurrent cache writes.
+	// Write failures are logged but do not affect the Shutdown return value.
+	if s.snapshotCfg.Enabled {
+		if err := SaveSnapshot(s.snapshotCfg); err != nil {
+			monitor.Rec53Log.Errorf("[SNAPSHOT] failed to save snapshot on shutdown: %v", err)
+		}
 	}
 
 	if len(errs) > 0 {

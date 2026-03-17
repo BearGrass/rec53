@@ -17,6 +17,7 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 - **EDNS0 & UDP Truncation** — 4096-byte EDNS0 buffer; TC flag with progressive answer trimming on UDP overflow
 - **TTL-based Caching** — deep-copy safe cache with negative caching (NXDOMAIN/NODATA)
 - **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
+- **NS Cache Snapshot** — persists NS delegation cache on shutdown and restores it before first query, eliminating cold-start latency after restart
 - **Prometheus Metrics** — per-query and per-nameserver observability
 - **Graceful Shutdown** — context-based cancellation with 5-second timeout
 
@@ -27,6 +28,7 @@ A recursive DNS resolver implemented in Go with state machine architecture, IP q
 ### Using rec53ctl (recommended)
 
 `rec53ctl` is the single-entry operational script covering the full lifecycle of rec53.
+Recommended workflow: generate a config template with `./generate-config.sh`, review and edit `config.yaml`, then use `rec53ctl` to run or install the service.
 
 ```bash
 # 1. Generate default config (first run only)
@@ -72,6 +74,8 @@ Override default paths via environment variables:
 | `BUILD_OUTPUT` | `dist/rec53` | Build output path |
 
 ### Manual (without rec53ctl)
+
+Manual usage follows the same config flow: generate `config.yaml` first, adjust it for your environment, then start `rec53` with `--config`.
 
 ```bash
 # Build
@@ -159,7 +163,19 @@ forwarding:
   - zone: internal
     upstreams:
       - 10.0.0.53:53
+
+# NS cache snapshot: persist NS delegation entries on shutdown and restore on startup.
+# Eliminates cold-start latency (typically 300ms+) caused by rebuilding the NS
+# delegation chain after a restart. Disabled by default; file must be set to enable.
+# snapshot:
+#   enabled: false
+#   file: ""   # e.g. /var/lib/rec53/ns-cache.json  or  ~/.rec53/ns-cache.json
 ```
+
+| `snapshot` field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable snapshot save/restore |
+| `file` | string | `""` | Path to snapshot file; empty string disables even if `enabled: true` |
 
 By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registrations. To use a custom list, specify `warmup.tlds`. Leave empty for the curated defaults.
 
