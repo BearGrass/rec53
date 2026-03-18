@@ -531,6 +531,7 @@ func TestLocalhostQueries(t *testing.T) {
 
 // BenchmarkIntegrationQuery benchmarks end-to-end queries.
 func BenchmarkIntegrationQuery(b *testing.B) {
+	b.ReportAllocs()
 	s := server.NewServer("127.0.0.1:0")
 	errChan := s.Run()
 	defer func() {

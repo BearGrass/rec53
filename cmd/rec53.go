@@ -35,6 +35,13 @@ type Config struct {
 	Snapshot   server.SnapshotConfig `yaml:"snapshot"`
 	Hosts      []server.HostEntry    `yaml:"hosts"`
 	Forwarding []server.ForwardZone  `yaml:"forwarding"`
+	Debug      DebugConfig           `yaml:"debug"`
+}
+
+// DebugConfig holds debug/profiling configuration
+type DebugConfig struct {
+	PprofEnabled bool   `yaml:"pprof_enabled"`
+	PprofListen  string `yaml:"pprof_listen"`
 }
 
 // DNSConfig represents DNS server configuration
@@ -74,6 +81,11 @@ func loadConfig(configPath string) (*Config, error) {
 
 	// Apply TLD list configuration: if custom TLDs are provided, use them; otherwise use curated defaults
 	cfg.Warmup.TLDs = server.LoadTLDList(cfg.Warmup.TLDs)
+
+	// Apply debug defaults: pprof listen address defaults to 127.0.0.1:6060 if not set
+	if cfg.Debug.PprofListen == "" {
+		cfg.Debug.PprofListen = "127.0.0.1:6060"
+	}
 
 	// Apply warmup concurrency configuration:
 	// If not explicitly set in config (concurrency == 0), use the dynamically calculated default.
@@ -299,6 +311,16 @@ func main() {
 	monitor.InitMetricWithAddr(cfg.DNS.Metric)
 	monitor.Rec53Log.Debugf("metrics server initialized on %s", cfg.DNS.Metric)
 
+	// Start pprof server if enabled (default: off, listen on 127.0.0.1:6060).
+	// Uses a dedicated context cancelled on shutdown signal.
+	pprofCancel := func() {} // no-op if pprof not enabled
+	if cfg.Debug.PprofEnabled {
+		var pprofCtx context.Context
+		pprofCtx, pprofCancel = context.WithCancel(context.Background())
+		monitor.StartPprofServer(pprofCtx, cfg.Debug.PprofListen)
+		monitor.Rec53Log.Infof("pprof server started on %s", cfg.Debug.PprofListen)
+	}
+
 	// Second panic recovery layer — after logger is available, panics are logged
 	// via monitor.Rec53Log so they appear in the configured log output.
 	defer func() {
@@ -332,6 +354,9 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	waitForSignal(sig, errChan)
+
+	// Cancel pprof context first (triggers graceful pprof server shutdown)
+	pprofCancel()
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

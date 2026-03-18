@@ -182,6 +182,40 @@ By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registra
 
 ---
 
+## Profiling / pprof
+
+rec53 includes a built-in pprof HTTP endpoint for heap, CPU, and goroutine profiling. It is **off by default** and runs on a separate HTTP server from the metrics endpoint.
+
+**Configuration** (`config.yaml`):
+
+```yaml
+debug:
+  pprof_enabled: true              # default: false
+  pprof_listen: "127.0.0.1:6060"   # default: 127.0.0.1:6060
+```
+
+> **Security**: Never bind `pprof_listen` to `0.0.0.0` in production. pprof exposes internal runtime data. Use SSH tunneling for remote access: `ssh -L 6060:127.0.0.1:6060 user@server`.
+
+**Usage**:
+
+```bash
+# Heap profile (memory allocations)
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+
+# CPU profile (30-second sample)
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30
+
+# Goroutine dump
+go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine
+
+# Browse all profiles in browser
+open http://127.0.0.1:6060/debug/pprof/
+```
+
+The pprof server participates in graceful shutdown — it stops accepting new requests when rec53 receives SIGINT/SIGTERM.
+
+---
+
 ## Docker
 
 ```bash

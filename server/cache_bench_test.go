@@ -19,6 +19,7 @@ func init() {
 
 // BenchmarkCacheKey measures the cost of building a cache key string.
 func BenchmarkCacheKey(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = getCacheKey("example.com.", dns.TypeA)
@@ -35,6 +36,7 @@ func BenchmarkCacheKey(b *testing.B) {
 
 // BenchmarkCacheGetHit measures getCacheCopyByType on a cache hit (includes msg.Copy).
 func BenchmarkCacheGetHit(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 	msg := &dns.Msg{}
 	msg.SetQuestion("example.com.", dns.TypeA)
@@ -58,6 +60,7 @@ func BenchmarkCacheGetHit(b *testing.B) {
 
 // BenchmarkCacheGetMiss measures getCacheCopyByType when the key does not exist.
 func BenchmarkCacheGetMiss(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 
 	b.ResetTimer()
@@ -77,6 +80,7 @@ func BenchmarkCacheGetMiss(b *testing.B) {
 // BenchmarkCacheSet measures setCacheCopyByType (includes msg.Copy and lock).
 // Uses a unique key per iteration to avoid go-cache overwrite short-circuiting.
 func BenchmarkCacheSet(b *testing.B) {
+	b.ReportAllocs()
 	msg := &dns.Msg{}
 	msg.SetQuestion("example.com.", dns.TypeA)
 	rr, _ := dns.NewRR("example.com. 60 IN A 1.2.3.4")
@@ -100,6 +104,7 @@ func BenchmarkCacheSet(b *testing.B) {
 // BenchmarkCacheConcurrent exercises concurrent mixed reads and writes
 // to verify RWMutex correctness. Run with -race.
 func BenchmarkCacheConcurrent(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 	msg := &dns.Msg{}
 	msg.SetQuestion("concurrent.example.com.", dns.TypeA)

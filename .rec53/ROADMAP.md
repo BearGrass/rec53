@@ -194,42 +194,58 @@
 
 ---
 
-## v0.4.0 — `sync.Pool` 内存优化
+## v0.4.0 — 可观测性 + 分配基线 ✅
 
-**目标**：通过对象池复用 `dns.Msg` 等高频分配对象，降低 GC 压力和 Stop-the-World 暂停时间。
+**目标**：建立内存分配的量化基线和生产可观测能力，为后续性能优化提供数据驱动的决策依据。
 
 ### 背景
 
-当前代码无任何 `sync.Pool` 使用。每次缓存 miss 的完整查询路径上会分配 3~4 个 `dns.Msg`：
-入口 `reply`、上游查询 `newQuery`、Happy Eyeballs 两次 `Copy()`、NS 解析每个 goroutine 2 个。
-高频写入的 `getCacheCopy()`/`setCacheCopy()` 也会深拷贝整个 `dns.Msg`（含 RR slice），
-是内存分配的主要来源。
-
-goroutine 池**不适用**于本项目：查询路径本身是同步状态机，临时 goroutine 生命周期 ms 级，
-在终端低 QPS 场景下创建代价可忽略；强行池化会大幅提升代码复杂度而收益极低。
-
-### 优化项（按优先级）
-
-| 优先级 | 对象 | 当前方式 | 优化方式 |
-|--------|------|----------|----------|
-| 高 | `dns.Msg` | `new(dns.Msg)` / `msg.Copy()` 每次堆分配 | `sync.Pool` + `msg.Reset()` 后归还 |
-| 中 | 全局入站 semaphore | 无上限 | `make(chan struct{}, N)` 防洪水攻击 |
-| 低 | state 结构体 | `new()` 每次迭代分配（24 字节） | pprof 确认热点后再决定是否池化 |
-
-### 设计约束
-
-- `sync.Pool` 中取出的 `dns.Msg` 必须先调用 `SetReply()` 或手动 `Reset()`，再使用
-- 归还前必须确保不再有任何引用持有该 `dns.Msg`（尤其注意 cache 写入路径已做 `Copy()`）
-- Happy Eyeballs 的 `query.Copy()` 在 goroutine 竞速结束后归还到 pool
+v0.4.0 最初规划为 `sync.Pool` 内存优化，经评估后调整方向（见下方"已评估方案"）。
+当前 26 个 benchmark 均未报告 alloc 指标，缺少分配基线；生产环境无 pprof 端点，无法定位实际热点。
+先解决可观测性问题，再用数据决定是否以及在哪里优化。
 
 ### 任务清单
 
-- [ ] `server/msg_pool.go` — 封装 `dns.Msg` 的 `sync.Pool`，提供 `AcquireMsg()` / `ReleaseMsg()` API
-- [ ] `server/server.go` — 入口 `reply` 改用 `AcquireMsg()`，`ServeDNS` 返回后 `ReleaseMsg()`
-- [ ] `server/state_query_upstream.go` — `newQuery`、Happy Eyeballs Copy、NS 解析的 `req/resp` 改用 pool
-- [ ] `server/state_machine.go` — 全局入站 semaphore（容量可配置，默认 512）
-- [ ] 单元测试 `server/msg_pool_test.go`（验证并发场景下无 double-free）
-- [ ] 用 `go test -bench` 前后对比 `BenchmarkServeDNS` 分配次数（`-benchmem`）
+**1. 全量 benchmark 加 `b.ReportAllocs()`（建立 alloc baseline）**
+
+- [x] `server/ip_pool_test.go` — 6 个 benchmark 加 `b.ReportAllocs()`
+- [x] `server/state_machine_bench_test.go` — 4 个 benchmark 加 `b.ReportAllocs()`
+- [x] `server/cache_bench_test.go` — 5 个 benchmark 加 `b.ReportAllocs()`
+- [x] `e2e/first_packet_bench_test.go` — 5 个 benchmark 加 `b.ReportAllocs()`
+- [x] `e2e/error_test.go` — `BenchmarkIntegrationQuery` 加 `b.ReportAllocs()`
+- [x] `monitor/metric_bench_test.go` — 4 个 benchmark 加 `b.ReportAllocs()`
+
+**2. 接入受控 pprof（用真实负载定位热点）**
+
+- [x] `monitor/pprof.go` — 新增独立 pprof HTTP 端点
+- [x] 默认关闭，通过配置项 `debug.pprof_enabled: true` 开启
+- [x] 开启时默认仅监听 `127.0.0.1:6060`，防止暴露在公网
+- [x] pprof HTTP server 纳入服务生命周期（context 取消 + Shutdown 优雅退出）
+- [x] `README.md` / `README.zh.md` 同步更新 pprof 使用说明
+
+**3. `updatePercentiles` 固定数组微优化（低风险 quick win）**
+
+- [x] `server/ip_pool_quality_v2.go` — `updatePercentiles()` 改用 `[64]int32` 栈数组 + `slices.Sort`
+- [x] 验证结果：allocs/op 从 3 降至 0，ns/op 从 1480 降至 ~700
+
+**4. Cache COW 设计与调用方只读审计（仅文档，不实施）**
+
+- [x] 完成 `getCacheCopy` / `getCacheCopyByType` 全部调用方的可变性审计清单 → `docs/cache-cow-audit.md`
+- [x] 输出 Cache COW 设计草案，包含：3 个方案（ReadOnlyMsg、Linter 契约、选择性移除）+ 风险评估
+- [x] 实施硬门槛：仅当 pprof 证明 cache `Copy()` 占总分配 >30% 时才进入代码阶段
+
+### 已评估、暂不实施的方案
+
+**`sync.Pool` 池化 `dns.Msg`**
+
+评估结论：`dns.Msg` 生命周期跨越多个状态机步骤和 goroutine（特别是 Happy Eyeballs 竞速路径），
+归还时机难以追踪，易引入 use-after-free 和复用污染。当前部署规模（单机本地递归解析器，<1000 QPS）
+下 GC 不构成瓶颈。维护风险远大于性能收益。
+
+**`sync.Pool` 池化 `updatePercentiles` 临时 slice**
+
+评估结论：ring buffer 上限固定 64 元素（256 bytes），用 `[64]int32` 栈数组即可实现零分配，
+无需引入 `sync.Pool` 的 Get/Put 开销和并发复杂度。
 
 ---
 

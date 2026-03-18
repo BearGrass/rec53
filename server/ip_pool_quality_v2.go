@@ -1,7 +1,7 @@
 package server
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -96,30 +96,29 @@ func (iq *IPQualityV2) updatePercentiles() {
 	}
 
 	// Copy samples for sorting (must sort to compute percentiles)
-	samples := make([]int32, iq.sampleCount)
+	var buf [64]int32
+	sorted := buf[:iq.sampleCount]
 	for i := 0; i < int(iq.sampleCount); i++ {
-		samples[i] = iq.samples[i]
+		sorted[i] = iq.samples[i]
 	}
-	sort.Slice(samples, func(i, j int) bool {
-		return samples[i] < samples[j]
-	})
+	slices.Sort(sorted)
 
 	// Calculate P50 (median)
-	iq.p50 = samples[iq.sampleCount/2]
+	iq.p50 = sorted[iq.sampleCount/2]
 
 	// Calculate P95
 	idx95 := int(float64(iq.sampleCount) * 0.95)
 	if idx95 >= int(iq.sampleCount) {
 		idx95 = int(iq.sampleCount) - 1
 	}
-	iq.p95 = samples[idx95]
+	iq.p95 = sorted[idx95]
 
 	// Calculate P99
 	idx99 := int(float64(iq.sampleCount) * 0.99)
 	if idx99 >= int(iq.sampleCount) {
 		idx99 = int(iq.sampleCount) - 1
 	}
-	iq.p99 = samples[idx99]
+	iq.p99 = sorted[idx99]
 }
 
 // RecordFailure records a failure and applies exponential backoff strategy

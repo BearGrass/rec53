@@ -19,6 +19,7 @@ func init() {
 // cache-hit path: STATE_INIT → CACHE_LOOKUP (hit) → RETURN_RESP.
 // No network I/O is involved.
 func BenchmarkStateMachineCacheHit(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 
 	// Pre-warm cache with a valid A response.
@@ -50,6 +51,7 @@ func BenchmarkStateMachineCacheHit(b *testing.B) {
 // BenchmarkStateInitHandle measures the stateInitState.handle FORMERR fast path
 // (request with no question sections).
 func BenchmarkStateInitHandle(b *testing.B) {
+	b.ReportAllocs()
 	ctx := context.Background()
 
 	// Request with zero questions triggers FORMERR immediately.
@@ -73,6 +75,7 @@ func BenchmarkStateInitHandle(b *testing.B) {
 
 // BenchmarkCacheLookupHit measures cacheLookupState.handle on a cache hit.
 func BenchmarkCacheLookupHit(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 
 	req := &dns.Msg{}
@@ -103,6 +106,7 @@ func BenchmarkCacheLookupHit(b *testing.B) {
 
 // BenchmarkCacheLookupMiss measures cacheLookupState.handle on a cache miss.
 func BenchmarkCacheLookupMiss(b *testing.B) {
+	b.ReportAllocs()
 	FlushCacheForTest()
 
 	req := &dns.Msg{}

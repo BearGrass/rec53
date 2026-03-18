@@ -183,6 +183,40 @@ forwarding:
 
 ---
 
+## 性能分析 / pprof
+
+rec53 内置受控的 pprof HTTP 端点，支持堆内存、CPU 和 goroutine 分析。**默认关闭**，使用独立 HTTP server（与 metrics 端口分离）。
+
+**配置** (`config.yaml`):
+
+```yaml
+debug:
+  pprof_enabled: true              # 默认: false
+  pprof_listen: "127.0.0.1:6060"   # 默认: 127.0.0.1:6060
+```
+
+> **安全提示**: 切勿在生产环境将 `pprof_listen` 绑定到 `0.0.0.0`。pprof 会暴露运行时内部数据。远程访问请使用 SSH 隧道: `ssh -L 6060:127.0.0.1:6060 user@server`。
+
+**使用方式**:
+
+```bash
+# 堆内存分析（内存分配热点）
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+
+# CPU 分析（采样 30 秒）
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30
+
+# Goroutine 转储
+go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine
+
+# 浏览器查看所有 profile
+open http://127.0.0.1:6060/debug/pprof/
+```
+
+pprof server 参与优雅关闭流程——当 rec53 收到 SIGINT/SIGTERM 时停止接受新请求。
+
+---
+
 ## Docker
 
 ```bash

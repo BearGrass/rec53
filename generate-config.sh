@@ -129,6 +129,17 @@ warmup:
 # snapshot:
 #   enabled: false
 #   file: ""       # e.g. /var/lib/rec53/cache-snapshot.json
+
+# debug: Development and profiling tools.
+# pprof_enabled: Start a pprof HTTP endpoint for heap/cpu/goroutine profiling.
+#   Default: false (off).  Only enable for debugging sessions.
+# pprof_listen: Address the pprof server binds to.
+#   Default: 127.0.0.1:6060 (localhost only — do NOT bind 0.0.0.0 in production).
+#   Access via: go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+#
+# debug:
+#   pprof_enabled: false
+#   pprof_listen: "127.0.0.1:6060"
 EOF
 
 if [ $? -eq 0 ]; then

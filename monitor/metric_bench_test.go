@@ -10,6 +10,7 @@ func init() {
 
 // BenchmarkInCounterAdd measures the cost of incrementing the InCounter.
 func BenchmarkInCounterAdd(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Rec53Metric.InCounterAdd("iter", "example.com.", "A")
@@ -26,6 +27,7 @@ func BenchmarkInCounterAdd(b *testing.B) {
 
 // BenchmarkOutCounterAdd measures the cost of incrementing the OutCounter (4 labels).
 func BenchmarkOutCounterAdd(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Rec53Metric.OutCounterAdd("iter", "example.com.", "A", "NOERROR")
@@ -42,6 +44,7 @@ func BenchmarkOutCounterAdd(b *testing.B) {
 
 // BenchmarkLatencyHistogram measures the cost of recording a latency observation.
 func BenchmarkLatencyHistogram(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Rec53Metric.LatencyHistogramObserve("iter", "example.com.", "A", "NOERROR", 1.5)
@@ -58,6 +61,7 @@ func BenchmarkLatencyHistogram(b *testing.B) {
 
 // BenchmarkIPQualityV2GaugeSet measures the cost of setting three gauges (P50/P95/P99).
 func BenchmarkIPQualityV2GaugeSet(b *testing.B) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Rec53Metric.IPQualityV2GaugeSet("1.2.3.4", 10, 20, 30)

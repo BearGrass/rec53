@@ -122,6 +122,7 @@ func fpQueryOnce(b *testing.B, client *dns.Client, addr, domain string) time.Dur
 //
 // This represents the worst-case first-packet scenario.
 func BenchmarkFirstPacketNoWarmup(b *testing.B) {
+	b.ReportAllocs()
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
 	}
@@ -174,6 +175,7 @@ func BenchmarkFirstPacketNoWarmup(b *testing.B) {
 // is warm at the TLD level, IP pool contains real RTT data, but the specific
 // domain has never been queried before.
 func BenchmarkFirstPacketWithWarmup(b *testing.B) {
+	b.ReportAllocs()
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
 	}
@@ -231,6 +233,7 @@ func BenchmarkFirstPacketWithWarmup(b *testing.B) {
 // difference between IPPoolOnly and NoWarmup reflects IP pool benefit alone;
 // the difference between WithWarmup and IPPoolOnly reflects zone cache benefit.
 func BenchmarkFirstPacketIPPoolOnly(b *testing.B) {
+	b.ReportAllocs()
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
 	}
@@ -286,6 +289,7 @@ func BenchmarkFirstPacketIPPoolOnly(b *testing.B) {
 // Use this as a baseline to quantify how much slower first-packet resolution
 // is compared to cached resolution.
 func BenchmarkFirstPacketCacheHit(b *testing.B) {
+	b.ReportAllocs()
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
 	}
@@ -335,6 +339,7 @@ func BenchmarkFirstPacketCacheHit(b *testing.B) {
 //	go test -v -run='^$' -bench=BenchmarkFirstPacketComparison \
 //	    -benchtime=1x -timeout=180s ./e2e/...
 func BenchmarkFirstPacketComparison(b *testing.B) {
+	b.ReportAllocs()
 	if testing.Short() {
 		b.Skip("skipping network benchmark in short mode")
 	}

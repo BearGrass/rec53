@@ -769,6 +769,7 @@ func TestIPPool_GetIPQualityV2(t *testing.T) {
 // BenchmarkGetBestIPsV2_1000IPs benchmarks IP selection with 1000 IPs
 // Target: < 1ms per operation
 func BenchmarkGetBestIPsV2_1000IPs(b *testing.B) {
+	b.ReportAllocs()
 	ipp := NewIPPool()
 
 	// Setup 1000 IPs with varying latencies and states
@@ -802,6 +803,7 @@ func BenchmarkGetBestIPsV2_1000IPs(b *testing.B) {
 
 // BenchmarkGetBestIPsV2_100IPs benchmarks IP selection with 100 IPs
 func BenchmarkGetBestIPsV2_100IPs(b *testing.B) {
+	b.ReportAllocs()
 	ipp := NewIPPool()
 
 	// Setup 100 IPs with varying latencies
@@ -830,6 +832,7 @@ func BenchmarkGetBestIPsV2_100IPs(b *testing.B) {
 
 // BenchmarkGetBestIPsV2_10IPs benchmarks IP selection with 10 IPs
 func BenchmarkGetBestIPsV2_10IPs(b *testing.B) {
+	b.ReportAllocs()
 	ipp := NewIPPool()
 
 	// Setup 10 IPs
@@ -858,6 +861,7 @@ func BenchmarkGetBestIPsV2_10IPs(b *testing.B) {
 
 // BenchmarkRecordLatency benchmarks latency recording
 func BenchmarkRecordLatency(b *testing.B) {
+	b.ReportAllocs()
 	iqv2 := NewIPQualityV2()
 
 	b.ResetTimer()
@@ -872,6 +876,7 @@ func BenchmarkRecordLatency(b *testing.B) {
 
 // BenchmarkGetScore benchmarks composite score calculation
 func BenchmarkGetScore(b *testing.B) {
+	b.ReportAllocs()
 	iqv2 := NewIPQualityV2()
 
 	// Pre-populate with samples
@@ -892,6 +897,7 @@ func BenchmarkGetScore(b *testing.B) {
 // BenchmarkRecordFailure measures IPQualityV2.RecordFailure across state transitions
 // (healthy → degraded → failed). Uses a local instance to avoid global pool mutations.
 func BenchmarkRecordFailure(b *testing.B) {
+	b.ReportAllocs()
 	iqv2 := NewIPQualityV2()
 
 	b.ResetTimer()

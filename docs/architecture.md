@@ -447,6 +447,27 @@ snapshot:
 
 ---
 
+## Core Subsystem: Observability (monitor)
+
+### Metrics
+
+`monitor/metric.go` exposes Prometheus counters, histograms, and gauges via a dedicated HTTP endpoint (default `:9999/metric`). `InitMetricWithAddr(addr)` starts the listener; `InitMetricForTest()` provides a no-op version for tests.
+
+### Logging
+
+`monitor/log.go` initializes a `zap.SugaredLogger` with file rotation (via lumberjack). The global `Rec53Log` is used throughout the codebase. All log lines use `[PREFIX]` tags for easy grep (e.g. `[STATE]`, `[PRUNE]`, `[PPROF]`).
+
+### pprof
+
+`monitor/pprof.go` provides an optional pprof HTTP endpoint for heap, CPU, and goroutine profiling. Key properties:
+
+- **Default off**: controlled by `debug.pprof_enabled` in config
+- **Separate server**: independent `http.Server` with its own mux, not shared with metrics
+- **Localhost only**: default bind to `127.0.0.1:6060`
+- **Lifecycle-managed**: receives a `context.Context`, gracefully shuts down on cancellation
+
+---
+
 ## Design Constraints
 
 - Single binary deployment
