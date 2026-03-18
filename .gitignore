@@ -11,6 +11,7 @@
 
 # Build and Runtime Artifacts
 rec53
+tools/dnsperf/dnsperf
 *.o
 *.a
 *.so
