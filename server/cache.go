@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/miekg/dns"
@@ -18,7 +18,7 @@ func newCache() *cache.Cache {
 // getCacheKey generates a cache key that includes both domain name and query type.
 // This ensures different record types for the same domain are cached separately.
 func getCacheKey(name string, qtype uint16) string {
-	return fmt.Sprintf("%s:%d", name, qtype)
+	return name + ":" + strconv.FormatUint(uint64(qtype), 10)
 }
 
 func getCache(key string) (*dns.Msg, bool) {

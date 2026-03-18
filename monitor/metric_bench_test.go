@@ -13,7 +13,7 @@ func BenchmarkInCounterAdd(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Rec53Metric.InCounterAdd("iter", "example.com.", "A")
+		Rec53Metric.InCounterAdd("iter", "A")
 	}
 	b.StopTimer()
 
@@ -30,7 +30,7 @@ func BenchmarkOutCounterAdd(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Rec53Metric.OutCounterAdd("iter", "example.com.", "A", "NOERROR")
+		Rec53Metric.OutCounterAdd("iter", "A", "NOERROR")
 	}
 	b.StopTimer()
 
@@ -47,7 +47,7 @@ func BenchmarkLatencyHistogram(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Rec53Metric.LatencyHistogramObserve("iter", "example.com.", "A", "NOERROR", 1.5)
+		Rec53Metric.LatencyHistogramObserve("iter", "A", "NOERROR", 1.5)
 	}
 	b.StopTimer()
 

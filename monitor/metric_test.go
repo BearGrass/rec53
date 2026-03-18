@@ -31,25 +31,17 @@ func TestMetric_InCounterAdd(t *testing.T) {
 	m.Register()
 
 	// Add counter
-	m.InCounterAdd("request", "example.com.", "A")
+	m.InCounterAdd("request", "A")
 
 	// Verify the counter was incremented
-	count := testutil.ToFloat64(InCounter.With(prometheus.Labels{
-		"stage": "request",
-		"name":  "example.com.",
-		"type":  "A",
-	}))
+	count := testutil.ToFloat64(InCounter.WithLabelValues("request", "A"))
 	if count != 1 {
 		t.Errorf("Expected counter to be 1, got %f", count)
 	}
 
 	// Add again
-	m.InCounterAdd("request", "example.com.", "A")
-	count = testutil.ToFloat64(InCounter.With(prometheus.Labels{
-		"stage": "request",
-		"name":  "example.com.",
-		"type":  "A",
-	}))
+	m.InCounterAdd("request", "A")
+	count = testutil.ToFloat64(InCounter.WithLabelValues("request", "A"))
 	if count != 2 {
 		t.Errorf("Expected counter to be 2, got %f", count)
 	}
@@ -63,27 +55,17 @@ func TestMetric_OutCounterAdd(t *testing.T) {
 	m.Register()
 
 	// Add counter with response code
-	m.OutCounterAdd("response", "example.com.", "A", "NOERROR")
+	m.OutCounterAdd("response", "A", "NOERROR")
 
 	// Verify the counter was incremented
-	count := testutil.ToFloat64(OutCounter.With(prometheus.Labels{
-		"stage": "response",
-		"name":  "example.com.",
-		"type":  "A",
-		"code":  "NOERROR",
-	}))
+	count := testutil.ToFloat64(OutCounter.WithLabelValues("response", "A", "NOERROR"))
 	if count != 1 {
 		t.Errorf("Expected counter to be 1, got %f", count)
 	}
 
 	// Test different response code
-	m.OutCounterAdd("response", "example.com.", "A", "SERVFAIL")
-	count = testutil.ToFloat64(OutCounter.With(prometheus.Labels{
-		"stage": "response",
-		"name":  "example.com.",
-		"type":  "A",
-		"code":  "SERVFAIL",
-	}))
+	m.OutCounterAdd("response", "A", "SERVFAIL")
+	count = testutil.ToFloat64(OutCounter.WithLabelValues("response", "A", "SERVFAIL"))
 	if count != 1 {
 		t.Errorf("Expected SERVFAIL counter to be 1, got %f", count)
 	}
@@ -97,25 +79,19 @@ func TestMetric_LatencyHistogramObserve(t *testing.T) {
 	m.Register()
 
 	// Record latency - this should not panic
-	m.LatencyHistogramObserve("query", "example.com.", "A", "NOERROR", 50.5)
+	m.LatencyHistogramObserve("query", "A", "NOERROR", 50.5)
 
 	// Record another latency
-	m.LatencyHistogramObserve("query", "example.com.", "A", "NOERROR", 100.0)
+	m.LatencyHistogramObserve("query", "A", "NOERROR", 100.0)
 
 	// Verify histogram is registered and working by checking the metric exists
-	// Note: Observer doesn't implement Collector, so we verify via the histogram vec
-	observer := LatencyHistogramObserver.With(prometheus.Labels{
-		"stage": "query",
-		"name":  "example.com.",
-		"type":  "A",
-		"code":  "NOERROR",
-	})
+	observer := LatencyHistogramObserver.WithLabelValues("query", "A", "NOERROR")
 	if observer == nil {
 		t.Error("Expected histogram observer to be non-nil")
 	}
 
 	// Record one more to ensure no panic
-	m.LatencyHistogramObserve("query", "example.com.", "A", "NOERROR", 200.0)
+	m.LatencyHistogramObserve("query", "A", "NOERROR", 200.0)
 }
 
 // TestMetric_IPQualityV2GaugeSet tests the IPQualityV2GaugeSet method for V2 percentile metrics
@@ -129,25 +105,19 @@ func TestMetric_IPQualityV2GaugeSet(t *testing.T) {
 	m.IPQualityV2GaugeSet("192.0.2.1", 50.0, 150.0, 250.0)
 
 	// Verify P50 gauge was set
-	p50Value := testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p50Value := testutil.ToFloat64(IPQualityV2_P50.WithLabelValues("192.0.2.1"))
 	if p50Value != 50.0 {
 		t.Errorf("Expected P50 gauge to be 50.0, got %f", p50Value)
 	}
 
 	// Verify P95 gauge was set
-	p95Value := testutil.ToFloat64(IPQualityV2_P95.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p95Value := testutil.ToFloat64(IPQualityV2_P95.WithLabelValues("192.0.2.1"))
 	if p95Value != 150.0 {
 		t.Errorf("Expected P95 gauge to be 150.0, got %f", p95Value)
 	}
 
 	// Verify P99 gauge was set
-	p99Value := testutil.ToFloat64(IPQualityV2_P99.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p99Value := testutil.ToFloat64(IPQualityV2_P99.WithLabelValues("192.0.2.1"))
 	if p99Value != 250.0 {
 		t.Errorf("Expected P99 gauge to be 250.0, got %f", p99Value)
 	}
@@ -155,32 +125,24 @@ func TestMetric_IPQualityV2GaugeSet(t *testing.T) {
 	// Update metrics (gauges should overwrite)
 	m.IPQualityV2GaugeSet("192.0.2.1", 100.0, 200.0, 300.0)
 
-	p50Value = testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p50Value = testutil.ToFloat64(IPQualityV2_P50.WithLabelValues("192.0.2.1"))
 	if p50Value != 100.0 {
 		t.Errorf("Expected P50 gauge to be 100.0 after update, got %f", p50Value)
 	}
 
-	p95Value = testutil.ToFloat64(IPQualityV2_P95.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p95Value = testutil.ToFloat64(IPQualityV2_P95.WithLabelValues("192.0.2.1"))
 	if p95Value != 200.0 {
 		t.Errorf("Expected P95 gauge to be 200.0 after update, got %f", p95Value)
 	}
 
-	p99Value = testutil.ToFloat64(IPQualityV2_P99.With(prometheus.Labels{
-		"ip": "192.0.2.1",
-	}))
+	p99Value = testutil.ToFloat64(IPQualityV2_P99.WithLabelValues("192.0.2.1"))
 	if p99Value != 300.0 {
 		t.Errorf("Expected P99 gauge to be 300.0 after update, got %f", p99Value)
 	}
 
 	// Set different IP
 	m.IPQualityV2GaugeSet("192.0.2.2", 75.0, 175.0, 275.0)
-	p50Value = testutil.ToFloat64(IPQualityV2_P50.With(prometheus.Labels{
-		"ip": "192.0.2.2",
-	}))
+	p50Value = testutil.ToFloat64(IPQualityV2_P50.WithLabelValues("192.0.2.2"))
 	if p50Value != 75.0 {
 		t.Errorf("Expected P50 gauge for 192.0.2.2 to be 75.0, got %f", p50Value)
 	}
@@ -196,12 +158,8 @@ func TestMetric_Register(t *testing.T) {
 	m.Register()
 
 	// Verify metrics are registered by checking if we can use them
-	m.InCounterAdd("test", "test.com.", "A")
-	count := testutil.ToFloat64(InCounter.With(prometheus.Labels{
-		"stage": "test",
-		"name":  "test.com.",
-		"type":  "A",
-	}))
+	m.InCounterAdd("test", "A")
+	count := testutil.ToFloat64(InCounter.WithLabelValues("test", "A"))
 	if count != 1 {
 		t.Errorf("Expected counter to be 1 after register, got %f", count)
 	}
@@ -285,9 +243,9 @@ func TestMetricConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(id int) {
 			for j := 0; j < 100; j++ {
-				m.InCounterAdd("concurrent", "test.com.", "A")
-				m.OutCounterAdd("concurrent", "test.com.", "A", "NOERROR")
-				m.LatencyHistogramObserve("concurrent", "test.com.", "A", "NOERROR", float64(j))
+				m.InCounterAdd("concurrent", "A")
+				m.OutCounterAdd("concurrent", "A", "NOERROR")
+				m.LatencyHistogramObserve("concurrent", "A", "NOERROR", float64(j))
 			}
 			done <- true
 		}(i)
@@ -299,11 +257,7 @@ func TestMetricConcurrentAccess(t *testing.T) {
 	}
 
 	// Verify counter has expected value (10 * 100 = 1000)
-	count := testutil.ToFloat64(InCounter.With(prometheus.Labels{
-		"stage": "concurrent",
-		"name":  "test.com.",
-		"type":  "A",
-	}))
+	count := testutil.ToFloat64(InCounter.WithLabelValues("concurrent", "A"))
 	if count != 1000 {
 		t.Errorf("Expected counter to be 1000, got %f", count)
 	}
@@ -318,7 +272,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	m.Register()
 
 	// Add some metrics
-	m.InCounterAdd("test", "example.com.", "A")
+	m.InCounterAdd("test", "A")
 
 	// Create test server with our custom registry
 	handler := http.NewServeMux()

@@ -12,23 +12,23 @@ type Metric struct {
 	reg prometheus.Registerer
 }
 
-func (m *Metric) InCounterAdd(stage string, name string, qtype string) {
-	InCounter.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype}).Inc()
+func (m *Metric) InCounterAdd(stage string, qtype string) {
+	InCounter.WithLabelValues(stage, qtype).Inc()
 }
 
-func (m *Metric) OutCounterAdd(stage string, name string, qtype string, code string) {
-	OutCounter.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype, "code": code}).Inc()
+func (m *Metric) OutCounterAdd(stage string, qtype string, code string) {
+	OutCounter.WithLabelValues(stage, qtype, code).Inc()
 }
 
-func (m *Metric) LatencyHistogramObserve(stage string, name string, qtype string, code string, latency float64) {
-	LatencyHistogramObserver.With(prometheus.Labels{"stage": stage, "name": name, "type": qtype, "code": code}).Observe(latency)
+func (m *Metric) LatencyHistogramObserve(stage string, qtype string, code string, latency float64) {
+	LatencyHistogramObserver.WithLabelValues(stage, qtype, code).Observe(latency)
 }
 
 // IPQualityV2GaugeSet sets the P50, P95, P99 latency gauges for an IP
 func (m *Metric) IPQualityV2GaugeSet(ip string, p50, p95, p99 float64) {
-	IPQualityV2_P50.With(prometheus.Labels{"ip": ip}).Set(p50)
-	IPQualityV2_P95.With(prometheus.Labels{"ip": ip}).Set(p95)
-	IPQualityV2_P99.With(prometheus.Labels{"ip": ip}).Set(p99)
+	IPQualityV2_P50.WithLabelValues(ip).Set(p50)
+	IPQualityV2_P95.WithLabelValues(ip).Set(p95)
+	IPQualityV2_P99.WithLabelValues(ip).Set(p99)
 }
 
 // register metric

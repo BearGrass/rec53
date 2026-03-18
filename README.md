@@ -25,6 +25,13 @@ rec53 is positioned as a lightweight, endpoint-side recursive resolver for perso
 
 ---
 
+> **v0.5.0 Breaking Change:** The `name` label (raw FQDN) has been removed from
+> Prometheus metrics `rec53_query_counter`, `rec53_response_counter`, and
+> `rec53_latency`. This eliminates unbounded label cardinality and reduces
+> hot-path allocations. **Migration:** remove `name` from any PromQL queries or
+> Grafana dashboard selectors that reference these metrics.
+> See [CHANGELOG.md](CHANGELOG.md) for details.
+
 ## Quick Start
 
 ### Using rec53ctl (recommended)
@@ -255,6 +262,7 @@ cd single_machine && docker-compose up -d
 - [`docs/benchmarks.md`](docs/benchmarks.md) — latency, QPS, memory benchmarks
 - [`docs/recursive-dns-test-plan.md`](docs/recursive-dns-test-plan.md) — complete recursive DNS test plan (functional + performance + release gates)
 - [`docs/perf-regression.md`](docs/perf-regression.md) — performance regression workflow and acceptance criteria
+- [`tools/validate-v050.sh`](tools/validate-v050.sh) — one-command perf validation (dnsperf + pprof, Linux dev workflow)
 - [`docs/metrics.md`](docs/metrics.md) — Prometheus metrics and PromQL examples
 - [`docs/sdns-comparison.md`](docs/sdns-comparison.md) — feature comparison with sdns
 - [`.rec53/CONVENTIONS.md`](.rec53/CONVENTIONS.md) — code conventions and patterns

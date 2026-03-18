@@ -429,7 +429,7 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 
 	//send query using Happy Eyeballs: concurrently query bestAddr and secondAddr,
 	//use the first successful response and cancel the other.
-	monitor.Rec53Metric.InCounterAdd("forward_request", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype])
+	monitor.Rec53Metric.InCounterAdd("forward_request", dns.TypeToString[newQuery.Question[0].Qtype])
 	port := getIterPort()
 
 	winner, err := queryHappyEyeballs(s.ctx, newQuery, bestAddr, secondAddr, port)
@@ -452,7 +452,7 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 		)
 	}
 
-	monitor.Rec53Metric.OutCounterAdd("forward_response", newQuery.Question[0].Name, dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
+	monitor.Rec53Metric.OutCounterAdd("forward_response", dns.TypeToString[newQuery.Question[0].Qtype], dns.RcodeToString[newResponse.Rcode])
 
 	monitor.Rec53Log.Debugf("[ITER] Response from %s: Rcode=%s, Answers=%d, Ns=%d, Extra=%d",
 		theBestIP, dns.RcodeToString[newResponse.Rcode], len(newResponse.Answer), len(newResponse.Ns), len(newResponse.Extra))

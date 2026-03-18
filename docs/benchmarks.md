@@ -89,11 +89,15 @@ go tool pprof -top -sample_index=alloc_space \
   http://127.0.0.1:6060/debug/pprof/heap
 ```
 
-Using the denoised `alloc_space` view above, the main allocation hotspots were:
+Using the denoised `alloc_space` view above, the main allocation hotspots were
+(v0.4.1 baseline, **before** v0.5.0 optimizations):
 
 - Cache read-copy path (`getCacheCopy` / `getCacheCopyByType`): ~26-27% alloc_space
 - DNS message copy path (`dns.Msg.Copy` / `CopyTo`): ~25% alloc_space
 - Metrics reporting path (`InCounterAdd` / `OutCounterAdd` / `LatencyHistogramObserve`): ~24% alloc_space
+
+After v0.5.0, the metrics path dropped to ~3.8% — see the
+[v0.5.0 section](#v050-hot-path-allocation-optimization-2026-03-18) for updated numbers.
 
 Notes:
 
@@ -110,6 +114,68 @@ These findings define the v0.5.0 optimization order:
 1. Reduce metrics-path allocations (`WithLabelValues`, lower label cardinality).
 2. Evaluate cache COW with strict race-safety and mutation-audit guards.
 3. Apply low-risk `getCacheKey` micro-optimization (`fmt.Sprintf` replacement).
+
+## v0.5.0 Hot-Path Allocation Optimization (2026-03-18)
+
+### Changes
+
+1. **Metrics label removal:** Removed `name` (raw FQDN) label from `InCounter`,
+   `OutCounter`, and `LatencyHistogramObserver` — eliminates unbounded cardinality.
+2. **`WithLabelValues` switch:** Replaced `With(prometheus.Labels{...})` with
+   `WithLabelValues(...)` in all metric methods — eliminates per-call map allocation.
+3. **`getCacheKey` optimization:** Replaced `fmt.Sprintf("%s:%d", ...)` with
+   string concatenation + `strconv.FormatUint` — zero allocations.
+
+### Micro-benchmark comparison (BenchmarkCacheKey, -count=5)
+
+| Metric | v0.4.1 (before) | v0.5.0 (after) | Delta |
+|--------|-----------------|----------------|-------|
+| ns/op  | ~68-69          | ~17            | −75%  |
+| B/op   | 16              | 0              | −100% |
+| allocs/op | 1            | 0              | −100% |
+
+### Dual-metric acceptance gate — PASSED
+
+| Gate | Metric | v0.4.1 baseline | v0.5.0 measured | Delta | Status |
+|------|--------|-----------------|-----------------|-------|--------|
+| 1 | dnsperf median QPS (c=64, 20s × 3) | ~97K | 111,049 | **+14.5%** | PASS |
+| 1 | dnsperf P99 | ~2.4ms | 2.4ms | 0% | PASS |
+| 2 | pprof alloc_space — metrics path | ~24% | ~3.8% | **−84%** | PASS |
+
+### dnsperf raw runs (c=64, 20s, v0.5.0)
+
+| Run | Queries | Duration | QPS | P50 | P95 | P99 | Errors | Timeouts |
+|-----|---------|----------|-----|-----|-----|-----|--------|----------|
+| 1 | 2,223,558 | 20.01s | 111,135.0 | 452 µs | 1.4 ms | 2.4 ms | 0 | 0 |
+| 2 | 2,221,846 | 20.01s | 111,049.5 | 452 µs | 1.4 ms | 2.4 ms | 0 | 0 |
+| 3 | 2,209,928 | 20.00s | 110,489.3 | 449 µs | 1.4 ms | 2.4 ms | 0 | 0 |
+
+### pprof alloc_space breakdown (v0.5.0, denoised)
+
+Top allocation sources during sustained cache-hit load:
+
+| Source | alloc_space | % of total |
+|--------|-------------|------------|
+| `dns.(*Msg).Copy` (cache COW) | 6.88 GB | 31.53% |
+| `cacheLookupState.handle` | 1.18 GB | 5.43% |
+| `dns.packBufferWithCompressionMap` | 1.34 GB | 6.14% |
+| `dns.(*A).copy` | 1.40 GB | 6.41% |
+| `LatencyHistogramObserve` | 0.33 GB | 1.50% |
+| `OutCounterAdd` | 0.29 GB | 1.35% |
+| `InCounterAdd` | 0.21 GB | 0.96% |
+| **Metrics subtotal** | **0.83 GB** | **3.81%** |
+
+Compared to v0.4.1, the metrics-path allocation dropped from ~24% to ~3.8%
+(−84%). The dominant allocation source is now `dns.Msg.Copy` at ~32%, which
+is the candidate for the conditional cache COW follow-up.
+
+### Cache COW follow-up evaluation
+
+Gate: >20% denoised `alloc_space` from `dns.Msg.Copy` after v0.5.0 optimizations.
+
+Result: **31.53%** — exceeds the 20% threshold. Cache COW follow-up is warranted
+and should be tracked as a separate change. See `getCacheCopy` / `getCacheCopyByType`
+in `server/cache.go`.
 
 ## Concurrency Scaling (dnsperf, reproducible limit, 2026-03-18)
 
@@ -236,6 +302,20 @@ for c in 64 128 192; do
 done
 ```
 
+For the v0.5.0 dual-metric acceptance flow, you can run the repository script:
+
+```bash
+chmod +x tools/validate-v050.sh
+./tools/validate-v050.sh
+```
+
+Script notes:
+
+- It starts/stops `rec53` automatically, runs warmup, executes `dnsperf` runs,
+  and captures `pprof` alloc profile.
+- Results are written to `/tmp/rec53-v050-validation`.
+- Dependencies: `dig`, `curl`, `go tool pprof`, GNU `grep -P`.
+
 For quick daily smoke (non-baseline), a single run is still acceptable:
 
 ```bash
@@ -295,7 +375,7 @@ for c in 32 64 128 256; do
 done
 ```
 
-## Regression Smoke Snapshot (2026-03-18)
+## Regression Smoke Snapshot (2026-03-18, v0.5.0)
 
 This snapshot is a quick sanity sample used for day-to-day regression checks
 in development (not a release-grade baseline replacement).
@@ -306,22 +386,27 @@ in development (not a release-grade baseline replacement).
 go test -run '^$' -bench 'BenchmarkCacheGetHit|BenchmarkStateMachineCacheHit|BenchmarkRecordLatency' -benchmem ./server/...
 ```
 
-| Benchmark | Result |
-|----------|--------|
-| `BenchmarkCacheGetHit` | `856.0 ns/op`, `296 B/op`, `7 allocs/op` |
-| `BenchmarkStateMachineCacheHit` | `4204 ns/op`, `1074 B/op`, `33 allocs/op` |
-| `BenchmarkRecordLatency` | `945.3 ns/op`, `0 B/op`, `0 allocs/op` |
+| Benchmark | v0.4.1 | v0.5.0 | Delta |
+|----------|--------|--------|-------|
+| `BenchmarkCacheGetHit` | `856 ns/op`, `296 B/op`, `7 allocs/op` | `234 ns/op`, `264 B/op`, `5 allocs/op` | −73% ns, −11% B, −2 allocs |
+| `BenchmarkStateMachineCacheHit` | `4204 ns/op`, `1074 B/op`, `33 allocs/op` | `1606 ns/op`, `1034 B/op`, `31 allocs/op` | −62% ns, −4% B, −2 allocs |
+| `BenchmarkRecordLatency` | `945 ns/op`, `0 B/op`, `0 allocs/op` | `596 ns/op`, `0 B/op`, `0 allocs/op` | −37% ns |
 
-### Macro load (`dnsperf`, UDP, c=64, 10s)
+### Macro load (`dnsperf`, UDP, c=64, 20s, median of 3 runs)
 
 ```bash
 tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
-  -f tools/dnsperf/queries-sample.txt -c 64 -d 10s -proto udp
+  -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
 ```
 
-- QPS: `96,941.6`
-- Latency: `P50 499us`, `P95 1.6ms`, `P99 2.5ms`
-- Reliability: `Timeouts 0`, `Errors 0`, `SERVFAIL 3`
+| Metric | v0.4.1 | v0.5.0 | Delta |
+|--------|--------|--------|-------|
+| QPS | 96,755 | 111,049 | +14.8% |
+| P50 | 543 µs | 452 µs | −17% |
+| P95 | 1.5 ms | 1.4 ms | −7% |
+| P99 | 2.4 ms | 2.4 ms | 0% |
+| Errors | 0 | 0 | — |
+| Timeouts | 0 | 0 | — |
 
 ## Running Your Own Benchmark
 

@@ -8,14 +8,14 @@ var (
 			Name: "rec53_query_counter",
 			Help: "rec53 query counter",
 		},
-		[]string{"stage", "name", "type"},
+		[]string{"stage", "type"},
 	)
 	OutCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "rec53_response_counter",
 			Help: "rec53 response counter",
 		},
-		[]string{"stage", "name", "type", "code"},
+		[]string{"stage", "type", "code"},
 	)
 
 	LatencyHistogramObserver = prometheus.NewHistogramVec(
@@ -24,7 +24,7 @@ var (
 			Help:    "rec53 latency",
 			Buckets: []float64{10, 50, 200, 1000, 3000}, // ms
 		},
-		[]string{"stage", "name", "type", "code"},
+		[]string{"stage", "type", "code"},
 	)
 	IPQualityV2_P50 = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

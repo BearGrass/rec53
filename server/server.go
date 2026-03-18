@@ -95,7 +95,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		originalQuestion = r.Question[0]
 	}
 
-	monitor.Rec53Metric.InCounterAdd("request", r.Question[0].Name, dns.TypeToString[r.Question[0].Qtype])
+	monitor.Rec53Metric.InCounterAdd("request", dns.TypeToString[r.Question[0].Qtype])
 	stm := newStateInitState(r, reply, context.Background())
 	result, err := Change(stm)
 	if err != nil {
@@ -120,8 +120,8 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		reply = truncateResponse(reply, r, getMaxUDPSize(r))
 	}
 
-	monitor.Rec53Metric.OutCounterAdd("response", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode])
-	monitor.Rec53Metric.LatencyHistogramObserve("latency", reply.Question[0].Name, dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode], float64(time.Since(startTime).Milliseconds()))
+	monitor.Rec53Metric.OutCounterAdd("response", dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode])
+	monitor.Rec53Metric.LatencyHistogramObserve("latency", dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode], float64(time.Since(startTime).Milliseconds()))
 	if err := w.WriteMsg(reply); err != nil {
 		monitor.Rec53Log.Errorf("Failed to write response: %v", err)
 	}

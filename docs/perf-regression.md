@@ -12,6 +12,27 @@ For full recursive DNS coverage (functional, e2e, release gates), see
 - Build in the same environment when comparing before/after runs.
 - Keep `config.yaml` stable across comparison runs.
 - Record Go version (`go version`) and CPU model in the PR/change note.
+- Rebuild perf tools before each run (do not trust stale binaries):
+
+```bash
+go build -o tools/dnsperf/dnsperf ./tools/dnsperf
+```
+
+## 1.1) Tooling in `tools/`
+
+- `tools/dnsperf`:
+  - Primary load tool for this repository.
+  - Modes:
+    - file replay: `-f tools/dnsperf/queries-sample.txt`
+    - cache-miss stress: `-random-prefix example.com`
+  - Supports UDP/TCP (`-proto`), duration mode (`-d`), count mode (`-n`), and
+    optional rate limit (`-qps`).
+- `tools/validate-v050.sh`:
+  - One-command script for the v0.5.0 dual-metric gate (dnsperf + pprof).
+  - Output directory: `/tmp/rec53-v050-validation`.
+  - Prerequisites: `dig`, `curl`, `go tool pprof`, GNU `grep` with `-P`.
+  - Intended for dev/CI validation on Linux; if your environment lacks these
+    dependencies, run the manual commands in this document instead.
 
 ## 2) Correctness Gate (must pass first)
 
@@ -48,6 +69,13 @@ Use `tools/dnsperf` for network-level regression checks:
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
   -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
+```
+
+Optional cache-miss stress profile:
+
+```bash
+tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+  -random-prefix example.com -c 32 -d 20s -proto udp
 ```
 
 Required review points:
@@ -128,3 +156,5 @@ same commit.
 - Record "not run" items explicitly when environment limitations exist.
 - Keep baseline snapshots in [`docs/benchmarks.md`](docs/benchmarks.md), and use
   this file as the authoritative reproducibility protocol.
+- When updating perf docs, include the exact tool mode (`-f` vs
+  `-random-prefix`), protocol, and command line so results can be replayed.
