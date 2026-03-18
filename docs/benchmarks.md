@@ -365,11 +365,11 @@ for c in 64 128 192; do
 done
 ```
 
-For the v0.5.0 dual-metric acceptance flow, you can run the repository script:
+For the dual-metric acceptance flow, you can run the repository script:
 
 ```bash
-chmod +x tools/validate-v050.sh
-./tools/validate-v050.sh
+chmod +x tools/validate-perf.sh
+./tools/validate-perf.sh
 ```
 
 Script notes:

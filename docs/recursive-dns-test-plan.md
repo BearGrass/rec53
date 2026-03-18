@@ -21,7 +21,7 @@ Use this table to keep testing documentation and tooling aligned:
 | `docs/perf-regression.md` | Performance execution protocol | Exact perf commands, acceptance thresholds, reproducible matrix method |
 | `docs/benchmarks.md` | Baseline snapshots | Measured numbers only (no policy decisions) |
 | `tools/dnsperf` | Load generator | Macro load tests (`-f` replay / `-random-prefix` miss stress) |
-| `tools/validate-v050.sh` | v0.5.0 dual-metric automation | One-command dnsperf + pprof validation workflow |
+| `tools/validate-perf.sh` | Dual-metric automation | One-command dnsperf + pprof validation workflow |
 
 Drift-prevention rule:
 
@@ -55,10 +55,10 @@ go build -o tools/dnsperf/dnsperf ./tools/dnsperf
     reproducible regression comparisons.
   - Random-prefix mode (`-random-prefix example.com`): cache-miss/iterative
     stress profile.
-- `tools/validate-v050.sh`:
-  - Linux-oriented helper for v0.5.0 dual-metric gate.
+- `tools/validate-perf.sh`:
+  - Linux-oriented helper for dual-metric gate.
   - Requires `dig`, `curl`, `go tool pprof`, GNU `grep -P`.
-  - Writes outputs to `/tmp/rec53-v050-validation`.
+  - Writes outputs to `/tmp/rec53-perf-validation`.
 
 ## 3. Functional Coverage Checklist
 
@@ -132,7 +132,7 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 -random-prefix example.com -c 32 -d
 - Run full race suite: `go test -race ./...`.
 - Run full e2e suite: `go test -v ./e2e/...`.
 - Run performance gate (bench + load + pprof) and update baselines if changed.
-- For v0.5.0-style dual-metric validation, `tools/validate-v050.sh` is allowed
+- For dual-metric validation, `tools/validate-perf.sh` is allowed
   as an automation wrapper; include raw outputs in artifacts.
 
 ## 6. Pass/Fail Rules

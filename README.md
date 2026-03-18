@@ -262,7 +262,7 @@ cd single_machine && docker-compose up -d
 - [`docs/benchmarks.md`](docs/benchmarks.md) — latency, QPS, memory benchmarks
 - [`docs/recursive-dns-test-plan.md`](docs/recursive-dns-test-plan.md) — complete recursive DNS test plan (functional + performance + release gates)
 - [`docs/perf-regression.md`](docs/perf-regression.md) — performance regression workflow and acceptance criteria
-- [`tools/validate-v050.sh`](tools/validate-v050.sh) — one-command perf validation (dnsperf + pprof, Linux dev workflow)
+- [`tools/validate-perf.sh`](tools/validate-perf.sh) — one-command perf validation (dnsperf + pprof, Linux dev workflow)
 - [`docs/metrics.md`](docs/metrics.md) — Prometheus metrics and PromQL examples
 - [`docs/sdns-comparison.md`](docs/sdns-comparison.md) — feature comparison with sdns
 - [`.rec53/CONVENTIONS.md`](.rec53/CONVENTIONS.md) — code conventions and patterns

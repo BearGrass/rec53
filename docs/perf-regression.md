@@ -27,9 +27,9 @@ go build -o tools/dnsperf/dnsperf ./tools/dnsperf
     - cache-miss stress: `-random-prefix example.com`
   - Supports UDP/TCP (`-proto`), duration mode (`-d`), count mode (`-n`), and
     optional rate limit (`-qps`).
-- `tools/validate-v050.sh`:
-  - One-command script for the v0.5.0 dual-metric gate (dnsperf + pprof).
-  - Output directory: `/tmp/rec53-v050-validation`.
+- `tools/validate-perf.sh`:
+  - One-command script for the dual-metric gate (dnsperf + pprof).
+  - Output directory: `/tmp/rec53-perf-validation`.
   - Prerequisites: `dig`, `curl`, `go tool pprof`, GNU `grep` with `-P`.
   - Intended for dev/CI validation on Linux; if your environment lacks these
     dependencies, run the manual commands in this document instead.

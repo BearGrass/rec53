@@ -49,7 +49,7 @@ rec53/
 │       ├── main.go         # Concurrent DNS benchmark: file/random-prefix modes, percentiles
 │       ├── queries-sample.txt  # Sample query file (13 domains, mixed types)
 │       └── dnsperf         # Built binary artifact (rebuild via `go build -o tools/dnsperf/dnsperf ./tools/dnsperf`)
-├── tools/validate-v050.sh  # v0.5.0 dual-metric validation script (dnsperf + pprof)
+├── tools/validate-perf.sh  # Dual-metric validation script (dnsperf + pprof)
 └── single_machine/         # Docker Compose deployment
     └── docker-compose.yml
 ```

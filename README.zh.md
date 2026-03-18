@@ -262,7 +262,7 @@ cd single_machine && docker-compose up -d
 - [`docs/benchmarks.md`](docs/benchmarks.md) — 延迟、QPS、内存基准数据
 - [`docs/recursive-dns-test-plan.md`](docs/recursive-dns-test-plan.md) — 完整递归 DNS 测试方案（功能 + 性能 + 发布门禁）
 - [`docs/perf-regression.md`](docs/perf-regression.md) — 性能回归流程与验收标准
-- [`tools/validate-v050.sh`](tools/validate-v050.sh) — 一键性能验证脚本（dnsperf + pprof，Linux 开发流程）
+- [`tools/validate-perf.sh`](tools/validate-perf.sh) — 一键性能验证脚本（dnsperf + pprof，Linux 开发流程）
 - [`docs/metrics.md`](docs/metrics.md) — Prometheus 指标与 PromQL 示例
 - [`docs/sdns-comparison.md`](docs/sdns-comparison.md) — 与 sdns 的功能对比
 - [`.rec53/CONVENTIONS.md`](.rec53/CONVENTIONS.md) — 代码规范与模式

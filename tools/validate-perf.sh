@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================================
-# v0.5.0 Hot-Path Allocation Optimization — Group 6 Validation Script
+# rec53 Performance Validation — Dual-Metric Acceptance Gate
 # ============================================================================
 #
-# This script runs the dual-metric acceptance gate for v0.5.0:
-#   (a) dnsperf QPS/P99 must not regress vs v0.4.1 baseline (~97K QPS at c=64)
-#   (b) pprof alloc_space for metrics path must show measurable reduction vs ~24%
+# Runs the dual-metric acceptance gate for rec53 performance changes:
+#   (a) dnsperf QPS/P99 must not regress vs baseline
+#   (b) pprof alloc_space for hot-path functions must show measurable reduction
+#
+# Current baseline (post cache-shallow-copy, 2026-03-18):
+#   QPS: ~119K (median, c=64, 20s)   P99: ~2.3ms
+#   alloc_space top: shallowCopyMsg ~15.7%, packBuffer ~7.6%
 #
 # Prerequisites:
-#   - rec53 binary built from v0.5.0 code: go build -o rec53 ./cmd
-#   - dnsperf tool built: go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 #   - Network access to root DNS servers (for cache warmup)
 #   - No other process on port 5353 or 6060
+#   - go toolchain available
 #
 # Usage:
-#   chmod +x tools/validate-v050.sh
-#   ./tools/validate-v050.sh
+#   chmod +x tools/validate-perf.sh
+#   ./tools/validate-perf.sh
 #
 # The script will:
 #   1. Build rec53 and dnsperf
@@ -25,16 +28,13 @@
 #   5. Capture pprof alloc_space during a 4th load run
 #   6. Stop rec53
 #   7. Print results summary + pass/fail gate check
-#
-# After running, paste the output back so we can update docs/benchmarks.md
-# and tasks.md.
 # ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-RESULTS_DIR="/tmp/rec53-v050-validation"
+RESULTS_DIR="/tmp/rec53-perf-validation"
 DNSPERF="$PROJECT_DIR/tools/dnsperf/dnsperf"
 REC53="$PROJECT_DIR/rec53"
 QUERIES="$PROJECT_DIR/tools/dnsperf/queries-sample.txt"
@@ -137,7 +137,7 @@ info "Cache warmup complete"
 # ── Step 4: dnsperf 3-run gate (c=64, 20s) ──────────────────────────────────
 
 info "═══════════════════════════════════════════════════════"
-info "  Task 6.1: dnsperf QPS/P99 gate (3 runs, c=64, 20s)"
+info "  Gate 1: dnsperf QPS/P99 (3 runs, c=64, 20s)"
 info "═══════════════════════════════════════════════════════"
 
 for run in 1 2 3; do
@@ -156,7 +156,7 @@ done
 # ── Step 5: pprof alloc_space during load ────────────────────────────────────
 
 info "═══════════════════════════════════════════════════════"
-info "  Task 6.2: pprof alloc_space capture during load"
+info "  Gate 2: pprof alloc_space capture during load"
 info "═══════════════════════════════════════════════════════"
 
 # Start a background dnsperf run for 30s to generate load during pprof capture
@@ -221,20 +221,19 @@ for run in 1 2 3; do
 done
 
 echo ""
-echo "──── v0.4.1 baseline (for comparison) ────"
-echo "  QPS: ~97K (median c=64)   P99: ~2.4ms"
-echo "  alloc_space (metrics path): ~24%"
+echo "──── Baseline (for comparison) ────"
+echo "  QPS: ~119K (median c=64)   P99: ~2.3ms"
+echo "  alloc_space top: shallowCopyMsg ~15.7%, packBuffer ~7.6%"
 echo ""
 echo "──── Gate check ────"
 echo ""
-echo "  [GATE 1] dnsperf QPS must not regress vs ~97K baseline"
+echo "  [GATE 1] dnsperf QPS must not regress vs ~119K baseline"
 echo "           → Compare median QPS from the 3 runs above"
 echo ""
-echo "  [GATE 2] pprof alloc_space for metrics path must show"
-echo "           measurable reduction vs ~24% baseline"
-echo "           → Check InCounterAdd/OutCounterAdd/LatencyHistogramObserve"
-echo "             in pprof output above. If these functions no longer appear"
-echo "             in the top entries, or show significantly reduced %, PASS."
+echo "  [GATE 2] pprof alloc_space for hot-path functions must show"
+echo "           measurable reduction vs baseline percentages above"
+echo "           → Check top allocation functions in pprof output."
+echo "             If target functions show significantly reduced %, PASS."
 echo ""
 echo "──── Files for further analysis ────"
 echo ""
@@ -244,7 +243,5 @@ echo "  pprof top:        $RESULTS_DIR/pprof-alloc-top.txt"
 echo ""
 echo "══════════════════════════════════════════════════════════"
 echo ""
-info "Done! Paste the output above back to the agent so we can:"
-info "  - Update docs/benchmarks.md with the dual-metric table (Task 6.3)"
-info "  - Evaluate cache COW follow-up (Task 6.4)"
-info "  - Mark Group 6 complete and commit v0.5.0"
+info "Done! Compare the results above against the baseline in docs/benchmarks.md."
+info "If both gates pass, update the baseline numbers in this script and docs."
