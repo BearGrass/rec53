@@ -137,7 +137,12 @@ func TestCacheByType(t *testing.T) {
 	}
 }
 
-// TestCacheIsolation tests that cached messages are not shared
+// TestCacheIsolation tests that the write-side deep copy protects the cached
+// entry from mutations to the caller's original message. With shallow copy on
+// read, callers MUST NOT modify individual RR fields on cache-read values
+// (see cache safety invariant in cache.go). This test verifies the write-side
+// guarantee only: mutating the source message after setCacheCopy does not
+// affect the cached entry.
 func TestCacheIsolation(t *testing.T) {
 	deleteAllCache()
 
@@ -157,20 +162,17 @@ func TestCacheIsolation(t *testing.T) {
 	})
 	setCacheCopyByType(domain, dns.TypeA, originalMsg, 300)
 
-	// Get a copy from cache
-	copy1, _ := getCacheCopyByType(domain, dns.TypeA)
+	// Mutate the caller's original message AFTER caching
+	originalMsg.Answer[0].(*dns.A).A = net.ParseIP("192.0.2.100")
 
-	// Modify the copy
-	copy1.Answer[0].(*dns.A).A = net.ParseIP("192.0.2.100")
-
-	// Get another copy and verify it's not affected
-	copy2, _ := getCacheCopyByType(domain, dns.TypeA)
-	originalIP := copy2.Answer[0].(*dns.A).A
-	if originalIP.Equal(net.ParseIP("192.0.2.100")) {
-		t.Error("Modifying cached copy affected other copies - cache isolation broken")
+	// Verify cached entry still has the original IP (write-side deep copy)
+	cached, _ := getCacheCopyByType(domain, dns.TypeA)
+	cachedIP := cached.Answer[0].(*dns.A).A
+	if cachedIP.Equal(net.ParseIP("192.0.2.100")) {
+		t.Error("Mutating original message after setCacheCopy affected cache — write-side isolation broken")
 	}
-	if !originalIP.Equal(net.ParseIP("192.0.2.1")) {
-		t.Errorf("Expected original IP 192.0.2.1, got %v", originalIP)
+	if !cachedIP.Equal(net.ParseIP("192.0.2.1")) {
+		t.Errorf("Expected cached IP 192.0.2.1, got %v", cachedIP)
 	}
 }
 
@@ -393,5 +395,525 @@ func TestCacheMultipleTypesSameDomain(t *testing.T) {
 		if !found {
 			t.Errorf("expected to find %s record", tc.typeName)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.3: OPT stripping tests
+// ---------------------------------------------------------------------------
+
+// TestStripOPT covers: OPT removed, non-OPT preserved, no-OPT no-op, multiple OPT stripped.
+func TestStripOPT(t *testing.T) {
+	glueA := &dns.A{
+		Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.53"),
+	}
+	glueAAAA := &dns.AAAA{
+		Hdr:  dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 300},
+		AAAA: net.ParseIP("2001:db8::53"),
+	}
+	opt1 := &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT}}
+	opt2 := &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT}}
+
+	tests := []struct {
+		name      string
+		extra     []dns.RR
+		wantLen   int
+		wantTypes []uint16
+	}{
+		{
+			name:      "single OPT removed, glue preserved",
+			extra:     []dns.RR{glueA, opt1},
+			wantLen:   1,
+			wantTypes: []uint16{dns.TypeA},
+		},
+		{
+			name:      "no OPT present — no-op",
+			extra:     []dns.RR{glueA, glueAAAA},
+			wantLen:   2,
+			wantTypes: []uint16{dns.TypeA, dns.TypeAAAA},
+		},
+		{
+			name:    "empty Extra — no-op",
+			extra:   nil,
+			wantLen: 0,
+		},
+		{
+			name:      "multiple OPT stripped",
+			extra:     []dns.RR{opt1, glueAAAA, opt2},
+			wantLen:   1,
+			wantTypes: []uint16{dns.TypeAAAA},
+		},
+		{
+			name:    "only OPT records — all removed",
+			extra:   []dns.RR{opt1, opt2},
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &dns.Msg{}
+			// Make a copy of the extra slice so tests are independent
+			msg.Extra = make([]dns.RR, len(tt.extra))
+			copy(msg.Extra, tt.extra)
+
+			stripOPT(msg)
+
+			if len(msg.Extra) != tt.wantLen {
+				t.Fatalf("Extra length = %d, want %d", len(msg.Extra), tt.wantLen)
+			}
+			for i, wantType := range tt.wantTypes {
+				if msg.Extra[i].Header().Rrtype != wantType {
+					t.Errorf("Extra[%d] type = %d, want %d", i, msg.Extra[i].Header().Rrtype, wantType)
+				}
+			}
+		})
+	}
+}
+
+// TestStripOPTOnCacheWrite verifies that setCacheCopy strips OPT from the cached
+// entry while preserving non-OPT Extra records and leaving the caller's message untouched.
+func TestStripOPTOnCacheWrite(t *testing.T) {
+	deleteAllCache()
+
+	domain := "opt-strip.example.com."
+	msg := &dns.Msg{}
+	msg.SetQuestion(domain, dns.TypeA)
+	msg.Answer = append(msg.Answer, &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	})
+	glue := &dns.A{
+		Hdr: dns.RR_Header{Name: "ns1." + domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.53"),
+	}
+	opt := &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT}}
+	msg.Extra = []dns.RR{glue, opt}
+
+	setCacheCopyByType(domain, dns.TypeA, msg, 300)
+
+	// Caller's message should still have OPT
+	if len(msg.Extra) != 2 {
+		t.Fatalf("caller's Extra was modified: len=%d, want 2", len(msg.Extra))
+	}
+
+	// Cached entry should have OPT stripped
+	cached, found := getCacheCopyByType(domain, dns.TypeA)
+	if !found {
+		t.Fatal("expected cached entry")
+	}
+	for _, rr := range cached.Extra {
+		if _, ok := rr.(*dns.OPT); ok {
+			t.Error("cached entry contains OPT record — stripOPT failed on write")
+		}
+	}
+	if len(cached.Extra) != 1 {
+		t.Fatalf("cached Extra length = %d, want 1 (glue only)", len(cached.Extra))
+	}
+	if cached.Extra[0].Header().Rrtype != dns.TypeA {
+		t.Errorf("cached Extra[0] type = %d, want A record", cached.Extra[0].Header().Rrtype)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.3: Shallow copy correctness tests
+// ---------------------------------------------------------------------------
+
+// TestShallowCopyMsg verifies: independent slice headers, shared RR pointers, all fields preserved.
+func TestShallowCopyMsg(t *testing.T) {
+	original := &dns.Msg{
+		MsgHdr:   dns.MsgHdr{Id: 1234, Response: true, Authoritative: true},
+		Compress: true,
+	}
+	original.Question = []dns.Question{
+		{Name: "example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET},
+	}
+	aRR := &dns.A{
+		Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	}
+	nsRR := &dns.NS{
+		Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+		Ns:  "ns1.example.com.",
+	}
+	glueRR := &dns.A{
+		Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.53"),
+	}
+	original.Answer = []dns.RR{aRR}
+	original.Ns = []dns.RR{nsRR}
+	original.Extra = []dns.RR{glueRR}
+
+	cp := shallowCopyMsg(original)
+
+	// Fields preserved
+	if cp.MsgHdr.Id != 1234 {
+		t.Errorf("Id = %d, want 1234", cp.MsgHdr.Id)
+	}
+	if !cp.MsgHdr.Response {
+		t.Error("Response flag not preserved")
+	}
+	if !cp.Compress {
+		t.Error("Compress flag not preserved")
+	}
+
+	// Slice lengths preserved
+	if len(cp.Question) != 1 {
+		t.Fatalf("Question len = %d, want 1", len(cp.Question))
+	}
+	if len(cp.Answer) != 1 {
+		t.Fatalf("Answer len = %d, want 1", len(cp.Answer))
+	}
+	if len(cp.Ns) != 1 {
+		t.Fatalf("Ns len = %d, want 1", len(cp.Ns))
+	}
+	if len(cp.Extra) != 1 {
+		t.Fatalf("Extra len = %d, want 1", len(cp.Extra))
+	}
+
+	// Shared RR pointers (same address)
+	if cp.Answer[0] != original.Answer[0] {
+		t.Error("Answer[0] pointer differs — expected shared RR pointer")
+	}
+	if cp.Ns[0] != original.Ns[0] {
+		t.Error("Ns[0] pointer differs — expected shared RR pointer")
+	}
+	if cp.Extra[0] != original.Extra[0] {
+		t.Error("Extra[0] pointer differs — expected shared RR pointer")
+	}
+
+	// Question is a value type — verify content equality
+	if cp.Question[0].Name != original.Question[0].Name {
+		t.Errorf("Question[0].Name = %s, want %s", cp.Question[0].Name, original.Question[0].Name)
+	}
+}
+
+// TestShallowCopyMsgEmpty verifies shallowCopyMsg handles empty/nil slices.
+func TestShallowCopyMsgEmpty(t *testing.T) {
+	original := &dns.Msg{MsgHdr: dns.MsgHdr{Id: 42}}
+	cp := shallowCopyMsg(original)
+
+	if cp.MsgHdr.Id != 42 {
+		t.Errorf("Id = %d, want 42", cp.MsgHdr.Id)
+	}
+	if cp.Question != nil {
+		t.Error("expected nil Question slice for empty original")
+	}
+	if cp.Answer != nil {
+		t.Error("expected nil Answer slice for empty original")
+	}
+	if cp.Ns != nil {
+		t.Error("expected nil Ns slice for empty original")
+	}
+	if cp.Extra != nil {
+		t.Error("expected nil Extra slice for empty original")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.4: Shallow copy slice isolation
+// ---------------------------------------------------------------------------
+
+// TestShallowCopySliceIsolation verifies that append/nil on the returned slice
+// does not affect the cached entry.
+func TestShallowCopySliceIsolation(t *testing.T) {
+	deleteAllCache()
+
+	domain := "slice-isolation.example.com."
+	msg := &dns.Msg{}
+	msg.SetQuestion(domain, dns.TypeA)
+	rr1 := &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	}
+	rr2 := &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.2"),
+	}
+	msg.Answer = []dns.RR{rr1, rr2}
+	setCacheCopyByType(domain, dns.TypeA, msg, 300)
+
+	// Read 1: append to returned slice
+	read1, _ := getCacheCopyByType(domain, dns.TypeA)
+	extraRR := &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+		A:   net.ParseIP("10.0.0.1"),
+	}
+	read1.Answer = append(read1.Answer, extraRR)
+
+	// Read 2: nil the slice
+	read2, _ := getCacheCopyByType(domain, dns.TypeA)
+	read2.Answer = nil
+
+	// Read 3: verify original cached entry is unaffected
+	read3, found := getCacheCopyByType(domain, dns.TypeA)
+	if !found {
+		t.Fatal("cached entry disappeared")
+	}
+	if len(read3.Answer) != 2 {
+		t.Fatalf("cached Answer length = %d, want 2 (slice isolation broken)", len(read3.Answer))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.1: Concurrent read + Pack() race test
+// ---------------------------------------------------------------------------
+
+// TestCacheConcurrentReadPack verifies that 100 goroutines can concurrently
+// read the same cache key, append RRs to a response, and call Pack() without
+// any data race. Must be run with -race.
+func TestCacheConcurrentReadPack(t *testing.T) {
+	deleteAllCache()
+
+	domain := "race-pack.example.com."
+	msg := &dns.Msg{}
+	msg.SetQuestion(domain, dns.TypeA)
+	msg.Answer = append(msg.Answer, &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	})
+	msg.Ns = append(msg.Ns, &dns.NS{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
+		Ns:  "ns1.example.com.",
+	})
+	msg.Extra = append(msg.Extra, &dns.A{
+		Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.53"),
+	})
+	setCacheCopyByType(domain, dns.TypeA, msg, 300)
+
+	const goroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			cached, found := getCacheCopyByType(domain, dns.TypeA)
+			if !found {
+				t.Error("cache miss in concurrent read")
+				return
+			}
+
+			// Build a response using cached RRs — mimics real handler behavior
+			resp := new(dns.Msg)
+			resp.SetReply(&dns.Msg{MsgHdr: dns.MsgHdr{Id: 9999}})
+			resp.Answer = append(resp.Answer, cached.Answer...)
+			resp.Ns = append(resp.Ns, cached.Ns...)
+			resp.Extra = append(resp.Extra, cached.Extra...)
+
+			// Pack() is the operation that must be race-free on shared RRs
+			wire, err := resp.Pack()
+			if err != nil {
+				t.Errorf("Pack() failed: %v", err)
+				return
+			}
+			if len(wire) == 0 {
+				t.Error("Pack() returned empty wire")
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.2: Concurrent read/write race test
+// ---------------------------------------------------------------------------
+
+// TestCacheConcurrentReadWrite verifies that N readers + 1 writer on the same
+// key produce no data race and readers always get valid messages.
+func TestCacheConcurrentReadWrite(t *testing.T) {
+	deleteAllCache()
+
+	domain := "race-rw.example.com."
+
+	// Seed the cache
+	seedMsg := &dns.Msg{}
+	seedMsg.SetQuestion(domain, dns.TypeA)
+	seedMsg.Answer = append(seedMsg.Answer, &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	})
+	setCacheCopyByType(domain, dns.TypeA, seedMsg, 300)
+
+	const readers = 50
+	const writerIters = 200
+	const readerIters = 200
+
+	var wg sync.WaitGroup
+
+	// 1 writer goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < writerIters; j++ {
+			m := &dns.Msg{}
+			m.SetQuestion(domain, dns.TypeA)
+			m.Answer = append(m.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   net.ParseIP("192.0.2.1"),
+			})
+			setCacheCopyByType(domain, dns.TypeA, m, 300)
+		}
+	}()
+
+	// N reader goroutines
+	wg.Add(readers)
+	for i := 0; i < readers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < readerIters; j++ {
+				cached, found := getCacheCopyByType(domain, dns.TypeA)
+				if !found {
+					// Writer might be replacing; tolerate misses
+					continue
+				}
+				if len(cached.Answer) < 1 {
+					t.Error("cached message has no Answer — invalid state")
+				}
+				// Pack to verify message integrity
+				if _, err := cached.Pack(); err != nil {
+					t.Errorf("Pack() failed on cache read: %v", err)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// ---------------------------------------------------------------------------
+// Task 4.1: Wire-format equivalence test
+// ---------------------------------------------------------------------------
+
+// TestShallowVsDeepCopyWireFormat compares Pack() output of shallow copy vs
+// deep copy for representative message types: A, NS delegation, CNAME chain, NXDOMAIN.
+func TestShallowVsDeepCopyWireFormat(t *testing.T) {
+	messages := map[string]*dns.Msg{
+		"A record": func() *dns.Msg {
+			m := &dns.Msg{}
+			m.SetQuestion("example.com.", dns.TypeA)
+			m.Answer = append(m.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+				A:   net.ParseIP("192.0.2.1"),
+			})
+			return m
+		}(),
+		"NS delegation": func() *dns.Msg {
+			m := &dns.Msg{}
+			m.SetQuestion("example.com.", dns.TypeNS)
+			m.Ns = append(m.Ns, &dns.NS{
+				Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 86400},
+				Ns:  "ns1.example.com.",
+			})
+			m.Extra = append(m.Extra, &dns.A{
+				Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 86400},
+				A:   net.ParseIP("192.0.2.53"),
+			})
+			return m
+		}(),
+		"CNAME chain": func() *dns.Msg {
+			m := &dns.Msg{}
+			m.SetQuestion("www.example.com.", dns.TypeA)
+			m.Answer = append(m.Answer,
+				&dns.CNAME{
+					Hdr:    dns.RR_Header{Name: "www.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+					Target: "example.com.",
+				},
+				&dns.A{
+					Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+					A:   net.ParseIP("192.0.2.1"),
+				},
+			)
+			return m
+		}(),
+		"NXDOMAIN": func() *dns.Msg {
+			m := &dns.Msg{}
+			m.SetQuestion("nonexistent.example.com.", dns.TypeA)
+			m.MsgHdr.Rcode = dns.RcodeNameError
+			m.Ns = append(m.Ns, &dns.SOA{
+				Hdr:     dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 300},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2024010101,
+				Refresh: 3600,
+				Retry:   900,
+				Expire:  604800,
+				Minttl:  86400,
+			})
+			return m
+		}(),
+	}
+
+	for name, original := range messages {
+		t.Run(name, func(t *testing.T) {
+			shallow := shallowCopyMsg(original)
+			deep := original.Copy()
+
+			shallowWire, err1 := shallow.Pack()
+			deepWire, err2 := deep.Pack()
+
+			if err1 != nil {
+				t.Fatalf("shallow Pack() error: %v", err1)
+			}
+			if err2 != nil {
+				t.Fatalf("deep Pack() error: %v", err2)
+			}
+
+			if len(shallowWire) != len(deepWire) {
+				t.Fatalf("wire length mismatch: shallow=%d, deep=%d", len(shallowWire), len(deepWire))
+			}
+			for i := range shallowWire {
+				if shallowWire[i] != deepWire[i] {
+					t.Fatalf("wire byte mismatch at offset %d: shallow=0x%02x, deep=0x%02x", i, shallowWire[i], deepWire[i])
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 4.2: Writer mutation does not affect cache
+// ---------------------------------------------------------------------------
+
+// TestWriterMutationDoesNotAffectCache writes an entry, mutates the caller's
+// message, then verifies the cached entry is unchanged.
+func TestWriterMutationDoesNotAffectCache(t *testing.T) {
+	deleteAllCache()
+
+	domain := "writer-mutation.example.com."
+	msg := &dns.Msg{}
+	msg.SetQuestion(domain, dns.TypeA)
+	originalRR := &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   net.ParseIP("192.0.2.1"),
+	}
+	msg.Answer = append(msg.Answer, originalRR)
+	setCacheCopyByType(domain, dns.TypeA, msg, 300)
+
+	// Mutate the caller's message in multiple ways
+	msg.Answer[0].(*dns.A).A = net.ParseIP("10.0.0.99")
+	msg.Answer = append(msg.Answer, &dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+		A:   net.ParseIP("10.0.0.100"),
+	})
+	msg.MsgHdr.Rcode = dns.RcodeServerFailure
+
+	// Verify cached entry is unaffected
+	cached, found := getCacheCopyByType(domain, dns.TypeA)
+	if !found {
+		t.Fatal("cached entry not found")
+	}
+	if cached.MsgHdr.Rcode != dns.RcodeSuccess {
+		t.Errorf("cached Rcode = %d, want NOERROR", cached.MsgHdr.Rcode)
+	}
+	if len(cached.Answer) != 1 {
+		t.Fatalf("cached Answer len = %d, want 1", len(cached.Answer))
+	}
+	cachedIP := cached.Answer[0].(*dns.A).A
+	if !cachedIP.Equal(net.ParseIP("192.0.2.1")) {
+		t.Errorf("cached IP = %v, want 192.0.2.1", cachedIP)
 	}
 }

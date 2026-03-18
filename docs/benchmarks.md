@@ -177,6 +177,69 @@ Result: **31.53%** — exceeds the 20% threshold. Cache COW follow-up is warrant
 and should be tracked as a separate change. See `getCacheCopy` / `getCacheCopyByType`
 in `server/cache.go`.
 
+## Cache Shallow Copy Optimization (2026-03-18)
+
+### Changes
+
+1. **Shallow copy on read:** Replaced `msg.Copy()` (deep copy) in `getCacheCopy`
+   with `shallowCopyMsg()` — new slice headers sharing RR pointers. Eliminates
+   per-RR allocation on every cache hit.
+2. **OPT stripping on write:** Strip `*dns.OPT` records from `msg.Extra` before
+   storing in cache — removes the only known `Pack()`-induced mutation, making
+   shared RR pointers safe for concurrent `Pack()` calls.
+3. **Write-side deep copy retained:** `setCacheCopy` still performs `value.Copy()`
+   to protect cached entries from caller mutations.
+
+### Micro-benchmark comparison (BenchmarkCacheGetHit, -benchmem -count=5)
+
+| Metric | v0.5.0 (deep copy) | shallow copy | Delta |
+|--------|-------------------|--------------|-------|
+| ns/op  | ~234              | ~175         | −25%  |
+| B/op   | 264               | 184          | −30%  |
+| allocs/op | 5              | 3            | −40%  |
+
+### BenchmarkShallowVsDeepCopy (3 Answer + 1 Ns + 1 Extra RRs)
+
+| Variant | ns/op | B/op | allocs/op |
+|---------|-------|------|-----------|
+| ShallowCopy | ~143 | 248 | 5 |
+| DeepCopy | ~294 | 472 | 11 |
+| **Delta** | **−51%** | **−47%** | **−55%** |
+
+### Dual-metric acceptance gate — PASSED
+
+| Gate | Metric | v0.5.0 baseline | Shallow copy measured | Delta | Status |
+|------|--------|-----------------|----------------------|-------|--------|
+| 1 | dnsperf median QPS (c=64, 20s × 3) | ~111K | 119,430 | **+7.6%** | PASS |
+| 1 | dnsperf P99 | 2.4ms | 2.3ms | −4% | PASS |
+| 2 | pprof alloc_space — cache copy path | 31.53% | 15.67% | **−50.3%** | PASS |
+
+### dnsperf raw runs (c=64, 20s, cache-shallow-copy)
+
+| Run | Queries | Duration | QPS | P50 | P95 | P99 | Errors | Timeouts |
+|-----|---------|----------|-----|-----|-----|-----|--------|----------|
+| 1 | 2,389,561 | 20.01s | 119,429.6 | 419 µs | 1.3 ms | 2.3 ms | 0 | 0 |
+| 2 | 2,415,445 | 20.01s | 120,723.9 | 415 µs | 1.3 ms | 2.2 ms | 0 | 0 |
+| 3 | 2,373,104 | 20.01s | 118,608.1 | 420 µs | 1.3 ms | 2.3 ms | 0 | 0 |
+
+### pprof alloc_space breakdown (cache-shallow-copy, top sources)
+
+| Source | alloc_space | % of total |
+|--------|-------------|------------|
+| `shallowCopyMsg` | 0.46 GB | 15.67% |
+| `cacheLookupState.handle` | 0.20 GB | 6.81% |
+| `dns.packBufferWithCompressionMap` | 0.23 GB | 7.64% |
+| `dns.(*CNAME).copy` (followCNAME path) | 0.05 GB | 1.54% |
+| `LatencyHistogramObserve` | 0.06 GB | 1.93% |
+| `OutCounterAdd` | 0.05 GB | 1.75% |
+| `InCounterAdd` | 0.03 GB | 1.14% |
+| **Metrics subtotal** | **0.14 GB** | **4.82%** |
+
+Compared to v0.5.0 baseline, the cache read path allocation dropped from 31.53%
+(`dns.Msg.Copy`) to 15.67% (`shallowCopyMsg`) — a 50.3% reduction. Deep copy
+RR allocation functions (`dns.(*A).copy`, `dns.(*NS).copy`) no longer appear in
+the top allocation list.
+
 ## Concurrency Scaling (dnsperf, reproducible limit, 2026-03-18)
 
 This section defines the reproducible "limit test" baseline on Intel i7-1165G7
@@ -375,7 +438,7 @@ for c in 32 64 128 256; do
 done
 ```
 
-## Regression Smoke Snapshot (2026-03-18, v0.5.0)
+## Regression Smoke Snapshot (2026-03-18, cache-shallow-copy)
 
 This snapshot is a quick sanity sample used for day-to-day regression checks
 in development (not a release-grade baseline replacement).
@@ -386,11 +449,11 @@ in development (not a release-grade baseline replacement).
 go test -run '^$' -bench 'BenchmarkCacheGetHit|BenchmarkStateMachineCacheHit|BenchmarkRecordLatency' -benchmem ./server/...
 ```
 
-| Benchmark | v0.4.1 | v0.5.0 | Delta |
-|----------|--------|--------|-------|
-| `BenchmarkCacheGetHit` | `856 ns/op`, `296 B/op`, `7 allocs/op` | `234 ns/op`, `264 B/op`, `5 allocs/op` | −73% ns, −11% B, −2 allocs |
-| `BenchmarkStateMachineCacheHit` | `4204 ns/op`, `1074 B/op`, `33 allocs/op` | `1606 ns/op`, `1034 B/op`, `31 allocs/op` | −62% ns, −4% B, −2 allocs |
-| `BenchmarkRecordLatency` | `945 ns/op`, `0 B/op`, `0 allocs/op` | `596 ns/op`, `0 B/op`, `0 allocs/op` | −37% ns |
+| Benchmark | v0.4.1 | v0.5.0 | shallow copy | Delta (v0.5.0→shallow) |
+|----------|--------|--------|-------------|------------------------|
+| `BenchmarkCacheGetHit` | `856 ns`, `296 B`, `7 allocs` | `234 ns`, `264 B`, `5 allocs` | `175 ns`, `184 B`, `3 allocs` | −25% ns, −30% B, −2 allocs |
+| `BenchmarkStateMachineCacheHit` | `4204 ns`, `1074 B`, `33 allocs` | `1606 ns`, `1034 B`, `31 allocs` | _(pending)_ | — |
+| `BenchmarkRecordLatency` | `945 ns`, `0 B`, `0 allocs` | `596 ns`, `0 B`, `0 allocs` | _(unchanged)_ | — |
 
 ### Macro load (`dnsperf`, UDP, c=64, 20s, median of 3 runs)
 
@@ -399,14 +462,14 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
   -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
 ```
 
-| Metric | v0.4.1 | v0.5.0 | Delta |
-|--------|--------|--------|-------|
-| QPS | 96,755 | 111,049 | +14.8% |
-| P50 | 543 µs | 452 µs | −17% |
-| P95 | 1.5 ms | 1.4 ms | −7% |
-| P99 | 2.4 ms | 2.4 ms | 0% |
-| Errors | 0 | 0 | — |
-| Timeouts | 0 | 0 | — |
+| Metric | v0.4.1 | v0.5.0 | shallow copy | Delta (v0.5.0→shallow) |
+|--------|--------|--------|-------------|------------------------|
+| QPS | 96,755 | 111,049 | 119,430 | +7.6% |
+| P50 | 543 µs | 452 µs | 419 µs | −7% |
+| P95 | 1.5 ms | 1.4 ms | 1.3 ms | −7% |
+| P99 | 2.4 ms | 2.4 ms | 2.3 ms | −4% |
+| Errors | 0 | 0 | 0 | — |
+| Timeouts | 0 | 0 | 0 | — |
 
 ## Running Your Own Benchmark
 

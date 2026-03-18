@@ -136,7 +136,29 @@ following that document.
 - [ ] Tests cover edge cases and error paths
 - [ ] State handlers return appropriate codes
 - [ ] Cache operations use copy functions to prevent mutation
+- [ ] Cache-read values: no individual RR field mutation (see Cache Read Safety)
 - [ ] Graceful shutdown context is properly propagated
+
+## Cache Read Safety
+
+`getCacheCopy` / `getCacheCopyByType` return a **shallow copy** of the cached
+`*dns.Msg` — new slice headers (`Question`, `Answer`, `Ns`, `Extra`) but
+**shared RR pointers** with the cached entry.
+
+**Safe operations** on cache-read messages:
+- Append, truncate, nil, or reassign slice headers (e.g., `resp.Answer = append(resp.Answer, cached.Answer...)`)
+- Read any RR field
+- Call `Pack()` (OPT records are stripped on write, so `Pack()` is side-effect-free)
+
+**Forbidden operations** on cache-read messages:
+- Modify individual RR struct fields (e.g., `rr.Header().Ttl = 0`, `a.A = ...`)
+- Modify `Question` entry fields after reading
+
+Violating these rules corrupts the cached entry and races with concurrent readers.
+The `TestCacheConcurrentReadPack` race test (run with `-race`) enforces this invariant.
+
+If a future code path needs to modify an RR field from a cache-read value, it must
+deep-copy that specific RR first.
 
 ## IP Quality Tracking Conventions
 

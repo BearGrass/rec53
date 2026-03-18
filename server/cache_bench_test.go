@@ -150,3 +150,38 @@ func BenchmarkCacheKeyWithContext(b *testing.B) {
 		_, _ = Change(newStateInitState(req2, resp2, ctx))
 	}
 }
+
+// BenchmarkShallowVsDeepCopy compares the allocation cost of shallowCopyMsg
+// vs dns.Msg.Copy (deep copy) on a representative cached message.
+func BenchmarkShallowVsDeepCopy(b *testing.B) {
+	msg := &dns.Msg{}
+	msg.SetQuestion("bench.example.com.", dns.TypeA)
+	for i := 0; i < 3; i++ {
+		rr, _ := dns.NewRR(fmt.Sprintf("bench.example.com. 60 IN A 1.2.3.%d", i+1))
+		msg.Answer = append(msg.Answer, rr)
+	}
+	msg.Ns = append(msg.Ns, func() dns.RR {
+		rr, _ := dns.NewRR("example.com. 86400 IN NS ns1.example.com.")
+		return rr
+	}())
+	msg.Extra = append(msg.Extra, func() dns.RR {
+		rr, _ := dns.NewRR("ns1.example.com. 86400 IN A 192.0.2.53")
+		return rr
+	}())
+
+	b.Run("ShallowCopy", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = shallowCopyMsg(msg)
+		}
+	})
+
+	b.Run("DeepCopy", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = msg.Copy()
+		}
+	})
+}

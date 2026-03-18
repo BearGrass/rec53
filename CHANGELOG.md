@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced deep copy (`dns.Msg.Copy()`) on cache reads with a shallow copy (`shallowCopyMsg`) that shares RR slice elements. Reduces cache-read allocations from 5 allocs/op to 3 allocs/op (−40%) and latency from 234 ns to 175 ns (−25%) per `getCacheCopy` call. Overall QPS improvement: ~111K → ~119K (+7.6%).
+- Strip OPT (EDNS0 pseudo-RR) from messages before caching to prevent `Pack()` side-effects (`OPT.SetExtendedRcode` mutates `OPT.Hdr.Ttl`), making shallow-copied messages safe for concurrent packing.
+- Added `Cache Read Safety` section to coding conventions (`.rec53/CONVENTIONS.md`): callers of `getCacheCopy` / `getCacheCopyByType` MUST NOT modify individual RR fields on returned values; slice-level operations (append, replace, truncate) are safe.
+
 ## [0.5.0] - 2026-03-18
 
 ### Changed

@@ -41,15 +41,54 @@ func setCacheCopyByType(name string, qtype uint16, value *dns.Msg, expire uint32
 	setCacheCopy(key, value, expire)
 }
 
-// getCacheCopy returns a deep copy of the cached message to prevent
-// concurrent modification issues.
+// getCacheCopy returns a shallow copy of the cached message.
+//
+// Cache safety invariant:
+//   - OPT records are stripped on write (setCacheCopy), so cached entries never
+//     contain *dns.OPT. This eliminates the only known Pack()-induced mutation.
+//   - The shallow copy allocates a new dns.Msg struct and new slice headers
+//     (Question, Answer, Ns, Extra) but shares the underlying RR pointers with
+//     the cached entry. Individual RR structs are NOT deep-copied.
+//   - Callers may freely modify slice headers (append, truncate, nil) on the
+//     returned message — the cached entry is not affected because the new slices
+//     have cap == len, so any append triggers a new backing array.
+//   - Callers MUST NOT modify individual RR struct fields (e.g., rr.Header().Ttl,
+//     a.A) on the returned message. Doing so would corrupt the cached entry and
+//     race with concurrent readers. The TestCacheConcurrentReadPack race test
+//     enforces this invariant.
 func getCacheCopy(key string) (*dns.Msg, bool) {
 	msg, found := getCache(key)
 	if !found {
 		return nil, false
 	}
-	// Create a copy of the message
-	return msg.Copy(), true
+	return shallowCopyMsg(msg), true
+}
+
+// shallowCopyMsg allocates a new dns.Msg with copied slice headers but shared
+// RR pointers. The returned slices have cap == len so that any caller append
+// triggers a new backing array, leaving the source slices untouched.
+func shallowCopyMsg(m *dns.Msg) *dns.Msg {
+	cp := new(dns.Msg)
+	cp.MsgHdr = m.MsgHdr
+	cp.Compress = m.Compress
+
+	if len(m.Question) > 0 {
+		cp.Question = make([]dns.Question, len(m.Question))
+		copy(cp.Question, m.Question)
+	}
+	if len(m.Answer) > 0 {
+		cp.Answer = make([]dns.RR, len(m.Answer))
+		copy(cp.Answer, m.Answer)
+	}
+	if len(m.Ns) > 0 {
+		cp.Ns = make([]dns.RR, len(m.Ns))
+		copy(cp.Ns, m.Ns)
+	}
+	if len(m.Extra) > 0 {
+		cp.Extra = make([]dns.RR, len(m.Extra))
+		copy(cp.Extra, m.Extra)
+	}
+	return cp
 }
 
 func setCache(key string, value interface{}, expire uint32) {
@@ -57,10 +96,37 @@ func setCache(key string, value interface{}, expire uint32) {
 	globalDnsCache.Set(key, value, expireTime)
 }
 
+// stripOPT removes all *dns.OPT records from msg.Extra in place.
+// OPT records are EDNS0 per-query transport metadata and should not be cached.
+// Stripping them eliminates the only known Pack()-induced mutation
+// (OPT.SetExtendedRcode modifying OPT.Hdr.Ttl), making shared RR pointers
+// safe for concurrent Pack() calls after shallow copy.
+func stripOPT(msg *dns.Msg) {
+	if len(msg.Extra) == 0 {
+		return
+	}
+	n := 0
+	for _, rr := range msg.Extra {
+		if _, ok := rr.(*dns.OPT); !ok {
+			msg.Extra[n] = rr
+			n++
+		}
+	}
+	// Clear trailing references to help GC and truncate.
+	for i := n; i < len(msg.Extra); i++ {
+		msg.Extra[i] = nil
+	}
+	msg.Extra = msg.Extra[:n]
+}
+
 // setCacheCopy stores a copy of the message to prevent
 // the cached message from being modified later.
+// The deep copy is followed by OPT stripping to ensure cached entries
+// contain no *dns.OPT records (see design decision D2).
 func setCacheCopy(key string, value *dns.Msg, expire uint32) {
-	setCache(key, value.Copy(), expire)
+	cp := value.Copy()
+	stripOPT(cp)
+	setCache(key, cp, expire)
 }
 
 func deleteExpiredCache() {
