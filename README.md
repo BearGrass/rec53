@@ -11,6 +11,7 @@ rec53 is positioned as a lightweight, endpoint-side recursive resolver for perso
 - **Hosts Local Authority** — serve static A/AAAA/CNAME records from config, with AA flag, before any cache or upstream lookup
 - **Forwarding Rules** — forward queries for specific domain suffixes to designated upstream DNS servers (longest-suffix match)
 - **UDP/TCP Support** — dual-protocol listeners on the same port
+- **SO_REUSEPORT Multi-Listener** — bind N UDP+TCP listener pairs on the same address via `SO_REUSEPORT` for kernel-level load balancing (Linux; `dns.listeners` config)
 - **State Machine Architecture** — clean, auditable resolution pipeline with 9 states
 - **IPQualityV2** — sliding-window latency histograms with automatic fault recovery
 - **Happy Eyeballs Concurrency** — simultaneous queries to best and secondary nameserver; first response wins
@@ -127,6 +128,9 @@ dns:
   # upstream_timeout: 1500ms  # Per-query timeout for iterative resolution.
                               # Default: 1.5s. Increase to 3-5s on high-latency networks.
                               # Minimum: 100ms.
+  # listeners: 0             # Number of UDP+TCP listener pairs bound via SO_REUSEPORT.
+                              # 0 or 1 = single pair (classic). >1 = N parallel pairs.
+                              # Recommended: match CPU core count. Linux only; ignored elsewhere.
 
 warmup:
   enabled: true
@@ -249,6 +253,8 @@ cd single_machine && docker-compose up -d
 
 - [`docs/architecture.md`](docs/architecture.md) — system design, state machine, cache, IP pool
 - [`docs/benchmarks.md`](docs/benchmarks.md) — latency, QPS, memory benchmarks
+- [`docs/recursive-dns-test-plan.md`](docs/recursive-dns-test-plan.md) — complete recursive DNS test plan (functional + performance + release gates)
+- [`docs/perf-regression.md`](docs/perf-regression.md) — performance regression workflow and acceptance criteria
 - [`docs/metrics.md`](docs/metrics.md) — Prometheus metrics and PromQL examples
 - [`docs/sdns-comparison.md`](docs/sdns-comparison.md) — feature comparison with sdns
 - [`.rec53/CONVENTIONS.md`](.rec53/CONVENTIONS.md) — code conventions and patterns

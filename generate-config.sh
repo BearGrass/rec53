@@ -41,6 +41,13 @@ dns:
   # Default: 1.5s (fast-fail; Happy Eyeballs concurrent queries absorb most reliability risk).
   # Increase to 3s-5s on high-latency networks; minimum allowed value is 100ms.
   # upstream_timeout: 1500ms
+  # listeners controls the number of UDP+TCP listener pairs bound to the same address
+  # via SO_REUSEPORT.  Each pair gets its own kernel receive queue, enabling
+  # kernel-level load balancing across goroutines.
+  # 0 or 1 = single listener pair (classic, no SO_REUSEPORT).
+  # >1 = N parallel listener pairs with SO_REUSEPORT.
+  # Recommended: match the number of CPU cores for maximum throughput.
+  # listeners: 0
 
 warmup:
   enabled: true

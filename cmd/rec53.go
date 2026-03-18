@@ -50,6 +50,11 @@ type DNSConfig struct {
 	Metric          string        `yaml:"metric"`
 	LogLevel        string        `yaml:"log_level"`
 	UpstreamTimeout time.Duration `yaml:"upstream_timeout"`
+	// Listeners controls the number of UDP+TCP listener pairs bound to the same
+	// address via SO_REUSEPORT.  0 or 1 means a single listener pair (classic
+	// behaviour, no SO_REUSEPORT).  Values >1 enable SO_REUSEPORT with N
+	// parallel listener pairs.
+	Listeners int `yaml:"listeners"`
 }
 
 // loadConfig loads configuration from a YAML file.
@@ -149,6 +154,11 @@ func validateConfig(cfg *Config) error {
 	// Validate upstream timeout: if set, must be at least 100ms
 	if cfg.DNS.UpstreamTimeout > 0 && cfg.DNS.UpstreamTimeout < 100*time.Millisecond {
 		return fmt.Errorf("dns.upstream_timeout must be at least 100ms, got %v", cfg.DNS.UpstreamTimeout)
+	}
+
+	// Validate listeners count
+	if cfg.DNS.Listeners < 0 {
+		return fmt.Errorf("dns.listeners must be >= 0 (0 or 1 = single listener), got %d", cfg.DNS.Listeners)
 	}
 
 	// Validate hosts entries
@@ -333,7 +343,7 @@ func main() {
 
 	// Create and start the DNS server.
 	monitor.Rec53Log.Debugf("creating DNS server on %s", cfg.DNS.Listen)
-	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding)
+	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.DNS.Listeners, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding)
 	// Restore cache from snapshot before starting listeners so the cache is
 	// warm before the first DNS query arrives.  This is synchronous and completes
 	// in < 5 ms on typical snapshot files.  Missing file → silent no-op; any
@@ -347,7 +357,11 @@ func main() {
 	monitor.Rec53Log.Debugf("starting DNS server")
 	errChan := rec53.Run()
 
-	monitor.Rec53Log.Infof("rec53 started, listening on %s, metrics on %s", cfg.DNS.Listen, cfg.DNS.Metric)
+	if cfg.DNS.Listeners > 1 {
+		monitor.Rec53Log.Infof("rec53 started, listening on %s (%d listener pairs, SO_REUSEPORT), metrics on %s", cfg.DNS.Listen, cfg.DNS.Listeners, cfg.DNS.Metric)
+	} else {
+		monitor.Rec53Log.Infof("rec53 started, listening on %s, metrics on %s", cfg.DNS.Listen, cfg.DNS.Metric)
+	}
 
 	// Wait for shutdown signal or server error
 	sig := make(chan os.Signal, 1)

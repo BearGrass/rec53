@@ -44,6 +44,10 @@ rec53/
 │   └── hosts_forward_test.go # Hosts authority & forwarding E2E tests
 ├── etc/                    # Configuration
 │   └── prometheus.yml      # Prometheus config for Docker
+├── tools/                  # Internal dev/perf tools (not shipped)
+│   └── dnsperf/            # Custom DNS load testing tool
+│       ├── main.go         # Concurrent DNS benchmark: file/random-prefix modes, percentiles
+│       └── queries-sample.txt  # Sample query file (13 domains, mixed types)
 └── single_machine/         # Docker Compose deployment
     └── docker-compose.yml
 ```
@@ -77,7 +81,7 @@ Client UDP/TCP query
 
 | Component | File | Role |
 |-----------|------|------|
-| `server` | `server/server.go` | UDP/TCP listener, request entry point |
+| `server` | `server/server.go` | UDP/TCP listener (N pairs via SO_REUSEPORT), request entry point |
 | `Change()` | `server/state_machine.go` | State machine loop orchestrator |
 | State handlers | `server/state_define.go`, `state.go`, `state_hosts.go`, `state_forward.go` | Per-state `handle()` logic |
 | `globalHostsMap` | `server/state_shared.go` | Pre-compiled hosts → `*dns.Msg` map |
@@ -472,6 +476,7 @@ snapshot:
 
 - Single binary deployment
 - Must handle both UDP and TCP protocols
+- SO_REUSEPORT multi-listener: configurable N UDP+TCP listener pairs per address (Linux)
 - Graceful shutdown with 5-second timeout
 - Max 50 state machine iterations (CNAME loop protection)
 - EDNS0 support with 4096-byte UDP buffer

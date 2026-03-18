@@ -16,17 +16,18 @@ import (
 
 type server struct {
 	listen       string
+	listeners    int // number of UDP+TCP listener pairs; >1 enables SO_REUSEPORT
 	warmupCfg    WarmupConfig
 	snapshotCfg  SnapshotConfig
 	hostsMap     map[string]*dns.Msg // pre-compiled "fqdn:qtype" → authoritative response
 	hostsNames   map[string]bool     // set of FQDNs in hosts (for NODATA detection)
 	forwardZones []ForwardZone       // zones sorted by zone length desc (longest match first)
-	udpSrv       *dns.Server
-	tcpSrv       *dns.Server
+	udpSrvs      []*dns.Server
+	tcpSrvs      []*dns.Server
 	wg           sync.WaitGroup
 	errChan      chan error
-	udpReady     chan struct{}      // closed when UDP server has started listening
-	tcpReady     chan struct{}      // closed when TCP server has started listening
+	udpReady     chan struct{}      // closed when first UDP listener has started
+	tcpReady     chan struct{}      // closed when first TCP listener has started
 	udpAddr      string             // set once UDP server is ready; safe to read after Run() returns
 	tcpAddr      string             // set once TCP server is ready; safe to read after Run() returns
 	warmupCancel context.CancelFunc // cancels the warmup goroutine; nil if warmup disabled
@@ -39,6 +40,7 @@ func NewServer(listen string) *server {
 	warmupCfg.Enabled = false
 	return &server{
 		listen:    listen,
+		listeners: 1,
 		warmupCfg: warmupCfg,
 	}
 }
@@ -47,18 +49,25 @@ func NewServer(listen string) *server {
 func NewServerWithConfig(listen string, warmupCfg WarmupConfig) *server {
 	return &server{
 		listen:    listen,
+		listeners: 1,
 		warmupCfg: warmupCfg,
 	}
 }
 
-// NewServerWithFullConfig creates a server with hosts and forwarding configuration.
+// NewServerWithFullConfig creates a server with hosts, forwarding, and listener configuration.
 // Hosts entries are pre-compiled into a lookup map; forwarding zones are sorted by
 // zone length descending for longest-suffix matching.
-func NewServerWithFullConfig(listen string, warmupCfg WarmupConfig, snapshotCfg SnapshotConfig, hosts []HostEntry, forwarding []ForwardZone) *server {
+// listeners controls the number of UDP+TCP listener pairs; values ≤1 mean a single
+// pair without SO_REUSEPORT; values >1 enable SO_REUSEPORT with N parallel pairs.
+func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfig, snapshotCfg SnapshotConfig, hosts []HostEntry, forwarding []ForwardZone) *server {
 	hostsMap, hostsNames := compileHostsEntries(hosts)
 	fwdZones := sortForwardZones(forwarding)
+	if listeners < 1 {
+		listeners = 1
+	}
 	s := &server{
 		listen:       listen,
+		listeners:    listeners,
 		warmupCfg:    warmupCfg,
 		snapshotCfg:  snapshotCfg,
 		hostsMap:     hostsMap,
@@ -173,30 +182,62 @@ func truncateResponse(reply, request *dns.Msg, maxSize int) *dns.Msg {
 
 // Run starts the DNS server listeners and returns an error channel.
 // Errors during startup or runtime are sent to the returned channel.
-// The channel is closed when both UDP and TCP servers have stopped.
+// The channel is closed when all servers have stopped.
+// When listeners > 1, SO_REUSEPORT is enabled and each listener pair gets
+// its own kernel receive queue for parallel packet distribution.
 // If warmup is enabled, it runs in the background without blocking startup.
 func (s *server) Run() <-chan error {
-	// Create servers before starting goroutines to avoid race with Shutdown()
+	n := s.listeners
+	if n < 1 {
+		n = 1
+	}
+	reusePort := n > 1
+
+	// Create ready channels and server slices before starting goroutines
 	s.udpReady = make(chan struct{})
 	s.tcpReady = make(chan struct{})
-	s.udpSrv = &dns.Server{Addr: s.listen, Net: "udp", Handler: s}
-	s.tcpSrv = &dns.Server{Addr: s.listen, Net: "tcp", Handler: s}
+	var udpOnce, tcpOnce sync.Once
 
-	// Notify udpReady when UDP server has bound the socket
-	s.udpSrv.NotifyStartedFunc = func() {
-		// Store the address before closing the channel so callers see it immediately
-		if s.udpSrv.PacketConn != nil {
-			s.udpAddr = s.udpSrv.PacketConn.LocalAddr().String()
+	s.udpSrvs = make([]*dns.Server, n)
+	s.tcpSrvs = make([]*dns.Server, n)
+
+	for i := 0; i < n; i++ {
+		s.udpSrvs[i] = &dns.Server{
+			Addr:      s.listen,
+			Net:       "udp",
+			Handler:   s,
+			ReusePort: reusePort,
 		}
-		close(s.udpReady)
+		s.tcpSrvs[i] = &dns.Server{
+			Addr:      s.listen,
+			Net:       "tcp",
+			Handler:   s,
+			ReusePort: reusePort,
+		}
 	}
 
-	// Notify tcpReady when TCP server has bound the socket
-	s.tcpSrv.NotifyStartedFunc = func() {
-		if s.tcpSrv.Listener != nil {
-			s.tcpAddr = s.tcpSrv.Listener.Addr().String()
+	// Wire NotifyStartedFunc for each listener; sync.Once ensures ready
+	// channels are closed exactly once by whichever listener binds first.
+	for i := 0; i < n; i++ {
+		udp := s.udpSrvs[i]
+		udp.NotifyStartedFunc = func() {
+			if udp.PacketConn != nil {
+				udpOnce.Do(func() {
+					s.udpAddr = udp.PacketConn.LocalAddr().String()
+					close(s.udpReady)
+				})
+			}
 		}
-		close(s.tcpReady)
+
+		tcp := s.tcpSrvs[i]
+		tcp.NotifyStartedFunc = func() {
+			if tcp.Listener != nil {
+				tcpOnce.Do(func() {
+					s.tcpAddr = tcp.Listener.Addr().String()
+					close(s.tcpReady)
+				})
+			}
+		}
 	}
 
 	// Start background IP probe loop for fault recovery
@@ -215,33 +256,43 @@ func (s *server) Run() <-chan error {
 		}()
 	}
 
-	s.errChan = make(chan error, 2)
-	s.wg.Add(2)
+	s.errChan = make(chan error, 2*n)
+	s.wg.Add(2 * n)
 
-	go func() {
-		defer s.wg.Done()
-		if err := s.udpSrv.ListenAndServe(); err != nil {
-			s.errChan <- fmt.Errorf("udp listener: %w", err)
-		}
-	}()
+	for i := 0; i < n; i++ {
+		udp := s.udpSrvs[i]
+		tcp := s.tcpSrvs[i]
+		idx := i
 
-	go func() {
-		defer s.wg.Done()
-		if err := s.tcpSrv.ListenAndServe(); err != nil {
-			s.errChan <- fmt.Errorf("tcp listener: %w", err)
-		}
-	}()
+		go func() {
+			defer s.wg.Done()
+			if err := udp.ListenAndServe(); err != nil {
+				s.errChan <- fmt.Errorf("udp listener[%d]: %w", idx, err)
+			}
+		}()
 
-	// Close errChan when both servers have stopped
+		go func() {
+			defer s.wg.Done()
+			if err := tcp.ListenAndServe(); err != nil {
+				s.errChan <- fmt.Errorf("tcp listener[%d]: %w", idx, err)
+			}
+		}()
+	}
+
+	// Close errChan when all servers have stopped
 	go func() {
 		s.wg.Wait()
 		close(s.errChan)
 	}()
 
-	// Wait for both UDP and TCP servers to be ready before returning.
+	// Wait for at least the first UDP and TCP server to be ready before returning.
 	// This ensures UDPAddr() and TCPAddr() are safe to call immediately after Run().
 	<-s.udpReady
 	<-s.tcpReady
+
+	if reusePort {
+		monitor.Rec53Log.Infof("Started %d UDP + %d TCP listeners with SO_REUSEPORT on %s", n, n, s.listen)
+	}
 
 	return s.errChan
 }
@@ -277,14 +328,18 @@ func (s *server) Shutdown(ctx context.Context) error {
 
 	var errs []error
 
-	if s.udpSrv != nil {
-		if err := s.udpSrv.ShutdownContext(ctx); err != nil {
-			errs = append(errs, err)
+	for _, srv := range s.udpSrvs {
+		if srv != nil {
+			if err := srv.ShutdownContext(ctx); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
-	if s.tcpSrv != nil {
-		if err := s.tcpSrv.ShutdownContext(ctx); err != nil {
-			errs = append(errs, err)
+	for _, srv := range s.tcpSrvs {
+		if srv != nil {
+			if err := srv.ShutdownContext(ctx); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 

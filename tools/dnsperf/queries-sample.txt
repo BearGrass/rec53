@@ -1,0 +1,21 @@
+# Sample query file for dnsperf
+# Format: name [qtype]  (qtype defaults to A if omitted)
+
+# Popular Chinese sites — good for cache-hit testing
+www.baidu.com
+www.qq.com
+www.taobao.com
+www.jd.com
+www.163.com
+
+# International sites
+www.google.com     A
+www.github.com     A
+www.cloudflare.com A
+www.amazon.com     A
+
+# Mixed query types
+cloudflare.com AAAA
+gmail.com      MX
+example.com    TXT
+google.com     NS

@@ -193,11 +193,17 @@ Update these docs **in the same commit** as the code change:
 - New dependency → this file + `docs/architecture.md`
 - New patterns → `.rec53/CONVENTIONS.md`
 - User-facing changes → `README.md` + `README.zh.md`
+- Benchmark docs update policy (`docs/benchmarks.md` / `docs/perf-regression.md`):
+  - When the user asks to "update benchmark docs", first run relevant benchmarks/load tests/pprof commands when feasible, then update docs based on measured results.
+  - If tests cannot be run (env/time/dependency limits), explicitly state what could not be executed and avoid presenting unverified numbers as fresh measurements.
 - README sync policy:
   - Any change to features, behavior, config, CLI flags, examples, or operational notes in one README must be mirrored in the other (`README.md` and `README.zh.md`) in the same commit.
   - If a change is intentionally language-specific, add a short rationale in the commit/PR description; otherwise treat single-sided README edits as incomplete.
 
 Related: `docs/architecture.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
 
-## 交互原则
-- 默认使用简体中文回复用户
+## Communication Language
+
+- Default: Respond to the user in Simplified Chinese.
+- Override: If the user explicitly requests another language (for example, English or Japanese), switch to that language.
+- Priority: An explicit language request in the current user turn overrides the default rule.

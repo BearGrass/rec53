@@ -122,6 +122,13 @@ func TestWithMockServer(t *testing.T) {
 }
 ```
 
+## Performance Regression Workflow
+
+For benchmark/load/pprof regression rules, use
+`docs/perf-regression.md` as the canonical workflow document.
+Any performance-sensitive change should include before/after numbers
+following that document.
+
 ## Code Review Checklist
 
 - [ ] Error messages are descriptive with context

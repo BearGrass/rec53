@@ -5,6 +5,7 @@
 | Version | Date     | Highlights                                                                        |
 |---------|----------|-----------------------------------------------------------------------------------|
 | v0.2.0  | 2026-03  | 全量缓存快照——重启后所有域名首次查询即缓存命中                                    |
+| v0.4.1  | planned  | SO_REUSEPORT 多 Listener——突破单 socket 吞吐上限                                  |
 | dev     | 2026-03  | NS 缓存快照持久化，消除重启冷启动延迟                                             |
 | dev     | 2026-03  | 并发 NS 解析（O-024），最多 5 worker，首个成功即返回                               |
 | dev     | 2026-03  | Happy Eyeballs 并发上游查询，先到先得                                              |
@@ -246,6 +247,116 @@ v0.4.0 最初规划为 `sync.Pool` 内存优化，经评估后调整方向（见
 
 评估结论：ring buffer 上限固定 64 元素（256 bytes），用 `[64]int32` 栈数组即可实现零分配，
 无需引入 `sync.Pool` 的 Get/Put 开销和并发复杂度。
+
+---
+
+## v0.4.1 — SO_REUSEPORT 多 Listener
+
+**目标**：通过 `SO_REUSEPORT` 多 socket 监听突破单 socket 吞吐上限（当前 ~91-95 K QPS），实现随 CPU 核心数线性扩展。
+
+### 背景
+
+并发扩展压测（`docs/benchmarks.md` "Concurrency Scaling" 章节）证实：
+
+- 吞吐在 c=32 饱和于 ~91 K QPS，增加并发仅增延迟不增吞吐
+- pprof 显示 `syscall.Syscall6`（`recvfrom`/`sendto`）占 ~25% CPU
+- 瓶颈为 **单 UDP socket 的内核读写串行化**，非 CPU 计算
+- 提升 CPU 频率仅预期 +15-25%，提核心数在当前架构下无效
+
+`miekg/dns` v1.1.52 原生支持 `dns.Server.ReusePort bool`，Linux 上通过 `unix.SO_REUSEPORT` setsockopt 实现，内核在多个 socket 间负载均衡。
+
+### 预期收益（4C8T, listeners=4）
+
+| 估计 | QPS | 倍率 |
+|------|-----|------|
+| 保守 | 150–200 K | 1.6–2.2× |
+| 乐观 | 250–300 K | 2.7–3.3× |
+
+延迟 P50/P99 应下降（每个 socket 排队深度更浅）。
+
+### 任务清单
+
+**1. server 结构体改造**
+
+- [ ] `server/server.go` — `udpSrv/tcpSrv *dns.Server` → `udpSrvs/tcpSrvs []*dns.Server` + `listeners int` 字段
+- [ ] `Run()` — 循环创建 N 对 listener，设置 `ReusePort: n > 1`，`sync.Once` 保护 ready channel
+- [ ] `Shutdown()` — 循环关闭 N 个 server
+
+**2. 配置接入**
+
+- [ ] `cmd/rec53.go` — `DNSConfig` 新增 `Listeners int` 字段 + 校验
+- [ ] `NewServerWithFullConfig` 签名增加 `listeners` 参数
+- [ ] `config.yaml` + `generate-config.sh` — 添加 `listeners:` 注释说明
+
+**3. 验证**
+
+- [ ] 现有测试通过（`NewServer()` 默认 listeners=1，行为不变）
+- [ ] `go test -race ./...` 无竞争
+- [ ] dnsperf 对比压测：listeners=1 vs listeners=4，记录结果到 `docs/benchmarks.md`
+
+**4. 文档**
+
+- [ ] `README.md` / `README.zh.md` — 新增 SO_REUSEPORT 配置说明
+- [ ] `docs/benchmarks.md` — 补充多 listener 压测对比数据
+- [ ] `docs/architecture.md` — 更新 server 层描述
+
+### 不需要改动的代码
+
+- `ServeDNS` handler — 不变
+- `globalDnsCache` / `globalIPPool` — 已有 RWMutex/atomic 保护，多 listener 无额外竞争
+- State Machine / Metrics — 不变
+- 所有现有测试 — 不变（默认退化为单 listener）
+
+### 开发成本
+
+~75 行代码改动，3 个文件（`server.go`、`cmd/rec53.go`、`config.yaml`），预计 1 小时完成。
+
+---
+
+## v0.5.0 — 热路径降分配优化（基于 pprof）
+
+**目标**：在不引入高风险生命周期复杂度（例如 `sync.Pool(dns.Msg)`）的前提下，优先降低已确认热路径的分配开销。
+
+**基线文档约定**：`docs/benchmarks.md` 中的 `Profiling Findings (2026-03, dnsperf + pprof)` 作为
+v0.5.0 后续优化的统一基线文档；所有优化项应使用同口径命令复采并与该基线做前后对比。
+
+### pprof 基线（dnsperf + 去噪）
+
+- 压测工具：`tools/dnsperf`（UDP，`c=128`，稳定约 `~100k QPS`）
+- 去噪 `alloc_space`（focus=`rec53/server|github.com/miekg/dns`）显示：
+  - `getCacheCopy/getCacheCopyByType` 累计约 **26-27%**
+  - `dns.Msg.Copy/CopyTo` 累计约 **25%**
+  - 指标上报（`InCounterAdd/OutCounterAdd/LatencyHistogramObserve`）累计约 **24%**
+- 去噪 `cpu`（同 focus）显示热点集中在 `ServeDNS -> Change -> cacheLookup` 路径
+
+### 任务清单（按优先级）
+
+**1. 指标上报路径去分配（高收益、低风险）**
+
+- [ ] `monitor/metric.go` — `With(prometheus.Labels{...})` 改为 `WithLabelValues(...)`，消除每次 map 分配
+- [ ] 指标维度收敛：移除或降维高基数 `name` label（至少不直接使用原始域名）
+- [ ] 更新 `README.md` / `README.zh.md` 的指标说明与兼容性变更
+
+**2. Cache COW POC（高收益）**
+
+- [ ] 基于 `docs/cache-cow-audit.md` 实现最小 POC：cache 读路径可选零拷贝，写路径保持 copy-on-write 语义
+- [ ] 新增防御性测试：验证读路径不会污染缓存条目，验证并发下无 data race（`-race`）
+- [ ] 对比基准：`BenchmarkCacheGetHit` / `BenchmarkStateMachineCacheHit` 的 allocs/op 与 ns/op
+
+**3. `getCacheKey` 热路径微优化（中收益、极低风险）**
+
+- [ ] `server/cache.go` — 用字符串拼接 + `strconv` 替换 `fmt.Sprintf("%s:%d", ...)`
+- [ ] 验证 `BenchmarkCacheKey` 与 `BenchmarkCacheGetHit` 的回归阈值
+
+**4. 二次 pprof 验证（收敛闭环）**
+
+- [ ] 使用 `tools/dnsperf`（`c=128`）重跑去噪 profile
+- [ ] 目标：热点占比下降并记录到 `docs/benchmarks.md`（含命令、环境、对比表）
+- [ ] 若 Cache COW 收益不足或风险过高，回退为“仅保留指标与 key 优化”
+
+### 不做事项（维持 v0.4.0 结论）
+
+- `sync.Pool(dns.Msg)`：生命周期跨状态机和并发路径，归还时机复杂，维护风险高于收益
 
 ---
 
