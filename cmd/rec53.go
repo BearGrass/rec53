@@ -35,7 +35,16 @@ type Config struct {
 	Snapshot   server.SnapshotConfig `yaml:"snapshot"`
 	Hosts      []server.HostEntry    `yaml:"hosts"`
 	Forwarding []server.ForwardZone  `yaml:"forwarding"`
+	XDP        XDPConfig             `yaml:"xdp"`
 	Debug      DebugConfig           `yaml:"debug"`
+}
+
+// XDPConfig holds XDP/eBPF cache fast path configuration.
+// When enabled, DNS cache hits are served directly from the kernel via XDP_TX,
+// bypassing the Go runtime entirely.
+type XDPConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Interface string `yaml:"interface"`
 }
 
 // DebugConfig holds debug/profiling configuration
@@ -169,6 +178,11 @@ func validateConfig(cfg *Config) error {
 	// Validate forwarding entries
 	if err := validateForwardingConfig(cfg.Forwarding); err != nil {
 		return err
+	}
+
+	// Validate XDP config
+	if cfg.XDP.Enabled && strings.TrimSpace(cfg.XDP.Interface) == "" {
+		return fmt.Errorf("xdp.interface is required when xdp.enabled is true")
 	}
 
 	return nil
@@ -343,7 +357,11 @@ func main() {
 
 	// Create and start the DNS server.
 	monitor.Rec53Log.Debugf("creating DNS server on %s", cfg.DNS.Listen)
-	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.DNS.Listeners, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding)
+	xdpIface := ""
+	if cfg.XDP.Enabled {
+		xdpIface = cfg.XDP.Interface
+	}
+	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.DNS.Listeners, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, xdpIface)
 	// Restore cache from snapshot before starting listeners so the cache is
 	// warm before the first DNS query arrives.  This is synchronous and completes
 	// in < 5 ms on typical snapshot files.  Missing file → silent no-op; any

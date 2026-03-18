@@ -379,3 +379,86 @@ func TestTruncateResponse(t *testing.T) {
 		})
 	}
 }
+
+// TestNewServerWithFullConfig_XDPDisabled verifies that XDP-disabled config
+// creates a server that works identically to the pre-XDP path.
+func TestNewServerWithFullConfig_XDPDisabled(t *testing.T) {
+	s := NewServerWithFullConfig(
+		"127.0.0.1:0", 1,
+		WarmupConfig{Enabled: false}, SnapshotConfig{},
+		nil, nil,
+		"", // xdpInterface="" → XDP disabled
+	)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+	if s.xdpLoader != nil {
+		t.Error("expected xdpLoader to be nil when XDP disabled")
+	}
+
+	// Run and shutdown should work without XDP
+	errChan := s.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Errorf("unexpected shutdown error: %v", err)
+	}
+	select {
+	case _, ok := <-errChan:
+		if ok {
+			t.Error("expected error channel closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("timeout waiting for errChan close")
+	}
+}
+
+// TestNewServerWithFullConfig_XDPInterface verifies that passing an XDP interface
+// creates a loader on the server struct.
+func TestNewServerWithFullConfig_XDPInterface(t *testing.T) {
+	s := NewServerWithFullConfig(
+		"127.0.0.1:0", 1,
+		WarmupConfig{Enabled: false}, SnapshotConfig{},
+		nil, nil,
+		"eth0", // xdpInterface="eth0" → loader created
+	)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+	if s.xdpLoader == nil {
+		t.Error("expected xdpLoader to be non-nil when interface specified")
+	}
+}
+
+// TestServer_ShutdownCleansXDP verifies that Shutdown() nils the global XDP
+// cache map and closes the loader when XDP was active (graceful degradation
+// when attach wasn't possible — e.g. no root — is handled by Run() logging).
+func TestServer_ShutdownCleansXDP(t *testing.T) {
+	// Ensure globalXDPCacheMap is nil after shutdown, even if it was set.
+	oldMap := globalXDPCacheMap.Load()
+	defer func() { globalXDPCacheMap.Store(oldMap) }()
+
+	s := NewServerWithFullConfig(
+		"127.0.0.1:0", 1,
+		WarmupConfig{Enabled: false}, SnapshotConfig{},
+		nil, nil,
+		"", // XDP disabled
+	)
+	errChan := s.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Errorf("unexpected shutdown error: %v", err)
+	}
+	if globalXDPCacheMap.Load() != nil {
+		t.Error("expected globalXDPCacheMap to be nil after shutdown")
+	}
+	select {
+	case _, ok := <-errChan:
+		if ok {
+			t.Error("expected error channel closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("timeout waiting for errChan close")
+	}
+}

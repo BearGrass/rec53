@@ -364,7 +364,7 @@ func TestIterState_Integration_Failover(t *testing.T) {
 
 // TestExtractSOAFromAuthority tests the extractSOAFromAuthority helper function
 func TestExtractSOAFromAuthority(t *testing.T) {
-	t.Run("returns SOA and its minttl", func(t *testing.T) {
+	t.Run("returns SOA with min(hdr.Ttl, minttl) per RFC 2308", func(t *testing.T) {
 		response := new(dns.Msg)
 		response.Ns = []dns.RR{
 			&dns.SOA{
@@ -372,7 +372,7 @@ func TestExtractSOAFromAuthority(t *testing.T) {
 					Name:   "example.com.",
 					Rrtype: dns.TypeSOA,
 					Class:  dns.ClassINET,
-					Ttl:    300,
+					Ttl:    300, // SOA RR TTL
 				},
 				Ns:      "ns1.example.com.",
 				Mbox:    "admin.example.com.",
@@ -380,7 +380,7 @@ func TestExtractSOAFromAuthority(t *testing.T) {
 				Refresh: 86400,
 				Retry:   7200,
 				Expire:  3600000,
-				Minttl:  600, // Negative cache TTL
+				Minttl:  600, // SOA MINIMUM field
 			},
 		}
 
@@ -388,8 +388,39 @@ func TestExtractSOAFromAuthority(t *testing.T) {
 		if soa == nil {
 			t.Fatal("expected SOA record, got nil")
 		}
-		if ttl != 600 {
-			t.Errorf("expected TTL 600, got %d", ttl)
+		// RFC 2308 §5: negative TTL = min(300, 600) = 300
+		if ttl != 300 {
+			t.Errorf("expected TTL 300 (min of hdr.Ttl=300, minttl=600), got %d", ttl)
+		}
+	})
+
+	t.Run("returns minttl when it is smaller than hdr.Ttl", func(t *testing.T) {
+		response := new(dns.Msg)
+		response.Ns = []dns.RR{
+			&dns.SOA{
+				Hdr: dns.RR_Header{
+					Name:   "example.com.",
+					Rrtype: dns.TypeSOA,
+					Class:  dns.ClassINET,
+					Ttl:    3600, // SOA RR TTL (larger)
+				},
+				Ns:      "ns1.example.com.",
+				Mbox:    "admin.example.com.",
+				Serial:  2021010101,
+				Refresh: 86400,
+				Retry:   7200,
+				Expire:  3600000,
+				Minttl:  120, // SOA MINIMUM field (smaller)
+			},
+		}
+
+		soa, ttl := extractSOAFromAuthority(response)
+		if soa == nil {
+			t.Fatal("expected SOA record, got nil")
+		}
+		// RFC 2308 §5: negative TTL = min(3600, 120) = 120
+		if ttl != 120 {
+			t.Errorf("expected TTL 120 (min of hdr.Ttl=3600, minttl=120), got %d", ttl)
 		}
 	})
 

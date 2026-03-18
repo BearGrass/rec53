@@ -50,5 +50,15 @@ var (
 		[]string{"ip"},
 	)
 
+	// XDPStatus reports the XDP fast path status:
+	//   0 = disabled or unavailable (degraded to Go-only cache)
+	//   1 = active (eBPF attached, serving cache hits via XDP_TX)
+	XDPStatus = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_status",
+			Help: "XDP fast path status: 0=disabled/unavailable, 1=active",
+		},
+	)
+
 	Rec53Metric *Metric
 )

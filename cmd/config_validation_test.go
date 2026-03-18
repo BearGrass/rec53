@@ -166,6 +166,32 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "invalid address",
 		},
+		// XDP config validation
+		{
+			name: "xdp disabled is valid",
+			cfg: &Config{
+				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				XDP: XDPConfig{Enabled: false},
+			},
+			wantErr: false,
+		},
+		{
+			name: "xdp enabled with interface is valid",
+			cfg: &Config{
+				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				XDP: XDPConfig{Enabled: true, Interface: "eth0"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "xdp enabled without interface is invalid",
+			cfg: &Config{
+				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				XDP: XDPConfig{Enabled: true, Interface: ""},
+			},
+			wantErr: true,
+			errMsg:  "xdp.interface is required",
+		},
 	}
 
 	for _, tt := range tests {

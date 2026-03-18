@@ -90,12 +90,18 @@ const contextKeyNSResolutionDepth contextKeyType = "nsResolutionDepth"
 const DefaultNegativeCacheTTL = 60
 
 // extractSOAFromAuthority extracts the SOA record from the Authority section.
-// Returns the SOA record and its TTL (or DefaultNegativeCacheTTL if SOA.Minttl is 0).
+// Returns the SOA record and its negative-cache TTL per RFC 2308 Section 5:
+// min(SOA RR TTL, SOA MINIMUM field). Falls back to DefaultNegativeCacheTTL
+// if the computed value is 0.
 // Returns nil, 0 if no SOA is found.
 func extractSOAFromAuthority(response *dns.Msg) (*dns.SOA, uint32) {
 	for _, rr := range response.Ns {
 		if soa, ok := rr.(*dns.SOA); ok {
-			ttl := soa.Minttl
+			// RFC 2308 §5: negative cache TTL = min(SOA TTL, SOA MINIMUM)
+			ttl := soa.Hdr.Ttl
+			if soa.Minttl < ttl {
+				ttl = soa.Minttl
+			}
 			if ttl == 0 {
 				ttl = DefaultNegativeCacheTTL
 			}

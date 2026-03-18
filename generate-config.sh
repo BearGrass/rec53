@@ -124,6 +124,16 @@ warmup:
 #     upstreams:
 #       - 10.0.0.53:53
 
+# xdp: XDP/eBPF DNS cache fast path.
+# When enabled, DNS cache hits are served directly from the kernel via XDP_TX,
+# bypassing the Go runtime entirely (zero syscalls, zero goroutine overhead).
+# Requirements: Linux kernel >= 5.15, CAP_BPF or root, clang >= 14 (build time only).
+# interface: the network interface to attach the XDP program to (e.g. eth0, ens33).
+#
+# xdp:
+#   enabled: false
+#   interface: ""
+
 # snapshot: Persist DNS cache on graceful shutdown and restore it on startup.
 # This eliminates the cold-start latency (typically 300ms+) caused by rebuilding
 # the cache after a restart.  Completely optional — omitting this block or

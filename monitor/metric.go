@@ -39,6 +39,7 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(IPQualityV2_P50)
 	m.reg.MustRegister(IPQualityV2_P95)
 	m.reg.MustRegister(IPQualityV2_P99)
+	m.reg.MustRegister(XDPStatus)
 }
 
 // MetricServer holds the HTTP server for metrics

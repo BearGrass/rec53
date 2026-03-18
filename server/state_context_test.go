@@ -32,6 +32,100 @@ func TestCacheLookupState_CacheHitEmptyAnswer(t *testing.T) {
 	}
 }
 
+// TestCacheLookupState_NegativeCacheHit_NXDOMAIN verifies that a cached
+// NXDOMAIN response (empty Answer + SOA in Authority) is served as a cache hit.
+func TestCacheLookupState_NegativeCacheHit_NXDOMAIN(t *testing.T) {
+	deleteAllCache()
+
+	domain := "nonexistent.example.com."
+	// Build NXDOMAIN response with SOA in Authority.
+	nxMsg := new(dns.Msg)
+	nxMsg.Rcode = dns.RcodeNameError
+	nxMsg.Ns = []dns.RR{
+		&dns.SOA{
+			Hdr: dns.RR_Header{
+				Name:   "example.com.",
+				Rrtype: dns.TypeSOA,
+				Class:  dns.ClassINET,
+				Ttl:    300,
+			},
+			Ns:     "ns1.example.com.",
+			Mbox:   "admin.example.com.",
+			Minttl: 60,
+		},
+	}
+	setCacheCopyByType(domain, dns.TypeA, nxMsg, 60)
+
+	req := new(dns.Msg)
+	req.SetQuestion(domain, dns.TypeA)
+	resp := new(dns.Msg)
+
+	s := newCacheLookupState(req, resp, context.Background())
+	ret, err := s.handle(req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != CACHE_LOOKUP_HIT {
+		t.Errorf("expected CACHE_LOOKUP_HIT for NXDOMAIN cache entry, got %d", ret)
+	}
+	// Verify Rcode and SOA were copied to response.
+	if resp.Rcode != dns.RcodeNameError {
+		t.Errorf("expected Rcode NXDOMAIN, got %s", dns.RcodeToString[resp.Rcode])
+	}
+	if !hasSOAInAuthority(resp) {
+		t.Error("expected SOA in response Authority section")
+	}
+	if len(resp.Answer) != 0 {
+		t.Errorf("expected empty Answer, got %d records", len(resp.Answer))
+	}
+}
+
+// TestCacheLookupState_NegativeCacheHit_NODATA verifies that a cached
+// NODATA response (empty Answer, Rcode=NOERROR, SOA in Authority) is served
+// as a cache hit.
+func TestCacheLookupState_NegativeCacheHit_NODATA(t *testing.T) {
+	deleteAllCache()
+
+	domain := "exists-but-no-aaaa.example.com."
+	// Build NODATA response: Rcode=Success, empty Answer, SOA in Authority.
+	nodataMsg := new(dns.Msg)
+	nodataMsg.Rcode = dns.RcodeSuccess
+	nodataMsg.Ns = []dns.RR{
+		&dns.SOA{
+			Hdr: dns.RR_Header{
+				Name:   "example.com.",
+				Rrtype: dns.TypeSOA,
+				Class:  dns.ClassINET,
+				Ttl:    300,
+			},
+			Ns:     "ns1.example.com.",
+			Mbox:   "admin.example.com.",
+			Minttl: 120,
+		},
+	}
+	setCacheCopyByType(domain, dns.TypeAAAA, nodataMsg, 120)
+
+	req := new(dns.Msg)
+	req.SetQuestion(domain, dns.TypeAAAA)
+	resp := new(dns.Msg)
+
+	s := newCacheLookupState(req, resp, context.Background())
+	ret, err := s.handle(req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != CACHE_LOOKUP_HIT {
+		t.Errorf("expected CACHE_LOOKUP_HIT for NODATA cache entry, got %d", ret)
+	}
+	// Verify Rcode stays NOERROR and SOA was copied.
+	if resp.Rcode != dns.RcodeSuccess {
+		t.Errorf("expected Rcode NOERROR, got %s", dns.RcodeToString[resp.Rcode])
+	}
+	if !hasSOAInAuthority(resp) {
+		t.Error("expected SOA in response Authority section")
+	}
+}
+
 // TestResolveNSIPsRecursively_Empty verifies that resolveNSIPsRecursively with
 // no NS names returns nil without panicking.
 func TestResolveNSIPsRecursively_Empty(t *testing.T) {

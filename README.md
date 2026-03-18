@@ -21,6 +21,7 @@ rec53 is positioned as a lightweight, endpoint-side recursive resolver for perso
 - **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
 - **Cache Snapshot** — persists full DNS cache on shutdown and restores it before first query, eliminating cold-start latency after restart
 - **Prometheus Metrics** — per-query and per-nameserver observability
+- **XDP/eBPF Cache Fast Path** — cache hits served directly from the kernel via `XDP_TX` (zero syscalls, zero Go runtime overhead); requires Linux kernel >= 5.15 and CAP_BPF
 - **Graceful Shutdown** — context-based cancellation with 5-second timeout
 
 ---
@@ -182,12 +183,24 @@ forwarding:
 # snapshot:
 #   enabled: false
 #   file: ""   # e.g. /var/lib/rec53/cache-snapshot.json  or  ~/.rec53/cache-snapshot.json
+
+# XDP/eBPF cache fast path: cache hits served directly from the kernel via XDP_TX.
+# Zero syscalls, zero Go runtime overhead, zero memory copies for cache hits.
+# Requirements: Linux kernel >= 5.15, CAP_BPF or root, clang >= 14 (build time only).
+# xdp:
+#   enabled: false
+#   interface: ""   # e.g. eth0, ens33
 ```
 
 | `snapshot` field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Enable snapshot save/restore |
 | `file` | string | `""` | Path to snapshot file; empty string disables even if `enabled: true` |
+
+| `xdp` field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable XDP/eBPF DNS cache fast path |
+| `interface` | string | `""` | Network interface to attach XDP program (required when enabled) |
 
 By default, rec53 warms up 30 high-traffic TLDs covering 85%+ of global registrations. To use a custom list, specify `warmup.tlds`. Leave empty for the curated defaults.
 

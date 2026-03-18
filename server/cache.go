@@ -123,10 +123,20 @@ func stripOPT(msg *dns.Msg) {
 // the cached message from being modified later.
 // The deep copy is followed by OPT stripping to ensure cached entries
 // contain no *dns.OPT records (see design decision D2).
+// When XDP is enabled, the entry is also synced to the BPF cache map.
 func setCacheCopy(key string, value *dns.Msg, expire uint32) {
 	cp := value.Copy()
 	stripOPT(cp)
 	setCache(key, cp, expire)
+
+	// Sync to BPF map for XDP fast path (no-op if globalXDPCacheMap is nil).
+	// Guard: only sync positive responses (non-empty Answer) with a Question
+	// section. Negative responses (NXDOMAIN/NODATA) and NS delegation entries
+	// have empty Answer sections and must NOT be synced — XDP cannot serve
+	// them correctly (no SOA in Authority after buildBPFCacheValue strips Ns).
+	if len(cp.Answer) > 0 && len(cp.Question) > 0 {
+		syncToBPFMap(cp.Question[0].Name, cp.Question[0].Qtype, cp, expire)
+	}
 }
 
 func deleteExpiredCache() {

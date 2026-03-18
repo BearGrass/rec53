@@ -1,0 +1,11 @@
+dns:
+  listen: "127.0.0.1:53"
+  metric: ":9999"
+  log_level: "debug"
+
+warmup:
+  enabled: false
+
+xdp:
+  enabled: true
+  interface: "lo"

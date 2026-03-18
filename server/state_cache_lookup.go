@@ -37,7 +37,19 @@ func (s *cacheLookupState) handle(request *dns.Msg, response *dns.Msg) (int, err
 	if msgInCache, ok := getCacheCopyByType(q.Name, q.Qtype); ok {
 		monitor.Rec53Log.Debugf("get cache %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
 		if len(msgInCache.Answer) != 0 {
+			// Positive cache hit: copy Answer records.
 			s.response.Answer = append(s.response.Answer, msgInCache.Answer...)
+			return CACHE_LOOKUP_HIT, nil
+		}
+		// Negative cache hit: NXDOMAIN/NODATA entries have empty Answer
+		// but contain SOA in Authority (Ns). Copy Rcode and Ns so that
+		// classifyRespState can detect the negative response via
+		// hasSOAInAuthority() and return it to the client.
+		if hasSOAInAuthority(msgInCache) {
+			s.response.Rcode = msgInCache.Rcode
+			s.response.Ns = append(s.response.Ns, msgInCache.Ns...)
+			monitor.Rec53Log.Debugf("[CACHE_LOOKUP] negative cache hit for %s (type: %s, rcode: %s)",
+				q.Name, dns.TypeToString[q.Qtype], dns.RcodeToString[msgInCache.Rcode])
 			return CACHE_LOOKUP_HIT, nil
 		}
 	}

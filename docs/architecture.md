@@ -26,6 +26,14 @@ rec53/
 │   ├── cache.go            # TTL cache wrapper (go-cache)
 │   ├── ip_pool.go          # IPQualityV2 ring buffer, scoring, probe loop
 │   ├── warmup.go           # WarmupNSRecords(), TLD list
+│   ├── xdp_loader.go       # XDP/eBPF lifecycle: load, attach, detach
+│   ├── xdp_sync.go         # Go→BPF map cache sync (inline from setCacheCopy)
+│   ├── xdp_gen.go          # //go:generate bpf2go directive
+│   ├── xdp/                # eBPF C sources (not a Go package)
+│   │   ├── dns_cache.h     # Shared struct definitions (cache_key, cache_value)
+│   │   ├── dns_cache.c     # XDP program: parse DNS, lookup cache, XDP_TX
+│   │   ├── Makefile         # clang BPF compilation rules
+│   │   └── generate-bpf.sh # Portable bpf2go invocation script
 │   └── *_test.go           # Server package tests
 ├── monitor/                # Observability
 │   ├── metric.go           # Prometheus metric methods, HTTP server
@@ -283,7 +291,7 @@ The cache is a thin wrapper around [`patrickmn/go-cache`](https://github.com/pat
 
 ### Negative Caching
 
-NXDOMAIN and NODATA (empty answer, no error) responses are cached using the SOA `Minttl` field from the Authority section. If no SOA is present, a 60-second default TTL is used. This prevents repeated iterative resolution for non-existent domains.
+NXDOMAIN and NODATA (empty answer, no error) responses are cached using the negative-cache TTL derived per RFC 2308 Section 5: `min(SOA RR TTL, SOA MINIMUM field)` from the Authority section. If no SOA is present, a 60-second default TTL is used. On cache lookup, negative entries (empty Answer + SOA in Authority) are served directly: the Rcode and Authority section are copied to the response, then `classifyRespState` detects `CLASSIFY_RESP_GET_NEGATIVE` and returns the negative response to the client without re-resolving.
 
 ### Cache API
 
@@ -471,6 +479,75 @@ snapshot:
 - **Separate server**: independent `http.Server` with its own mux, not shared with metrics
 - **Localhost only**: default bind to `127.0.0.1:6060`
 - **Lifecycle-managed**: receives a `context.Context`, gracefully shuts down on cancellation
+
+---
+
+## Core Subsystem: XDP Cache Fast Path (eBPF)
+
+The XDP cache layer intercepts DNS queries at the network driver layer (XDP hook point), serving cache hits directly via `XDP_TX` with zero syscalls, zero Go runtime overhead, and zero memory copies.
+
+### Architecture
+
+```
+                   ┌─────────────┐
+   NIC ──────────▶ │  XDP hook   │
+                   │ dns_cache.c │
+                   └──────┬──────┘
+                          │
+                    ┌─────┴─────┐
+              cache hit    cache miss
+                    │           │
+               XDP_TX       XDP_PASS
+            (direct reply)     │
+                          ┌────▼────┐
+                          │  Go DNS │
+                          │  server │
+                          └─────────┘
+```
+
+### eBPF Program (`server/xdp/dns_cache.c`)
+
+Parses ETH/IPv4/UDP/DNS headers, extracts and lowercases the qname via bounded loop, looks up the BPF hash map with wire-format qname + qtype key. On hit: swaps MAC/IP/UDP headers, patches transaction ID, adjusts packet tail, copies pre-serialized response, recalculates IP checksum, returns `XDP_TX`. On miss: returns `XDP_PASS` to the kernel stack.
+
+### Go Loader (`server/xdp_loader.go`)
+
+`XDPLoader` manages the eBPF lifecycle: loads bpf2go-generated objects, attaches to a network interface with native→generic XDP fallback, and provides `CacheMap()`/`StatsMap()` handles. Closed on server shutdown.
+
+### Cache Sync (`server/xdp_sync.go`)
+
+`syncToBPFMap()` is called inline from `setCacheCopy()` after `stripOPT()`. Converts presentation-format domain to wire format, serializes the response via `Pack()`, calculates monotonic-clock expiration, and writes to the BPF map. Responses > 512 bytes are skipped (XDP serves UDP only).
+
+### BPF Maps
+
+| Map | Type | Size | Key | Value |
+|-----|------|------|-----|-------|
+| `cache_map` | `BPF_MAP_TYPE_HASH` | 65536 | wire-format qname (255 B) + qtype (2 B) | expire_ts + resp_len + response (512 B) |
+| `xdp_stats` | `BPF_MAP_TYPE_PERCPU_ARRAY` | 4 | index (hit/miss/pass/error) | uint64 counter |
+
+### Configuration
+
+```yaml
+xdp:
+  enabled: false       # requires root/CAP_BPF, kernel >= 5.15
+  interface: "eth0"    # network interface for XDP attach
+```
+
+When `enabled: false` (default), the entire XDP path is a no-op — no eBPF objects are loaded, no maps are created, and `syncToBPFMap()` returns immediately.
+
+### XDP vs Go Cache Responsibility Boundary
+
+The BPF cache only handles a narrow subset of DNS responses. The write-side guard `len(Answer) > 0` in `setCacheCopy` enforces this boundary:
+
+| Responsibility | XDP (kernel) | Go (userspace) |
+|----------------|-------------|----------------|
+| Positive A/AAAA hits | Yes — fast path via `XDP_TX` | Fallback for TCP/IPv6/EDNS0/oversized |
+| Negative caching (NXDOMAIN/NODATA) | No — requires SOA in Authority, which `buildBPFCacheValue` strips | Yes — serves via `cacheLookupState` |
+| NS delegation cache | No — internal resolver use only, key mismatch (zone vs qname) | Yes — `lookupNSCacheState` |
+| Large responses (>512 B) | No — `buildBPFCacheValue` rejects | Yes |
+| CNAME chains | No — requires multi-step resolution | Yes |
+| Snapshot restore entries | No — may have empty Answer | Yes |
+
+This design keeps the BPF program simple (Question+Answer only, fixed 512-byte buffer) while Go handles the full RFC complexity.
 
 ---
 
