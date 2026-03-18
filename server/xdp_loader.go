@@ -93,6 +93,14 @@ func (l *XDPLoader) CacheMap() *ebpf.Map {
 	return l.objs.CacheMap
 }
 
+// StatsMap returns the BPF xdp_stats per-CPU array map handle, or nil if not loaded.
+func (l *XDPLoader) StatsMap() *ebpf.Map {
+	if l.objs == nil {
+		return nil
+	}
+	return l.objs.XdpStats
+}
+
 // Close detaches the XDP program and closes all BPF objects.
 // Safe to call multiple times or before LoadAndAttach.
 func (l *XDPLoader) Close() error {

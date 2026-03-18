@@ -23,6 +23,7 @@ type server struct {
 	hostsNames   map[string]bool     // set of FQDNs in hosts (for NODATA detection)
 	forwardZones []ForwardZone       // zones sorted by zone length desc (longest match first)
 	xdpLoader    *XDPLoader          // eBPF lifecycle manager; nil when XDP disabled
+	xdpCancel    context.CancelFunc  // cancels XDP metrics + cleanup goroutines; nil if XDP inactive
 	udpSrvs      []*dns.Server
 	tcpSrvs      []*dns.Server
 	wg           sync.WaitGroup
@@ -265,6 +266,20 @@ func (s *server) Run() <-chan error {
 			globalXDPCacheMap.Store(s.xdpLoader.CacheMap())
 			monitor.Rec53Log.Infof("[XDP] cache fast path active on %s", s.xdpLoader.iface)
 			monitor.XDPStatus.Set(1)
+
+			// Start background goroutines for XDP metrics export and expired
+			// entry cleanup. Both are cancelled by Shutdown() via xdpCancel.
+			xdpCtx, xdpCancel := context.WithCancel(context.Background())
+			s.xdpCancel = xdpCancel
+			s.wg.Add(2)
+			go func() {
+				defer s.wg.Done()
+				startXDPMetricsLoop(xdpCtx, s.xdpLoader.StatsMap())
+			}()
+			go func() {
+				defer s.wg.Done()
+				startXDPCleanupLoop(xdpCtx, s.xdpLoader.CacheMap())
+			}()
 		}
 	} else {
 		monitor.Rec53Log.Infof("[XDP] disabled by config, running in Go-only cache mode")
@@ -382,6 +397,10 @@ func (s *server) Shutdown(ctx context.Context) error {
 	// Must happen after DNS listeners are stopped (no more cache writes)
 	// but before snapshot (snapshot doesn't need BPF map).
 	if s.xdpLoader != nil {
+		// Cancel metrics + cleanup goroutines first so they stop reading BPF maps.
+		if s.xdpCancel != nil {
+			s.xdpCancel()
+		}
 		globalXDPCacheMap.Store(nil)
 		if err := s.xdpLoader.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("[XDP] close: %w", err))

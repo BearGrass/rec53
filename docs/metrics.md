@@ -13,6 +13,14 @@ The address can be changed via the `-metric` CLI flag or the `dns.metric` config
 | `rec53_ipv2_p50_latency_ms` | Gauge | `ip` | Median nameserver RTT |
 | `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | 95th-percentile nameserver RTT |
 | `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | 99th-percentile nameserver RTT |
+| `rec53_xdp_cache_hits_total` | Gauge | — | XDP BPF cache hits (sum across all CPUs) |
+| `rec53_xdp_cache_misses_total` | Gauge | — | XDP BPF cache misses |
+| `rec53_xdp_pass_total` | Gauge | — | Packets passed to Go stack (non-DNS, malformed, etc.) |
+| `rec53_xdp_errors_total` | Gauge | — | XDP BPF processing errors |
+
+> **XDP metrics note:** The `rec53_xdp_*` metrics are Gauges (not Counters) because Go
+> reads absolute totals from BPF per-CPU arrays and sets the gauge each tick (5s interval).
+> These metrics are only populated when XDP is enabled; otherwise they remain at 0.
 
 > **Breaking change (v0.5.0):** The `name` label (raw FQDN) was removed from
 > `rec53_query_counter`, `rec53_response_counter`, and `rec53_latency` to
@@ -35,4 +43,10 @@ histogram_quantile(0.99, rate(rec53_latency_bucket[5m]))
 
 # Degraded nameservers (P50 > 500ms)
 rec53_ipv2_p50_latency_ms > 500
+
+# XDP cache hit ratio (when XDP is enabled)
+rec53_xdp_cache_hits_total / (rec53_xdp_cache_hits_total + rec53_xdp_cache_misses_total)
+
+# XDP error rate
+rec53_xdp_errors_total / (rec53_xdp_cache_hits_total + rec53_xdp_cache_misses_total + rec53_xdp_pass_total + rec53_xdp_errors_total)
 ```

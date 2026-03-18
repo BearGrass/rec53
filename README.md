@@ -20,8 +20,8 @@ rec53 is positioned as a lightweight, endpoint-side recursive resolver for perso
 - **TTL-based Caching** — deep-copy safe cache with negative caching (NXDOMAIN/NODATA)
 - **NS Warmup** — pre-populates IP pool on startup for low-latency cold start
 - **Cache Snapshot** — persists full DNS cache on shutdown and restores it before first query, eliminating cold-start latency after restart
-- **Prometheus Metrics** — per-query and per-nameserver observability
-- **XDP/eBPF Cache Fast Path** — cache hits served directly from the kernel via `XDP_TX` (zero syscalls, zero Go runtime overhead); requires Linux kernel >= 5.15 and CAP_BPF
+- **Prometheus Metrics** — per-query and per-nameserver observability; XDP cache counters (hits/misses/pass/errors) exported as gauges
+- **XDP/eBPF Cache Fast Path** — cache hits served directly from the kernel via `XDP_TX` (zero syscalls, zero Go runtime overhead); automatic TTL expiry cleanup; requires Linux kernel >= 5.15 and CAP_BPF
 - **Graceful Shutdown** — context-based cancellation with 5-second timeout
 
 ---
@@ -82,6 +82,17 @@ Override default paths via environment variables:
 | `BINARY_NAME` | `rec53` | Binary file name |
 | `SERVICE_NAME` | `rec53` | Systemd service name |
 | `BUILD_OUTPUT` | `dist/rec53` | Build output path |
+
+### Build Dependencies
+
+| Dependency | Required | Notes |
+|---|---|---|
+| Go 1.21+ | Always | Core build toolchain |
+| `clang` >= 14 | XDP only | Compiles eBPF C code; not needed at runtime |
+| `linux-headers` | XDP only | Kernel headers for BPF helper definitions |
+| `CAP_BPF` or root | XDP only | Required at runtime to load XDP program and attach to interface |
+
+> **XDP note:** XDP/eBPF support requires Linux kernel >= 5.15. After changing BPF C code, regenerate Go bindings with `go generate ./server/...`.
 
 ### Manual (without rec53ctl)
 

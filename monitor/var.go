@@ -60,5 +60,34 @@ var (
 		},
 	)
 
+	// XDP BPF per-CPU counters exported as Prometheus gauges.
+	// These are absolute counters read periodically from the BPF xdp_stats
+	// per-CPU array map (summed across all CPUs). Using Gauge instead of
+	// Counter because the values are set from BPF-side totals, not incremented.
+	XDPCacheHitsTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_cache_hits_total",
+			Help: "Total DNS cache hits served via XDP_TX (from BPF per-CPU counters)",
+		},
+	)
+	XDPCacheMissesTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_cache_misses_total",
+			Help: "Total DNS cache misses passed to Go resolver via XDP_PASS (from BPF per-CPU counters)",
+		},
+	)
+	XDPPassTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_pass_total",
+			Help: "Total packets passed to Go (non-DNS, non-UDP, TC bit, etc.) via XDP_PASS (from BPF per-CPU counters)",
+		},
+	)
+	XDPErrorsTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_errors_total",
+			Help: "Total XDP processing errors (from BPF per-CPU counters)",
+		},
+	)
+
 	Rec53Metric *Metric
 )
