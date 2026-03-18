@@ -100,10 +100,26 @@ func loadQueriesFromFile(path string) ([]query, error) {
 
 // ── worker ─────────────────────────────────────────────────────
 
+// worker sends DNS queries over a persistent connection, eliminating per-query
+// socket creation overhead. If the connection breaks, it reconnects automatically.
 func worker(server, proto string, timeout time.Duration,
 	in <-chan query, out chan<- result, wg *sync.WaitGroup) {
 	defer wg.Done()
-	c := &dns.Client{Net: proto, Timeout: timeout}
+
+	dial := func() *dns.Conn {
+		conn, err := dns.DialTimeout(proto, server, timeout)
+		if err != nil {
+			return nil
+		}
+		return conn
+	}
+
+	conn := dial()
+	defer func() {
+		if conn != nil {
+			conn.Close()
+		}
+	}()
 
 	for q := range in {
 		msg := new(dns.Msg)
@@ -111,9 +127,35 @@ func worker(server, proto string, timeout time.Duration,
 		msg.RecursionDesired = true
 
 		t0 := time.Now()
-		resp, _, err := c.Exchange(msg, server)
-		lat := time.Since(t0)
 
+		var resp *dns.Msg
+		var err error
+
+		// Try on persistent connection; reconnect once on failure.
+		for attempt := 0; attempt < 2; attempt++ {
+			if conn == nil {
+				conn = dial()
+				if conn == nil {
+					err = fmt.Errorf("dial failed")
+					break
+				}
+			}
+			conn.SetDeadline(t0.Add(timeout))
+			if err = conn.WriteMsg(msg); err != nil {
+				conn.Close()
+				conn = nil
+				continue
+			}
+			resp, err = conn.ReadMsg()
+			if err != nil {
+				conn.Close()
+				conn = nil
+				continue
+			}
+			break
+		}
+
+		lat := time.Since(t0)
 		r := result{latency: lat}
 		switch {
 		case err != nil && isTimeout(err):

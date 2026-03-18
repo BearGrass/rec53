@@ -41,6 +41,9 @@ QUERIES="$PROJECT_DIR/tools/dnsperf/queries-sample.txt"
 SERVER="127.0.0.1:5353"
 PPROF_ADDR="127.0.0.1:6060"
 
+# Tunable: concurrency level (override via environment: PERF_CONCURRENCY=256)
+CONCURRENCY="${PERF_CONCURRENCY:-128}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -65,6 +68,7 @@ trap cleanup EXIT
 
 # ── Step 0: Preparation ─────────────────────────────────────────────────────
 
+info "Concurrency: $CONCURRENCY (override with PERF_CONCURRENCY=N)"
 info "Creating results directory: $RESULTS_DIR"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
@@ -137,12 +141,12 @@ info "Cache warmup complete"
 # ── Step 4: dnsperf 3-run gate (c=64, 20s) ──────────────────────────────────
 
 info "═══════════════════════════════════════════════════════"
-info "  Gate 1: dnsperf QPS/P99 (3 runs, c=64, 20s)"
+info "  Gate 1: dnsperf QPS/P99 (3 runs, c=$CONCURRENCY, 20s)"
 info "═══════════════════════════════════════════════════════"
 
 for run in 1 2 3; do
     info "Run $run/3..."
-    "$DNSPERF" -server "$SERVER" -f "$QUERIES" -c 64 -d 20s -proto udp \
+    "$DNSPERF" -server "$SERVER" -f "$QUERIES" -c "$CONCURRENCY" -d 20s -proto udp \
         > "$RESULTS_DIR/dnsperf-run${run}.txt" 2>&1
     echo ""
     echo "--- dnsperf run $run output ---"
@@ -160,8 +164,8 @@ info "  Gate 2: pprof alloc_space capture during load"
 info "═══════════════════════════════════════════════════════"
 
 # Start a background dnsperf run for 30s to generate load during pprof capture
-info "Starting background load (c=64, 30s) for pprof capture..."
-"$DNSPERF" -server "$SERVER" -f "$QUERIES" -c 64 -d 30s -proto udp \
+info "Starting background load (c=$CONCURRENCY, 30s) for pprof capture..."
+"$DNSPERF" -server "$SERVER" -f "$QUERIES" -c "$CONCURRENCY" -d 30s -proto udp \
     > "$RESULTS_DIR/dnsperf-pprof-load.txt" 2>&1 &
 LOAD_PID=$!
 
@@ -200,7 +204,7 @@ info "  RESULTS SUMMARY"
 info "═══════════════════════════════════════════════════════"
 echo ""
 
-echo "──── dnsperf runs (c=64, 20s) ────"
+echo "──── dnsperf runs (c=$CONCURRENCY, 20s) ────"
 echo ""
 printf "%-5s  %-12s  %-10s  %-10s  %-10s  %-8s  %-8s\n" \
     "Run" "QPS" "P50" "P95" "P99" "Errors" "Timeouts"
