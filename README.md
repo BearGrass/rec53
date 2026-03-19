@@ -133,6 +133,7 @@ Reference docs:
 
 - [Metrics](docs/metrics.md)
 - [Benchmarks](docs/benchmarks.md)
+- [Physical NIC XDP Benchmark Report (Chinese)](docs/xdp-physical-benchmark-2026-03-19.zh.md)
 - [Performance Regression Notes](docs/perf-regression.md)
 - [Conventions](.rec53/CONVENTIONS.md)
 - [Roadmap](.rec53/ROADMAP.md)

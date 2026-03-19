@@ -89,11 +89,26 @@ func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfi
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	startTime := time.Now()
 	reply := &dns.Msg{}
+	queryName := ""
+	queryType := "UNKNOWN"
+	if r != nil && len(r.Question) > 0 {
+		queryName = r.Question[0].Name
+		queryType = dns.TypeToString[r.Question[0].Qtype]
+	}
+	done := monitor.DNSRequestStarted(queryName, queryType)
+	defer func() {
+		rcode := "UNKNOWN"
+		if reply != nil {
+			rcode = dns.RcodeToString[reply.Rcode]
+		}
+		done(rcode, nil)
+	}()
 
 	// Guard against malformed requests with no question (QDCOUNT=0) to prevent panic
 	if len(r.Question) == 0 {
 		reply.SetRcode(r, dns.RcodeFormatError)
-		w.WriteMsg(reply)
+		err := w.WriteMsg(reply)
+		done(dns.RcodeToString[reply.Rcode], err)
 		return
 	}
 
@@ -132,6 +147,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	monitor.Rec53Metric.LatencyHistogramObserve("latency", dns.TypeToString[reply.Question[0].Qtype], dns.RcodeToString[reply.Rcode], float64(time.Since(startTime).Milliseconds()))
 	if err := w.WriteMsg(reply); err != nil {
 		monitor.Rec53Log.Errorf("Failed to write response: %v", err)
+		done(dns.RcodeToString[reply.Rcode], err)
 	}
 }
 

@@ -418,6 +418,14 @@ func main() {
 	// Wait for shutdown signal or server error
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	diagSig := make(chan os.Signal, 1)
+	signal.Notify(diagSig, syscall.SIGUSR1)
+	defer signal.Stop(diagSig)
+	go func() {
+		for range diagSig {
+			monitor.DumpRuntimeDiagnostics("signal SIGUSR1")
+		}
+	}()
 
 	waitForSignal(sig, errChan)
 

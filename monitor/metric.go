@@ -61,7 +61,7 @@ func InitMetricWithAddr(addr string) {
 	}
 	Rec53Metric.Register()
 
-	http.Handle("/metric", promhttp.Handler())
+	http.Handle("/metric", instrumentMetricsHandler(promhttp.Handler()))
 	MetricServer = &http.Server{Addr: addr}
 	go func() {
 		if err := MetricServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

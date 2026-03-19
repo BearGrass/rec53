@@ -603,3 +603,97 @@ sudo bpftool link list   # should show xdp prog on veth-rec53
 # Cleanup
 sudo ip netns del ns-client
 ```
+
+## Physical NIC XDP Benchmark (direct cable, multi-domain, 2026-03-19)
+
+This section records a physical-host validation run for the XDP fast path on a
+directly connected link. It is a different topology from the earlier `veth`
+test above, so the numbers should be read as a separate snapshot rather than a
+drop-in replacement for the `veth + netns` baseline.
+
+### Test environment
+
+- Server host: Intel i7-1165G7 (4C8T), Linux `6.8.0-101-generic`
+- Client host: AMD Ryzen 7 4800H (8C16T), Linux `6.17.0-19-generic`
+- Direct link: `192.168.53.1/24` (`enp89s0`, driver `igc`) <-> `192.168.53.2/24`
+  (`eno1`, driver `r8169`)
+- Link negotiated at `1000Mb/s`, full duplex, autonegotiation on
+- Server config: `listen=192.168.53.1:53`, `metric=192.168.53.1:9999`,
+  `listeners=1`, `warmup=false`, `xdp.enabled=true`, `xdp.interface=enp89s0`
+- Query set: `tools/dnsperf/queries-sample.txt` (13 pre-warmed names/types:
+  A/AAAA/MX/TXT/NS mix)
+- Warmup: `dnsperf -c 4 -d 15s`
+- Load shape: 4 parallel `dnsperf` processes, each `-c 50 -d 180s`
+
+### Raw runs
+
+| Run | Queries | Duration | QPS | P50 | P95 | P99 | Timeouts | Errors |
+|-----|---------|----------|-----|-----|-----|-----|----------|--------|
+| 1 | 14,335,475 | 180.03 s | 79,626.8 | 306 us | 1.3 ms | 5.3 ms | 0 | 0 |
+| 2 | 14,291,676 | 180.00 s | 79,397.7 | 305 us | 1.3 ms | 5.3 ms | 0 | 0 |
+| 3 | 14,664,976 | 180.07 s | 81,440.0 | 302 us | 1.3 ms | 5.1 ms | 0 | 0 |
+| 4 | 14,430,141 | 180.09 s | 80,128.0 | 304 us | 1.3 ms | 5.2 ms | 0 | 0 |
+
+### Summary
+
+- Combined QPS: **320,592.5**
+- Total queries: **57,722,268**
+- Timeouts: **0**
+- Errors: **0**
+- Per-process P50 range: **302-306 us**
+- Per-process P99 range: **5.1-5.3 ms**
+
+### XDP verification
+
+Prometheus counters on the server remained healthy throughout the run:
+
+- `rec53_xdp_status`: stayed at `1`
+- `rec53_xdp_cache_hits_total`: `30,778,790 -> 88,536,610`
+- `rec53_xdp_cache_misses_total`: `51 -> 27,346`
+- `rec53_xdp_errors_total`: `0 -> 0`
+- `rec53_xdp_pass_total`: `7 -> 15`
+
+Observed deltas across warmup + benchmark:
+
+- XDP hits: `+57,757,820`
+- XDP misses: `+27,295`
+- XDP pass: `+8`
+- Effective hit ratio: **99.95%**
+
+This confirms the 3-minute multi-domain run remained dominated by the XDP cache
+fast path rather than falling back to the normal Go resolver path.
+
+### Notes
+
+1. The client NIC (`r8169`) exposes only a single receive interrupt in this
+   setup and reports `receive-hashing: off [fixed]`. That limits how well reply
+   traffic can spread across client CPUs and likely caps the achievable ceiling.
+2. Manual IRQ/process affinity tuning did not materially improve throughput in
+   this environment; the 30-second plateau before this run was already around
+   `~305K QPS`, and the longer 180-second run stabilised at `~320K QPS`.
+3. The earlier 5-second numbers understated steady-state throughput. For this
+   topology, at least `30s` is needed for a meaningful sustained-load snapshot,
+   and `180s` gives a better user-facing number.
+
+### Reproduce
+
+```bash
+# server
+go build -o rec53 ./cmd
+sudo ./rec53 --config /tmp/rec53-local-xdp.yaml -rec53.log /tmp/rec53-bench.log
+
+# client
+cd /home/long/code/rec53
+go build -o tools/dnsperf/dnsperf ./tools/dnsperf
+awk 'NF && $1 !~ /^#/' tools/dnsperf/queries-sample.txt > /tmp/query-multi.txt
+
+# warmup
+./tools/dnsperf/dnsperf -server 192.168.53.1:53 -f /tmp/query-multi.txt -c 4 -d 15s
+
+# benchmark
+for i in 1 2 3 4; do
+  ./tools/dnsperf/dnsperf -server 192.168.53.1:53 \
+    -f /tmp/query-multi.txt -c 50 -d 180s > /tmp/dnsperf-multi-$i.out &
+done
+wait
+```
