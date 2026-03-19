@@ -1,209 +1,132 @@
 # AGENTS.md
 
-Practical guidance for agentic coding systems operating on this repository.
+Minimal working guide for AI coding agents in this repository.
 
-## Build & Run
+## Scope
+
+- This file is for execution guidance: what to run, what to avoid, and which repo rules matter.
+- Do not treat it as full architecture documentation; use `docs/architecture.md` for deeper system design.
+- There is currently no `.cursorrules`, `.cursor/rules/`, or `.github/copilot-instructions.md` in this repo.
+
+## Project Facts
+
+- Language: Go
+- Module: `rec53`
+- Go version: `go 1.25.0`
+- Main binary entry: `./cmd`
+- Main packages: `cmd`, `server`, `monitor`, `utils`, `e2e`
+
+## Build And Run
 
 ```bash
-go build -o rec53 ./cmd          # build binary
-./generate-config.sh             # generate default config (first run only)
+go build -o rec53 ./cmd
+./generate-config.sh
 ./rec53 --config ./config.yaml
 ./rec53 --config ./config.yaml --no-warmup
 ./rec53 --config ./config.yaml -listen 0.0.0.0:53 -metric :9099 -log-level debug
 ```
 
+## Format, Lint, Verify
+
+```bash
+gofmt -w .
+gofmt -l .
+go vet ./...
+```
+
+- There is no `Makefile` and no repo-local `golangci-lint` config.
+- Standard verification is `gofmt`, `go vet`, and the most relevant `go test` command.
+
 ## Test Commands
 
 ```bash
-# Full suite (always use -race for concurrent code)
+# Full suite
 go test -race ./...
-go test -race -timeout 120s ./... -count=1   # disable test cache
+go test -race -timeout 120s ./... -count=1
 
-# Single test — most common pattern for agents
-go test -v -run TestNameHere ./package/...
-# Examples:
-go test -v -run TestResolverIntegration ./e2e/...
-go test -v -run TestIPPoolSelection ./server/...
-go test -v -run TestCacheHitMiss ./server/...
+# Single exact test
+go test -v -run '^TestName$' ./server/...
+
+# Common exact examples
+go test -v -run '^TestValidateConfig$' ./cmd/...
+go test -v -run '^TestResolverIntegration$' ./e2e/...
+go test -v -run '^TestIPPool_GetBestIPsV2_MultipleIPs$' ./server/...
 
 # Package-level runs
+go test -v ./cmd/...
 go test -v ./server/...
 go test -v ./e2e/...
-go test -short ./...   # skip long-running integration tests
+go test -v ./monitor/...
 
-# Coverage
+# Other useful modes
+go test -short ./...
+go test -bench=. ./server/...
 go test -cover ./...
 ```
 
-## Code Style
+## Pick The Smallest Relevant Test First
 
-### Formatting & Imports
+- CLI/config/logging/startup/signal changes: `./cmd/...`
+- Resolver/cache/warmup/snapshot/XDP/state-machine changes: `./server/...`
+- End-to-end query behavior/forwarding/recursion/lifecycle changes: `./e2e/...`
+- Metrics/logger changes: `./monitor/...`
+- Prefer exact `-run` first, then package tests, then `-race ./...`.
 
-- `gofmt -w .` before every commit; Go 1.21+
-- Import groups: stdlib → external → internal (`rec53/*`), blank line between each:
+## Repo-Specific Testing Rules
 
-```go
-import (
-    "fmt"
-    "time"
+- Prefer `-race` for non-trivial changes.
+- `e2e/main_test.go` owns `TestMain`; do not add per-file `init()` setup in e2e tests.
+- Initialize monitor globals once in test bootstrap, not once per file.
+- Do not call `FlushCacheForTest()` or `ResetIPPoolForTest()` unless a test truly requires cold state.
+- Avoid unnecessary cold-cache resets; iterative resolution can be slow.
+- Use `NewMockAuthorityServer(t, zone)` from `e2e/helpers.go` for authoritative fixtures.
+- Use `SetIterPort` / `ResetIterPort` when tests need iterative resolver port control.
 
-    "github.com/miekg/dns"
-    "github.com/prometheus/client_golang/prometheus"
+## Code Style: Keep To Existing Patterns
 
-    "rec53/monitor"
-    "rec53/server"
-)
-```
+- Run `gofmt -w .` before finishing Go changes.
+- Import order: standard library, external deps, internal `rec53/*` packages.
+- Packages are lowercase; exported identifiers use PascalCase; unexported identifiers use camelCase.
+- Keep existing constructor and state naming patterns such as `newXState(...)` and `newXStateWithContext(...)`.
+- Use pointer receivers for mutating/stateful structs.
+- Preserve existing public signatures and flow-control return patterns unless a change is necessary.
 
-### Naming Conventions
+## Error Handling And Logging
 
-| Element | Convention | Example |
-|---------|------------|---------|
-| Packages | lowercase, single word | `server`, `monitor`, `utils` |
-| Exported types/funcs | PascalCase | `IPPool`, `NewServer`, `GetBestIPsV2` |
-| Unexported types/funcs | camelCase | `inCacheState`, `getBestIPs` |
-| Constants | SCREAMING_SNAKE_CASE | `STATE_INIT`, `MAX_IP_LATENCY`, `IN_CACHE_HIT_CACHE` |
-| Package-level globals | `global` + PascalCase | `globalDnsCache`, `globalIPPool` |
-| Context keys | unexported named type | `type contextKeyType string` |
+- Check errors immediately with `if err != nil`.
+- Wrap propagated errors with `fmt.Errorf("...: %w", err)`.
+- State handlers return `(int, error)`; the `int` is flow control.
+- Include enough context to identify the failed state or operation.
+- Use `monitor.Rec53Log` for logging.
+- Include domain, query type, and upstream IP when relevant.
+- Prefix resolver hot-path logs with stable tags like `[IN_CACHE]` or `[ITER]`.
 
-### Types & Receivers
+## Concurrency And Shared State
 
-- Pointer receivers for state-mutating methods: `func (s *inCacheState) handle(...)`
-- Value receivers when state is read-only and struct is small
-- State structs always embed `request`, `response *dns.Msg` and `ctx context.Context`
+- Preserve the existing synchronization strategy around shared maps such as DNS cache and IP pool.
+- Use `sync.RWMutex` for shared maps and `sync/atomic` for hot counters/flags.
+- Use `context.Context` for cancellation.
+- Avoid goroutines that cannot be stopped.
+- Prefer bounded concurrency where the repo already uses semaphore patterns.
 
-### Error Handling
+## Resolver And Cache Safety
 
-- State `handle()` methods return `(int, error)` — int is the next state code, error is context
-- Return codes defined in `server/state_machine.go` (e.g. `IN_CACHE_HIT_CACHE`, `ITER_COMMON_ERROR`)
-- Always include context in error strings:
+- Keep state transitions explicit and testable.
+- Typical resolver flow is `STATE_INIT -> IN_CACHE -> CHECK_RESP -> IN_GLUE -> IN_GLUE_CACHE -> ITER -> RET_RESP`.
+- Cache keys follow `domain.:qtype`.
+- Use cache helpers such as `getCacheCopyByType` and `setCacheCopyByType`; do not bypass them.
+- Cache-read DNS messages are not safe for in-place RR field mutation; deep-copy before mutation.
 
-```go
-return ITER_COMMON_ERROR, fmt.Errorf("request is nil in %s", s.getCurrentState())
-```
+## Docs To Update When Behavior Changes
 
-- Never swallow errors silently; log at `Debugf` or `Errorf` before returning
+- User-facing behavior, flags, examples, or operations: update `README.md` and `README.zh.md` together.
+- Architecture or package responsibility changes: update `docs/architecture.md`.
+- New standard coding patterns: update `.rec53/CONVENTIONS.md`.
+- If benchmark docs change, run relevant benchmarks when feasible; do not invent fresh numbers.
 
-### Logging
+## Agent Workflow
 
-Use `monitor.Rec53Log` (zap.SugaredLogger):
-
-```go
-monitor.Rec53Log.Debugf("[STATE] cache hit for %s (type: %s)", q.Name, dns.TypeToString[q.Qtype])
-monitor.Rec53Log.Errorf("[STATE] handler failed: state=%d err=%v", stm.getCurrentState(), err)
-```
-
-- Prefix log lines with `[STATE_NAME]` for easy grep
-- Include domain, query type, and IP in log messages
-
-### Concurrency
-
-- `sync.RWMutex` for shared maps (`globalIPPool`, `globalDnsCache`)
-- `RLock`/`RUnlock` for reads; `Lock`/`Unlock` for writes — always `defer` unlock immediately
-- `sync/atomic` for counters/booleans inside `IPQuality` structs (lock-free fast path)
-- Context-based cancellation for goroutines; no bare `time.Sleep` in loops
-- Semaphore pattern (`make(chan struct{}, N)`) to cap goroutine concurrency
-
-### Comments
-
-- Export comments start with the identifier name; explain *why*, not just what
-- Complex algorithms (state transitions, concurrency design) deserve block comments
-
-```go
-// IPQualityV2 tracks response latency using a sliding window ring buffer
-// and exports P50/P95/P99 to Prometheus. Thread-safe via atomic operations.
-type IPQualityV2 struct { ... }
-```
-
-## State Machine Pattern
-
-Each state is a struct implementing the `stateMachine` interface:
-
-```go
-type stateMachine interface {
-    getCurrentState() int
-    getRequest()      *dns.Msg
-    getResponse()     *dns.Msg
-    handle(req, resp *dns.Msg) (int, error)
-}
-```
-
-Constructor pattern (also provide a `WithContext` variant):
-
-```go
-func newInCacheState(req, resp *dns.Msg) *inCacheState {
-    return &inCacheState{request: req, response: resp, ctx: context.Background()}
-}
-```
-
-States: `STATE_INIT → IN_CACHE → CHECK_RESP → IN_GLUE → IN_GLUE_CACHE → ITER → RET_RESP`
-
-## Testing Patterns
-
-- Table-driven tests with `t.Run(tt.name, ...)` — see `server/ip_pool_test.go`
-- Always run with `-race`; integration tests use `-timeout 120s`
-- E2E tests live in `e2e/`; `e2e/main_test.go` owns `TestMain` — **do not add `init()` to individual e2e files**
-- Initialize monitor singletons once in `TestMain`, never per-file:
-
-```go
-// e2e/main_test.go — already exists, do not duplicate
-func TestMain(m *testing.M) {
-    monitor.Rec53Log = zap.NewNop().Sugar()
-    monitor.InitMetricForTest() // no Prometheus registration, no HTTP listener
-    os.Exit(m.Run())
-}
-```
-
-- **Do not call `FlushCacheForTest()` / `ResetIPPoolForTest()` indiscriminately** — cold cache causes
-  slow iterative resolution (e.g. `www.huawei.com` takes 6-15 s). Only reset state when the test
-  correctness explicitly requires a clean slate (e.g. `TestServerUDPAndTCP`, `TestMalformedQueries`).
-- Mock authority servers: `NewMockAuthorityServer(t, zone)` from `e2e/helpers.go`
-- Test helpers that expose internal state: `SetIterPort` / `ResetIterPort` in `server/state_define.go`
-
-## Key Architecture Notes
-
-- **Cache keys**: `"domain.:qtype"` — use `getCacheCopyByType` / `setCacheCopyByType`; always `msg.Copy()` on retrieval to prevent mutation of cached data
-- **IP selection**: `globalIPPool.GetBestIPsV2(ips)` returns `(best, secondary)`; `RecordLatency` / `RecordFailure` update quality; probe loop runs every 30 s
-- **CNAME / NS resolution depth**: context key `contextKeyNSResolutionDepth` prevents recursive deadlock in `resolveNSIPsConcurrently`
-- **Max iterations**: 50 state machine loops (CNAME loop guard) — see `server/state_machine.go`
-
-## Package Globals
-
-| Variable | Package | Init |
-|----------|---------|------|
-| `globalDnsCache` | `server` | `newCache()` at package init |
-| `globalIPPool` | `server` | `NewIPPool()` at package init |
-| `Rec53Metric *Metric` | `monitor` | `InitMetric(addr)` or `InitMetricForTest()` |
-| `Rec53Log *zap.SugaredLogger` | `monitor` | set by `cmd/rec53.go` or test `TestMain` |
-
-## Dependencies
-
-- `github.com/miekg/dns` — DNS protocol
-- `github.com/patrickmn/go-cache` — TTL cache
-- `github.com/prometheus/client_golang` — metrics
-- `go.uber.org/zap` — structured logging
-- `gopkg.in/natefinch/lumberjack.v2` — log rotation
-- `gopkg.in/yaml.v2` — config parsing
-
-## Document Maintenance
-
-Update these docs **in the same commit** as the code change:
-
-- New package/dir → `docs/architecture.md`
-- New dependency → this file + `docs/architecture.md`
-- New patterns → `.rec53/CONVENTIONS.md`
-- User-facing changes → `README.md` + `README.zh.md`
-- Benchmark docs update policy (`docs/benchmarks.md` / `docs/perf-regression.md`):
-  - When the user asks to "update benchmark docs", first run relevant benchmarks/load tests/pprof commands when feasible, then update docs based on measured results.
-  - If tests cannot be run (env/time/dependency limits), explicitly state what could not be executed and avoid presenting unverified numbers as fresh measurements.
-- README sync policy:
-  - Any change to features, behavior, config, CLI flags, examples, or operational notes in one README must be mirrored in the other (`README.md` and `README.zh.md`) in the same commit.
-  - If a change is intentionally language-specific, add a short rationale in the commit/PR description; otherwise treat single-sided README edits as incomplete.
-
-Related: `docs/architecture.md`, `.rec53/CONVENTIONS.md`, `.rec53/ROADMAP.md`
-
-## Communication Language
-
-- Default: Respond to the user in Simplified Chinese.
-- Override: If the user explicitly requests another language (for example, English or Japanese), switch to that language.
-- Priority: An explicit language request in the current user turn overrides the default rule.
+- Start narrow: read the package you will touch, run one targeted test, then widen scope.
+- Prefer package-level verification during iteration.
+- Before finishing substantial Go work, run `gofmt -w .`, `go vet ./...`, and the most relevant `go test` command.
+- Use this file for execution rules, `.rec53/CONVENTIONS.md` for longer conventions, and `docs/architecture.md` for deeper design context.
