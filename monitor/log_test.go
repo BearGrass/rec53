@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.uber.org/zap/zapcore"
@@ -74,4 +76,26 @@ func TestAtomicLevel(t *testing.T) {
 
 	// Restore initial level
 	atomicLevel.SetLevel(initialLevel)
+}
+
+func TestGetLogWriterCreatesParentDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	original := *logFile
+	t.Cleanup(func() {
+		*logFile = original
+	})
+
+	*logFile = filepath.Join(tmpDir, "nested", "rec53.log")
+
+	writer := getLogWriter()
+	if _, err := writer.Write([]byte("hello\n")); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Dir(*logFile)); err != nil {
+		t.Fatalf("expected log dir to exist: %v", err)
+	}
+	if _, err := os.Stat(*logFile); err != nil {
+		t.Fatalf("expected log file to exist: %v", err)
+	}
 }

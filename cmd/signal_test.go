@@ -445,7 +445,7 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
-// TestLogLevelFlag tests the -log-level flag
+// TestLogLevelFlag tests that an invalid -log-level fails fast with a configuration error.
 func TestLogLevelFlag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping in short mode")
@@ -466,27 +466,20 @@ func TestLogLevelFlag(t *testing.T) {
 	configPath := createTestConfigFile(t, fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf(":%d", metricPort))
 	defer os.Remove(configPath)
 
-	// Start with invalid log level (should default to info)
+	// Start with invalid log level; this should fail fast during config validation.
 	cmd := exec.Command(binaryPath,
 		"-config", configPath,
 		"-log-level", "invalid",
 	)
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start process: %v", err)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected invalid log level to prevent startup")
 	}
 
-	// Wait for server to start
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify server is running (invalid log level should not prevent startup)
-	if !isPortInUse(port) {
-		t.Error("Server did not start with invalid log level")
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "configuration error: dns.log_level must be one of") {
+		t.Fatalf("expected configuration error for invalid log level, got: %s", outputStr)
 	}
-
-	// Cleanup
-	cmd.Process.Signal(syscall.SIGTERM)
-	cmd.Wait()
 }
 
 // buildTestBinary builds the rec53 binary for testing

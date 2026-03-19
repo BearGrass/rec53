@@ -6,8 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-19
+
+### Release Scope
+
+- `v1.0.0` is positioned for personal users and simple IT environments: single-machine or node-local recursive DNS, explicit operator-managed deployment, and the default Go path as the production baseline.
+- It is not positioned as a public open resolver, centralized recursive DNS fleet, or enterprise high-availability DNS platform.
+
 ### Changed
 
+- Reorganized the documentation for the v1.0.0 release track: `README.md` and `README.zh.md` now act as concise entry points, user-facing docs live under `docs/user/`, and developer-facing docs live under `docs/dev/`.
+- Refocused `docs/architecture.md` on developer-facing architecture, lifecycle, cache, and concurrency boundaries instead of mixing deployment guidance with implementation details.
+- Expanded Prometheus documentation in `docs/metrics.md` and `docs/user/operations.md` to cover scrape setup, first-deployment verification, core PromQL checks, and metric-label stability guidance for both operators and developers.
+- `server.Run()` no longer waits forever for readiness when listener startup fails before `NotifyStartedFunc` fires; startup errors now surface without blocking the caller.
+- `server.Shutdown()` now cancels warmup and XDP background work before waiting on the shared wait group, preventing shutdown hangs when background goroutines depend on cancellation to exit.
+- Tightened configuration validation in `cmd/rec53.go`: invalid `dns.log_level` values now fail fast, `debug.pprof_listen` is validated when pprof is enabled, and config file read errors are reported more explicitly.
+- Updated startup/config tests in `server/server_test.go`, `cmd/config_validation_test.go`, and `cmd/signal_test.go` to cover the new fail-fast and non-blocking lifecycle behavior.
+- Hardened `rec53ctl` lifecycle behavior for safer deployment: installs now refuse to overwrite unmanaged unit/binary targets, installed services use an explicit `LOG_FILE` path (`/var/log/rec53/rec53.log` by default), and `uninstall` preserves config/logs unless `--purge` is requested.
+- Added regression tests for `rec53ctl` install/uninstall safety and for logger parent-directory creation so the default and installed log paths remain predictable.
 - Replaced deep copy (`dns.Msg.Copy()`) on cache reads with a shallow copy (`shallowCopyMsg`) that shares RR slice elements. Reduces cache-read allocations from 5 allocs/op to 3 allocs/op (−40%) and latency from 234 ns to 175 ns (−25%) per `getCacheCopy` call. Overall QPS improvement: ~111K → ~119K (+7.6%).
 - Strip OPT (EDNS0 pseudo-RR) from messages before caching to prevent `Pack()` side-effects (`OPT.SetExtendedRcode` mutates `OPT.Hdr.Ttl`), making shallow-copied messages safe for concurrent packing.
 - Added `Cache Read Safety` section to coding conventions (`.rec53/CONVENTIONS.md`): callers of `getCacheCopy` / `getCacheCopyByType` MUST NOT modify individual RR fields on returned values; slice-level operations (append, replace, truncate) are safe.
@@ -67,7 +83,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Go version upgraded to 1.21+
 - Log level setting fixed (zap.AtomicLevel)
 
-[Unreleased]: https://github.com/username/rec53/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/username/rec53/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/username/rec53/compare/v0.1.0...v0.4.1
-[0.1.0]: https://github.com/username/rec53/releases/tag/v0.1.0
+[Unreleased]: https://github.com/BearGrass/rec53/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/BearGrass/rec53/releases/tag/v1.0.0
+[0.5.0]: https://github.com/BearGrass/rec53/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/BearGrass/rec53/compare/v0.1.0...v0.4.1
+[0.1.0]: https://github.com/BearGrass/rec53/releases/tag/v0.1.0

@@ -200,6 +200,7 @@ func (s *server) Run() <-chan error {
 		n = 1
 	}
 	reusePort := n > 1
+	startupErr := make(chan error, 2*n)
 
 	// Create ready channels and server slices before starting goroutines
 	s.udpReady = make(chan struct{})
@@ -310,14 +311,18 @@ func (s *server) Run() <-chan error {
 		go func() {
 			defer s.wg.Done()
 			if err := udp.ListenAndServe(); err != nil {
-				s.errChan <- fmt.Errorf("udp listener[%d]: %w", idx, err)
+				err = fmt.Errorf("udp listener[%d]: %w", idx, err)
+				s.errChan <- err
+				startupErr <- err
 			}
 		}()
 
 		go func() {
 			defer s.wg.Done()
 			if err := tcp.ListenAndServe(); err != nil {
-				s.errChan <- fmt.Errorf("tcp listener[%d]: %w", idx, err)
+				err = fmt.Errorf("tcp listener[%d]: %w", idx, err)
+				s.errChan <- err
+				startupErr <- err
 			}
 		}()
 	}
@@ -330,8 +335,19 @@ func (s *server) Run() <-chan error {
 
 	// Wait for at least the first UDP and TCP server to be ready before returning.
 	// This ensures UDPAddr() and TCPAddr() are safe to call immediately after Run().
-	<-s.udpReady
-	<-s.tcpReady
+	udpReady := s.udpReady
+	tcpReady := s.tcpReady
+	for udpReady != nil || tcpReady != nil {
+		select {
+		case <-udpReady:
+			udpReady = nil
+		case <-tcpReady:
+			tcpReady = nil
+		case err := <-startupErr:
+			monitor.Rec53Log.Errorf("DNS server startup failed before ready: %v", err)
+			return s.errChan
+		}
+	}
 
 	if reusePort {
 		monitor.Rec53Log.Infof("Started %d UDP + %d TCP listeners with SO_REUSEPORT on %s", n, n, s.listen)
@@ -368,6 +384,9 @@ func (s *server) Shutdown(ctx context.Context) error {
 	if s.warmupCancel != nil {
 		s.warmupCancel()
 	}
+	if s.xdpCancel != nil {
+		s.xdpCancel()
+	}
 
 	var errs []error
 
@@ -397,10 +416,6 @@ func (s *server) Shutdown(ctx context.Context) error {
 	// Must happen after DNS listeners are stopped (no more cache writes)
 	// but before snapshot (snapshot doesn't need BPF map).
 	if s.xdpLoader != nil {
-		// Cancel metrics + cleanup goroutines first so they stop reading BPF maps.
-		if s.xdpCancel != nil {
-			s.xdpCancel()
-		}
 		globalXDPCacheMap.Store(nil)
 		if err := s.xdpLoader.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("[XDP] close: %w", err))

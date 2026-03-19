@@ -9,9 +9,13 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/rec53}"
 BINARY_NAME="${BINARY_NAME:-rec53}"
 SERVICE_NAME="${SERVICE_NAME:-rec53}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+LOG_FILE="${LOG_FILE:-/var/log/rec53/rec53.log}"
 BUILD_OUTPUT="${BUILD_OUTPUT:-dist/rec53}"
 
-UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+UNIT_FILE="${SYSTEMD_UNIT_DIR}/${SERVICE_NAME}.service"
+MANAGED_MARKER_FILE="${CONFIG_DIR}/.managed-by-rec53ctl"
+MANAGED_SIGNATURE="managed-by=rec53ctl"
 
 ## --- Helper Functions ---
 
@@ -29,6 +33,82 @@ require_root() {
 require_systemctl() {
     if ! command -v systemctl >/dev/null 2>&1; then
         die "systemctl not found. This command requires systemd."
+    fi
+}
+
+require_absolute_path() {
+    local name="$1"
+    local value="$2"
+    case "${value}" in
+        /*) ;;
+        *)
+            die "${name} must be an absolute path: ${value}"
+            ;;
+    esac
+
+    case "${value}" in
+        *[[:space:]]*)
+            die "${name} must not contain whitespace: ${value}"
+            ;;
+    esac
+}
+
+require_safe_basename() {
+    local name="$1"
+    local value="$2"
+    case "${value}" in
+        ""|.|..|*/*)
+            die "${name} must be a simple file or service name: ${value}"
+            ;;
+    esac
+
+    case "${value}" in
+        *[!A-Za-z0-9._@+-]*)
+            die "${name} contains unsupported characters: ${value}"
+            ;;
+    esac
+}
+
+validate_control_paths() {
+    require_absolute_path "INSTALL_DIR" "${INSTALL_DIR}"
+    require_absolute_path "CONFIG_DIR" "${CONFIG_DIR}"
+    require_absolute_path "SYSTEMD_UNIT_DIR" "${SYSTEMD_UNIT_DIR}"
+    require_absolute_path "LOG_FILE" "${LOG_FILE}"
+    require_safe_basename "BINARY_NAME" "${BINARY_NAME}"
+    require_safe_basename "SERVICE_NAME" "${SERVICE_NAME}"
+}
+
+is_managed_marker_present() {
+    [ -f "${MANAGED_MARKER_FILE}" ] && grep -Fq "${MANAGED_SIGNATURE}" "${MANAGED_MARKER_FILE}"
+}
+
+is_managed_unit_present() {
+    [ -f "${UNIT_FILE}" ] && grep -Fqx "# Managed by rec53ctl" "${UNIT_FILE}"
+}
+
+assert_managed_installation() {
+    if is_managed_marker_present || is_managed_unit_present; then
+        return 0
+    fi
+    die "refusing to modify existing installation because it is not marked as managed by rec53ctl"
+}
+
+write_managed_marker() {
+    cat > "${MANAGED_MARKER_FILE}" <<EOF
+${MANAGED_SIGNATURE}
+binary=${INSTALL_DIR}/${BINARY_NAME}
+unit=${UNIT_FILE}
+config=${CONFIG_DIR}/config.yaml
+log=${LOG_FILE}
+EOF
+    chmod 644 "${MANAGED_MARKER_FILE}"
+}
+
+remove_empty_dir_if_possible() {
+    local dir="$1"
+    if [ -d "${dir}" ] && [ -z "$(ls -A "${dir}" 2>/dev/null)" ]; then
+        rmdir "${dir}"
+        echo "Removed empty directory: ${dir}"
     fi
 }
 
@@ -56,6 +136,7 @@ cmd_build() {
 cmd_install() {
     require_root
     require_systemctl
+    validate_control_paths
 
     local force_config=0
     while [ $# -gt 0 ]; do
@@ -78,6 +159,13 @@ cmd_install() {
         need_config_copy=1
     fi
 
+    if [ -f "${UNIT_FILE}" ] && ! is_managed_unit_present; then
+        die "${UNIT_FILE} already exists and is not managed by rec53ctl"
+    fi
+    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ] && ! is_managed_marker_present; then
+        die "${INSTALL_DIR}/${BINARY_NAME} already exists and is not managed by rec53ctl"
+    fi
+
     # Build
     cmd_build
 
@@ -94,14 +182,20 @@ cmd_install() {
         echo "Installed config: ${CONFIG_DIR}/config.yaml"
     fi
 
+    mkdir -p "$(dirname "${LOG_FILE}")"
+    echo "Runtime logs will be written to: ${LOG_FILE}"
+    write_managed_marker
+
     # Generate systemd unit file
+    mkdir -p "${SYSTEMD_UNIT_DIR}"
     cat > "${UNIT_FILE}" <<EOF
+# Managed by rec53ctl
 [Unit]
 Description=rec53 Recursive DNS Resolver
 After=network.target
 
 [Service]
-ExecStart=${INSTALL_DIR}/${BINARY_NAME} --config ${CONFIG_DIR}/config.yaml
+ExecStart=${INSTALL_DIR}/${BINARY_NAME} --config ${CONFIG_DIR}/config.yaml -rec53.log ${LOG_FILE}
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal
@@ -124,6 +218,7 @@ EOF
 cmd_upgrade() {
     require_root
     require_systemctl
+    validate_control_paths
 
     # Verify installation exists
     if [ ! -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
@@ -132,6 +227,7 @@ cmd_upgrade() {
     if [ ! -f "${UNIT_FILE}" ]; then
         die "${UNIT_FILE} not found. Run install first."
     fi
+    assert_managed_installation
 
     # Backup current binary
     cp "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}.bak"
@@ -178,6 +274,20 @@ cmd_upgrade() {
 
 cmd_uninstall() {
     require_root
+    validate_control_paths
+
+    local purge=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --purge) purge=1 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+        shift
+    done
+
+    if [ -f "${UNIT_FILE}" ] || [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        assert_managed_installation
+    fi
 
     # Stop and disable service if unit file exists
     if [ -f "${UNIT_FILE}" ]; then
@@ -200,18 +310,28 @@ cmd_uninstall() {
         echo "Binary not found at ${INSTALL_DIR}/${BINARY_NAME}; skipping."
     fi
 
-    # Remove config.yaml only; preserve CONFIG_DIR if non-empty
-    if [ -f "${CONFIG_DIR}/config.yaml" ]; then
-        rm -f "${CONFIG_DIR}/config.yaml"
-        echo "Removed config: ${CONFIG_DIR}/config.yaml"
-    fi
-
-    if [ -d "${CONFIG_DIR}" ]; then
-        if [ -z "$(ls -A "${CONFIG_DIR}" 2>/dev/null)" ]; then
-            rmdir "${CONFIG_DIR}"
-            echo "Removed empty directory: ${CONFIG_DIR}"
-        else
-            echo "Notice: ${CONFIG_DIR} contains other files and was not removed."
+    if [ "${purge}" -eq 1 ]; then
+        if [ -f "${CONFIG_DIR}/config.yaml" ]; then
+            rm -f "${CONFIG_DIR}/config.yaml"
+            echo "Removed config: ${CONFIG_DIR}/config.yaml"
+        fi
+        if [ -f "${MANAGED_MARKER_FILE}" ]; then
+            rm -f "${MANAGED_MARKER_FILE}"
+            echo "Removed managed marker: ${MANAGED_MARKER_FILE}"
+        fi
+        if [ -f "${LOG_FILE}" ]; then
+            rm -f "${LOG_FILE}"
+            echo "Removed log file: ${LOG_FILE}"
+        fi
+        remove_empty_dir_if_possible "$(dirname "${LOG_FILE}")"
+        remove_empty_dir_if_possible "${CONFIG_DIR}"
+    else
+        echo "Preserved config and logs. Re-run with --purge to remove managed config and log files."
+        if [ -d "${CONFIG_DIR}" ]; then
+            echo "Config directory preserved: ${CONFIG_DIR}"
+        fi
+        if [ -e "${LOG_FILE}" ]; then
+            echo "Log path preserved: ${LOG_FILE}"
         fi
     fi
 
@@ -257,7 +377,7 @@ Commands:
   build      Compile rec53 binary to \${BUILD_OUTPUT} (default: dist/rec53)
   install    Build, deploy binary, write config, install and start systemd service
   upgrade    Build new binary and hot-swap the running service (with auto-rollback)
-  uninstall  Stop/disable service, remove binary and config
+  uninstall  Stop/disable service and remove managed binary; preserve config/logs unless --purge is used
   run        Run rec53 in the foreground with terminal log output
   help       Show this help message
 
@@ -266,6 +386,8 @@ Environment variables (override defaults):
   CONFIG_DIR    Config directory                (default: /etc/rec53)
   BINARY_NAME   Binary file name               (default: rec53)
   SERVICE_NAME  Systemd service name           (default: rec53)
+  SYSTEMD_UNIT_DIR Systemd unit directory      (default: /etc/systemd/system)
+  LOG_FILE      Service log file path          (default: /var/log/rec53/rec53.log)
   BUILD_OUTPUT  Build output path              (default: dist/rec53)
   SKIP_BUILD    Set to 1 to skip build in upgrade  (default: 0)
   CONFIG_FILE   Config file path for run command   (default: auto-detect)
@@ -277,6 +399,7 @@ Examples:
   sudo ./rec53ctl upgrade
   SKIP_BUILD=1 sudo ./rec53ctl upgrade
   sudo ./rec53ctl uninstall
+  sudo ./rec53ctl uninstall --purge
   ./rec53ctl run
   CONFIG_FILE=./my-config.yaml ./rec53ctl run
 EOF

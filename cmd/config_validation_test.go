@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -59,6 +61,21 @@ func TestValidateConfig(t *testing.T) {
 			name:    "valid full address metric",
 			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: "127.0.0.1:9999"}, Warmup: server.WarmupConfig{}},
 			wantErr: false,
+		},
+		{
+			name:    "invalid log level",
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "verbose"}, Warmup: server.WarmupConfig{}},
+			wantErr: true,
+			errMsg:  "dns.log_level must be one of",
+		},
+		{
+			name: "pprof enabled with invalid listen address",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"},
+				Debug: DebugConfig{PprofEnabled: true, PprofListen: "bad-addr"},
+			},
+			wantErr: true,
+			errMsg:  "invalid debug.pprof_listen address",
 		},
 		// Hosts validation
 		{
@@ -207,6 +224,45 @@ func TestValidateConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	t.Run("missing file returns actionable error", func(t *testing.T) {
+		_, err := loadConfig("/tmp/rec53-does-not-exist.yaml")
+		if err == nil {
+			t.Fatal("expected error for missing config file")
+		}
+		if !contains(err.Error(), "Config file not found") {
+			t.Fatalf("expected missing-file guidance, got: %v", err)
+		}
+	})
+
+	t.Run("applies defaults for pprof listen and warmup concurrency", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "config.yaml")
+		content := []byte(`
+dns:
+  listen: "127.0.0.1:5353"
+  metric: ":9999"
+  log_level: "info"
+warmup:
+  enabled: true
+`)
+		if err := os.WriteFile(configPath, content, 0o644); err != nil {
+			t.Fatalf("failed to write temp config: %v", err)
+		}
+
+		cfg, err := loadConfig(configPath)
+		if err != nil {
+			t.Fatalf("loadConfig() error = %v", err)
+		}
+		if cfg.Debug.PprofListen != "127.0.0.1:6060" {
+			t.Fatalf("expected default pprof listen, got %q", cfg.Debug.PprofListen)
+		}
+		if cfg.Warmup.Concurrency != server.DefaultWarmupConfig.Concurrency {
+			t.Fatalf("expected default warmup concurrency %d, got %d", server.DefaultWarmupConfig.Concurrency, cfg.Warmup.Concurrency)
+		}
+	})
 }
 
 func contains(s, substr string) bool {

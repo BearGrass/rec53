@@ -3,6 +3,7 @@ package monitor
 import (
 	"flag"
 	"os"
+	"path/filepath"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -40,6 +41,9 @@ func getLogWriter() zapcore.WriteSyncer {
 	case "/dev/stdout":
 		return zapcore.AddSync(os.Stdout)
 	default:
+		if err := os.MkdirAll(filepath.Dir(*logFile), 0o755); err != nil {
+			panic(err)
+		}
 		return zapcore.AddSync(&lumberjack.Logger{
 			Filename:   *logFile,
 			MaxSize:    1,

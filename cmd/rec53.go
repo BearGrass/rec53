@@ -79,6 +79,9 @@ func loadConfig(configPath string) (*Config, error) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read config %q: %w", configPath, err)
+		}
 		return nil, fmt.Errorf(
 			"Config file not found: %s\n"+
 				"Generate it with:\n"+
@@ -114,6 +117,38 @@ func loadConfig(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
+func validateTCPAddress(fieldName, addr string) error {
+	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
+		return fmt.Errorf("invalid %s address '%s': %v", fieldName, addr, err)
+	}
+	return nil
+}
+
+func validateMetricAddress(addr string) error {
+	metricStr := strings.TrimSpace(addr)
+	if strings.HasPrefix(metricStr, ":") {
+		portStr := metricStr[1:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid dns.metric port '%s': %v", addr, err)
+		}
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("dns.metric port must be between 1 and 65535, got %d", port)
+		}
+		return nil
+	}
+	return validateTCPAddress("dns.metric", addr)
+}
+
+func isValidLogLevel(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug", "info", "warn", "error", "":
+		return true
+	default:
+		return false
+	}
+}
+
 // validateConfig validates critical configuration fields before use.
 // Returns error if configuration is invalid.
 func validateConfig(cfg *Config) error {
@@ -132,27 +167,17 @@ func validateConfig(cfg *Config) error {
 	}
 
 	// Validate listen address can be parsed
-	if _, err := net.ResolveTCPAddr("tcp", cfg.DNS.Listen); err != nil {
-		return fmt.Errorf("invalid dns.listen address '%s': %v", cfg.DNS.Listen, err)
+	if err := validateTCPAddress("dns.listen", cfg.DNS.Listen); err != nil {
+		return err
 	}
 
 	// Validate metric address can be parsed (allow just port)
-	metricStr := strings.TrimSpace(cfg.DNS.Metric)
-	if metricStr[0] == ':' {
-		// Port-only format
-		portStr := metricStr[1:]
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			return fmt.Errorf("invalid dns.metric port '%s': %v", cfg.DNS.Metric, err)
-		}
-		if port < 1 || port > 65535 {
-			return fmt.Errorf("dns.metric port must be between 1 and 65535, got %d", port)
-		}
-	} else {
-		// Full address format
-		if _, err := net.ResolveTCPAddr("tcp", cfg.DNS.Metric); err != nil {
-			return fmt.Errorf("invalid dns.metric address '%s': %v", cfg.DNS.Metric, err)
-		}
+	if err := validateMetricAddress(cfg.DNS.Metric); err != nil {
+		return err
+	}
+
+	if !isValidLogLevel(cfg.DNS.LogLevel) {
+		return fmt.Errorf("dns.log_level must be one of: debug, info, warn, error")
 	}
 
 	// Validate warmup config exists
@@ -183,6 +208,15 @@ func validateConfig(cfg *Config) error {
 	// Validate XDP config
 	if cfg.XDP.Enabled && strings.TrimSpace(cfg.XDP.Interface) == "" {
 		return fmt.Errorf("xdp.interface is required when xdp.enabled is true")
+	}
+
+	if cfg.Debug.PprofEnabled {
+		if strings.TrimSpace(cfg.Debug.PprofListen) == "" {
+			return fmt.Errorf("debug.pprof_listen is required when debug.pprof_enabled is true")
+		}
+		if err := validateTCPAddress("debug.pprof_listen", cfg.Debug.PprofListen); err != nil {
+			return err
+		}
 	}
 
 	return nil

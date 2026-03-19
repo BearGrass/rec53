@@ -97,6 +97,97 @@ func TestServerRunAndShutdown(t *testing.T) {
 	}
 }
 
+func TestServerRun_StartupErrorDoesNotBlock(t *testing.T) {
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve tcp port: %v", err)
+	}
+	defer tcpLn.Close()
+
+	addr := tcpLn.Addr().String()
+	udpAddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		t.Fatalf("failed to resolve udp addr %q: %v", addr, err)
+	}
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		t.Fatalf("failed to reserve udp port: %v", err)
+	}
+	defer udpConn.Close()
+
+	s := NewServer(addr)
+	runDone := make(chan (<-chan error), 1)
+	go func() {
+		runDone <- s.Run()
+	}()
+
+	var errChan <-chan error
+	select {
+	case errChan = <-runDone:
+		// good: startup path did not block forever
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run() blocked on startup failure instead of returning")
+	}
+
+	select {
+	case err, ok := <-errChan:
+		if !ok {
+			t.Fatal("expected startup error, got closed errChan")
+		}
+		if err == nil {
+			t.Fatal("expected non-nil startup error")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected startup error to be visible on errChan")
+	}
+
+	if s.UDPAddr() != "" {
+		t.Errorf("expected empty UDPAddr on startup failure, got %q", s.UDPAddr())
+	}
+	if s.TCPAddr() != "" {
+		t.Errorf("expected empty TCPAddr on startup failure, got %q", s.TCPAddr())
+	}
+}
+
+func TestServerShutdown_CancelsBackgroundWorkBeforeWait(t *testing.T) {
+	warmupCtx, warmupCancel := context.WithCancel(context.Background())
+	xdpCtx, xdpCancel := context.WithCancel(context.Background())
+
+	s := &server{
+		warmupCancel: warmupCancel,
+		xdpCancel:    xdpCancel,
+		xdpLoader:    &XDPLoader{},
+	}
+
+	s.wg.Add(2)
+	go func() {
+		defer s.wg.Done()
+		<-warmupCtx.Done()
+	}()
+	go func() {
+		defer s.wg.Done()
+		<-xdpCtx.Done()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		done <- s.Shutdown(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Shutdown() returned unexpected error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		warmupCancel()
+		xdpCancel()
+		t.Fatal("Shutdown() blocked waiting for background work")
+	}
+}
+
 // TestServerUDPAddr tests UDPAddr method
 func TestServerUDPAddr(t *testing.T) {
 	s := NewServer("127.0.0.1:0")
