@@ -115,6 +115,7 @@ func renderPlainDashboard(d Dashboard, refresh time.Duration) string {
 	if d.LastError != "" {
 		sections = append(sections, "error="+d.LastError)
 	}
+	sections = append(sections, "plain mode uses the overview summary only; use the full-screen TUI for 1-6 detail views")
 	return strings.Join(sections, "\n\n") + "\n\n"
 }
 

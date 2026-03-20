@@ -66,7 +66,7 @@
 - [x] 确认刷新频率、布局、自适应降级和不可达目标处理
 - [x] 决定首版采用独立二进制，不由 `rec53ctl` 包装调用
 - [x] 补上首版终端兼容性 fallback：`-plain` 纯文本模式
-- [ ] 评估下一个最值得做的增强项是 detail 视图还是 history sparkline
+- [x] 确认下一个最值得做的增强项优先是 detail 视图，不先做 history sparkline
 
 **退出条件**
 
@@ -170,7 +170,7 @@
 
 **后续增强候选**
 
-- [ ] detail 视图：展开单个面板查看更多字段与解释
+- [x] detail 视图：展开单个面板并补充 bounded breakdown，帮助解释当前 summary
 - [ ] panel drill-down：从 summary 进入更细的 cache / upstream / XDP 子视图
 - [ ] history sparklines：在终端内显示短历史趋势，而不接外部时序库
 - [ ] 排序 / 筛选：当后续引入更多细分项时，支持按失败原因或 stage 聚焦

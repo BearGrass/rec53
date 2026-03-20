@@ -59,6 +59,8 @@ If the terminal still does not support the full-screen UI, use the plain compati
 - `q`: quit
 - `r`: refresh immediately
 - `h` or `?`: toggle help and status legend
+- `1` to `6`: open detail view for Traffic, Cache, Snapshot, Upstream, XDP, or State Machine
+- `0` or `Esc`: return to the overview dashboard
 
 ## Status Model
 
@@ -80,6 +82,18 @@ The TUI uses a small fixed set of states:
 - `Upstream`: timeout rate, bad-rcode rate, fallback activity, and winner path
 - `XDP`: active or disabled state, hit ratio, sync errors, cleanup activity, and entry count
 - `State Machine`: most active stage and top failure reasons
+
+## Detail View
+
+The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add drill-down navigation or historical charts, but it does add bounded breakdowns that help explain the current summary.
+
+Recommended use:
+
+- stay in overview for first-check triage
+- press `1` to `6` when one panel already looks suspicious and you want the current response mix, lookup mix, winner mix, or top state buckets
+- press `0` or `Esc` to return to the overview
+
+`-plain` stays overview-only by design.
 
 ## Local Self-Test
 

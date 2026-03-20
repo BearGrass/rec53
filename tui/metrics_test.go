@@ -228,6 +228,24 @@ rec53_state_machine_failures_total{reason="query_upstream_error"} 1
 	if dashboard.XDP.HitRatio <= 0 {
 		t.Fatalf("xdp hit ratio = %f, want > 0", dashboard.XDP.HitRatio)
 	}
+	if got := dashboard.Traffic.ResponseCodes; len(got) != 3 || got[0].Label != "NOERROR" || got[0].Rate <= got[1].Rate {
+		t.Fatalf("traffic response codes = %+v, want sorted NOERROR-first breakdown", got)
+	}
+	if got := dashboard.Cache.Results; len(got) != 3 || got[0].Label != "positive_hit" {
+		t.Fatalf("cache results = %+v, want positive_hit-first breakdown", got)
+	}
+	if got := dashboard.Upstream.FailureReasons; len(got) != 2 || got[0].Label != "timeout" {
+		t.Fatalf("upstream failures = %+v, want timeout-first breakdown", got)
+	}
+	if got := dashboard.Upstream.Winners; len(got) != 1 || got[0].Label != "primary" {
+		t.Fatalf("upstream winners = %+v, want primary breakdown", got)
+	}
+	if got := dashboard.StateMachine.Stages; len(got) != 2 || got[0].Label != "IN_CACHE" {
+		t.Fatalf("state stages = %+v, want IN_CACHE-first breakdown", got)
+	}
+	if got := dashboard.StateMachine.Failures; len(got) != 1 || got[0].Label != "query_upstream_error" {
+		t.Fatalf("state failures = %+v, want query_upstream_error breakdown", got)
+	}
 }
 
 func TestDeriveDashboardMarksXDPDisabled(t *testing.T) {
@@ -310,9 +328,47 @@ func TestRenderPlainDashboard(t *testing.T) {
 		"hit_ratio=90.0%",
 		"XDP",
 		"mode=disabled",
+		"plain mode uses the overview summary only",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("plain dashboard missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderDetailIncludesBreakdowns(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailUpstream
+
+	text := ui.renderDetail(Dashboard{
+		Upstream: UpstreamPanel{
+			Status:         statusDegraded,
+			TimeoutRate:    2,
+			BadRcodeRate:   0.5,
+			FallbackRate:   1,
+			Winner:         "primary",
+			WinnerRate:     3,
+			DominantReason: "timeout",
+			FailureReasons: []BreakdownItem{
+				{Label: "timeout", Rate: 2, Ratio: 0.8},
+				{Label: "bad_rcode", Rate: 0.5, Ratio: 0.2},
+			},
+			Winners: []BreakdownItem{
+				{Label: "primary", Rate: 3, Ratio: 0.75},
+				{Label: "secondary", Rate: 1, Ratio: 0.25},
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"Failure reasons:",
+		"Winner mix:",
+		"timeout",
+		"primary",
+		"80.0%",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("detail view missing %q\n%s", want, text)
 		}
 	}
 }

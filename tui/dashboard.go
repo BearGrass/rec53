@@ -27,6 +27,7 @@ type TrafficPanel struct {
 	ServfailRatio float64
 	NXDomainRatio float64
 	NoErrorRatio  float64
+	ResponseCodes []BreakdownItem
 }
 
 type CachePanel struct {
@@ -38,6 +39,7 @@ type CachePanel struct {
 	MissRate        float64
 	Entries         float64
 	Lifecycle       string
+	Results         []BreakdownItem
 }
 
 type SnapshotPanel struct {
@@ -59,6 +61,8 @@ type UpstreamPanel struct {
 	Winner         string
 	WinnerRate     float64
 	DominantReason string
+	FailureReasons []BreakdownItem
+	Winners        []BreakdownItem
 }
 
 type XDPPanel struct {
@@ -80,6 +84,14 @@ type StateMachinePanel struct {
 	TopFailureRate    float64
 	SecondFailure     string
 	SecondFailureRate float64
+	Stages            []BreakdownItem
+	Failures          []BreakdownItem
+}
+
+type BreakdownItem struct {
+	Label string
+	Rate  float64
+	Ratio float64
 }
 
 type Dashboard struct {
@@ -183,6 +195,7 @@ func buildTrafficPanel(prev, curr *MetricsSnapshot, dt float64) TrafficPanel {
 	if ok {
 		respPrev, _ := prev.sumByLabel("rec53_response_counter", "code")
 		respDelta := deltaMap(respCurr, respPrev)
+		panel.ResponseCodes = buildBreakdown(respDelta, dt, 4)
 		totalResponses := 0.0
 		for _, value := range respDelta {
 			totalResponses += value
@@ -224,6 +237,7 @@ func buildCachePanel(prev, curr *MetricsSnapshot, dt float64) CachePanel {
 	if ok {
 		resultsPrev, _ := prev.sumByLabel("rec53_cache_lookup_total", "result")
 		delta := deltaMap(resultsCurr, resultsPrev)
+		panel.Results = buildBreakdown(delta, dt, 4)
 		panel.PositiveHitRate = delta["positive_hit"] / dt
 		panel.NegativeHitRate = delta["negative_hit"] / dt
 		panel.DelegationRate = delta["delegation_hit"] / dt
@@ -328,9 +342,12 @@ func buildUpstreamPanel(prev, curr *MetricsSnapshot, dt float64) UpstreamPanel {
 	if ok {
 		failuresPrev, _ := prev.sumByLabel("rec53_upstream_failures_total", "reason")
 		delta := deltaMap(failuresCurr, failuresPrev)
+		panel.FailureReasons = buildBreakdown(delta, dt, 4)
 		panel.TimeoutRate = delta["timeout"] / dt
 		panel.BadRcodeRate = delta["bad_rcode"] / dt
-		panel.DominantReason, _ = pickTopLabel(delta)
+		if len(panel.FailureReasons) > 0 {
+			panel.DominantReason = panel.FailureReasons[0].Label
+		}
 	}
 
 	fallbackCurr, ok := curr.sum("rec53_upstream_fallback_total")
@@ -342,8 +359,11 @@ func buildUpstreamPanel(prev, curr *MetricsSnapshot, dt float64) UpstreamPanel {
 	if winnersCurr, ok := curr.sumByLabel("rec53_upstream_winner_total", "path"); ok {
 		winnersPrev, _ := prev.sumByLabel("rec53_upstream_winner_total", "path")
 		delta := deltaMap(winnersCurr, winnersPrev)
-		panel.Winner, panel.WinnerRate = pickTopLabel(delta)
-		panel.WinnerRate = panel.WinnerRate / dt
+		panel.Winners = buildBreakdown(delta, dt, 3)
+		if len(panel.Winners) > 0 {
+			panel.Winner = panel.Winners[0].Label
+			panel.WinnerRate = panel.Winners[0].Rate
+		}
 	}
 
 	panel.Status = statusOK
@@ -425,35 +445,24 @@ func buildStateMachinePanel(prev, curr *MetricsSnapshot, dt float64) StateMachin
 	if ok {
 		stagesPrev, _ := prev.sumByLabel("rec53_state_machine_stage_total", "stage")
 		delta := deltaMap(stagesCurr, stagesPrev)
-		panel.TopStage, panel.TopStageRate = pickTopLabel(delta)
-		panel.TopStageRate = panel.TopStageRate / dt
+		panel.Stages = buildBreakdown(delta, dt, 5)
+		if len(panel.Stages) > 0 {
+			panel.TopStage = panel.Stages[0].Label
+			panel.TopStageRate = panel.Stages[0].Rate
+		}
 	}
 
 	failuresCurr, ok := curr.sumByLabel("rec53_state_machine_failures_total", "reason")
 	if ok {
 		failuresPrev, _ := prev.sumByLabel("rec53_state_machine_failures_total", "reason")
-		delta := deltaMap(failuresCurr, failuresPrev)
-		type entry struct {
-			key   string
-			value float64
+		panel.Failures = buildBreakdown(deltaMap(failuresCurr, failuresPrev), dt, 5)
+		if len(panel.Failures) > 0 {
+			panel.TopFailure = panel.Failures[0].Label
+			panel.TopFailureRate = panel.Failures[0].Rate
 		}
-		entries := make([]entry, 0, len(delta))
-		for key, value := range delta {
-			entries = append(entries, entry{key: key, value: value})
-		}
-		sort.Slice(entries, func(i, j int) bool {
-			if entries[i].value == entries[j].value {
-				return entries[i].key < entries[j].key
-			}
-			return entries[i].value > entries[j].value
-		})
-		if len(entries) > 0 {
-			panel.TopFailure = entries[0].key
-			panel.TopFailureRate = entries[0].value / dt
-		}
-		if len(entries) > 1 {
-			panel.SecondFailure = entries[1].key
-			panel.SecondFailureRate = entries[1].value / dt
+		if len(panel.Failures) > 1 {
+			panel.SecondFailure = panel.Failures[1].Label
+			panel.SecondFailureRate = panel.Failures[1].Rate
 		}
 	}
 
@@ -476,6 +485,49 @@ func buildOverallSummary(d Dashboard) string {
 	appendPart("XDP", d.XDP.Status)
 	appendPart("SM", d.StateMachine.Status)
 	return strings.Join(parts, " | ")
+}
+
+func buildBreakdown(delta map[string]float64, dt float64, limit int) []BreakdownItem {
+	if len(delta) == 0 || dt <= 0 || limit <= 0 {
+		return nil
+	}
+	type entry struct {
+		key   string
+		value float64
+	}
+	entries := make([]entry, 0, len(delta))
+	total := 0.0
+	for key, value := range delta {
+		if value <= 0 {
+			continue
+		}
+		entries = append(entries, entry{key: key, value: value})
+		total += value
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	items := make([]BreakdownItem, 0, limit)
+	for _, entry := range entries[:limit] {
+		item := BreakdownItem{
+			Label: entry.key,
+			Rate:  entry.value / dt,
+		}
+		if total > 0 {
+			item.Ratio = entry.value / total
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func percent(value float64) string {
