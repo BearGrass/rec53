@@ -1,7 +1,7 @@
 # Roadmap
 
 主 roadmap 只保留当前状态、接下来 1-2 个版本的计划，以及长期方向。
-已完成版本与历史里程碑已归档到 [ROADMAP.archive.md](./ROADMAP.archive.md)。
+已完成版本与历史里程碑已归档到 [roadmap.archive.md](./roadmap.archive.md)。
 
 ## Version History
 
@@ -38,7 +38,7 @@
 
 ## 已完成归档
 
-详细历史已移至 [ROADMAP.archive.md](./ROADMAP.archive.md)。
+详细历史已移至 [roadmap.archive.md](./roadmap.archive.md)。
 主 roadmap 只保留以下摘要：
 
 - 基础能力：Hosts/Forwarding、状态机重构、综合测试与运维脚本
@@ -231,14 +231,111 @@
 
 ## Open Backlog
 
-详见 [BACKLOG.md](./BACKLOG.md)。当前仍值得持续关注的条目：
+这些条目还没有进入明确版本排期，但仍值得持续跟踪。已经完成的历史 backlog 项不再在这里重复保留。
 
-- `O-016`：AAAA (IPv6) 上游选择支持
-- `O-006`：UDP 截断后的 TCP 重试
-- `B-014`：Glue bailiwick 校验
-- `O-022`：Response ID 校验
-- `O-021`：无 glue 委派缓存策略
-- `O-005`：负缓存 TTL 配置化
+### Resolver And Protocol
+
+#### [B-014] Glue 无 bailiwick 校验
+
+- Priority: Medium
+- Description: Additional 中的 glue 记录仍未做 bailiwick 校验，存在被越权 glue 影响解析路径的风险。
+- Acceptance:
+  提取 glue 时校验 A/AAAA 记录名字是否落在当前 zone 的 bailiwick 内。
+  对 out-of-bailiwick glue 改为触发 NS 子查询解析，而不是直接采信。
+  补充对应单元测试。
+
+#### [O-021] 无 glue 时委派 NS 不缓存
+
+- Priority: Medium
+- Description: 当前只有 `Ns` 和 `Extra` 同时存在时才缓存委派，NS-only referral 仍会导致下一次重复从上层迭代。
+- Acceptance:
+  NS-only 响应也缓存 NS RRset。
+  下次同区域解析能直接从缓存找到委派起点。
+
+#### [O-022] Response ID 未校验
+
+- Priority: Low
+- Description: 当前未严格校验响应 ID 与请求 ID 一致，仍存在乱序或伪造响应被误接受的风险。
+- Acceptance:
+  校验 `newResponse.Id == newQuery.Id`。
+  补充单元测试覆盖 ID mismatch。
+
+#### [O-016] Add AAAA (IPv6) Support
+
+- Priority: High
+- Description: `getIPListFromResponse()` 仍只提取 IPv4 `A` 记录，缺少 IPv6 `AAAA` 路径支持。
+- Acceptance:
+  提取 `AAAA` 记录。
+  更新地址选择和预取逻辑以兼容 IPv6。
+  补充 AAAA 查询测试。
+
+#### [O-006] TCP Retry for Truncated Responses
+
+- Priority: High
+- Description: UDP 响应被截断时还没有自动切到 TCP 重试。
+- Acceptance:
+  检测 `TC` 标志。
+  截断后自动走 TCP 重试。
+  覆盖大响应场景。
+
+#### [O-005] Negative Cache TTL 配置化
+
+- Priority: Medium
+- Description: 负缓存能力已经存在，但 TTL 策略和配置化仍可继续收敛。
+- Acceptance:
+  明确 NXDOMAIN / NODATA TTL 来源与配置边界。
+  补足相关测试场景。
+
+#### [O-018] 状态机死循环保护增强
+
+- Priority: Medium
+- Description: 当前仍主要依赖 `MaxIterations=50`，递归深度与 delegation 深度保护可以更明确。
+- Acceptance:
+  添加 NS 递归深度限制。
+  添加 delegation 深度跟踪。
+  覆盖死循环回归测试。
+
+### Test Coverage
+
+#### [T-003] Negative Cache E2E Test
+
+- Priority: High
+- Description: 验证 NXDOMAIN/NODATA 被缓存后，后续相同查询直接命中 negative cache。
+
+#### [T-004] Query Budget Exhaustion Test
+
+- Priority: High
+- Description: 构造深层 referral 链，验证 budget 耗尽时进入 `FAIL_SERVFAIL`。
+
+#### [T-005] Timeout Retry And Server Switch Test
+
+- Priority: High
+- Description: 验证单个 NS 超时后重试，再自动切换到备用 NS 并最终成功。
+
+#### [T-006] SERVFAIL / REFUSED Server Blacklist Test
+
+- Priority: High
+- Description: 验证 bad rcode 会标记坏服务器并切换到备用上游。
+
+#### [T-007] Response ID Mismatch Test
+
+- Priority: Medium
+- Description: 验证错误 ID 的响应会被丢弃并继续等待正确响应。
+
+#### [T-008] CNAME + NXDOMAIN Combination Test
+
+- Priority: Medium
+- Description: 验证含 CNAME 链且最终 `RCODE=NXDOMAIN` 的组合响应被正确保留和返回。
+
+#### [T-009] Referral Loop Detection Test
+
+- Priority: Medium
+- Description: 验证循环委派能够被检测并返回 SERVFAIL，而不是陷入无限迭代。
+
+#### [T-010] All NS Unreachable Test
+
+- Priority: Medium
+- Description: 验证一个区域下所有 NS 都超时或拒绝时，最终正确返回 SERVFAIL。
 
 ## Future
 

@@ -11,8 +11,8 @@ This section is for contributors and maintainers. It focuses on how rec53 is org
 
 ## Reference Material
 
-- [Coding Conventions](../../.rec53/CONVENTIONS.md)
-- [Roadmap](../../.rec53/ROADMAP.md)
+- [Coding Conventions](conventions.md)
+- [Roadmap](../roadmap.md)
 - [Metrics](../metrics.md)
 - [Testing Docs Index](../testing/README.md)
 

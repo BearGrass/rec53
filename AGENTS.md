@@ -121,7 +121,7 @@ go test -cover ./...
 
 - User-facing behavior, flags, examples, or operations: update `README.md` and `README.zh.md` together.
 - Architecture or package responsibility changes: update `docs/architecture.md`.
-- New standard coding patterns: update `.rec53/CONVENTIONS.md`.
+- New standard coding patterns: update `docs/dev/conventions.md`.
 - If benchmark docs change, run relevant benchmarks when feasible; do not invent fresh numbers.
 
 ## Agent Workflow
@@ -129,4 +129,4 @@ go test -cover ./...
 - Start narrow: read the package you will touch, run one targeted test, then widen scope.
 - Prefer package-level verification during iteration.
 - Before finishing substantial Go work, run `gofmt -w .`, `go vet ./...`, and the most relevant `go test` command.
-- Use this file for execution rules, `.rec53/CONVENTIONS.md` for longer conventions, and `docs/architecture.md` for deeper design context.
+- Use this file for execution rules, `docs/dev/conventions.md` for longer conventions, and `docs/architecture.md` for deeper design context.

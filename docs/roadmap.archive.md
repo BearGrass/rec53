@@ -1,6 +1,6 @@
 # Roadmap Archive
 
-这个文件保存已经完成的版本和历史里程碑摘要，避免主 [ROADMAP.md](./ROADMAP.md) 持续膨胀。
+这个文件保存已经完成的版本和历史里程碑摘要，避免主 [roadmap.md](./roadmap.md) 持续膨胀。
 这里保留的是“发生过什么”和“留下了什么”，不再承担当前排期职责。
 
 ## Completed Versions
@@ -65,7 +65,7 @@
 
 ## Reference Docs
 
-- [benchmarks.md](../docs/testing/benchmarks.md)
-- [architecture.md](../docs/architecture.md)
-- [metrics.md](../docs/metrics.md)
-- [xdp-physical-benchmark-2026-03-19.zh.md](../docs/testing/xdp-physical-benchmark-2026-03-19.zh.md)
+- [benchmarks.md](./testing/benchmarks.md)
+- [architecture.md](./architecture.md)
+- [metrics.md](./metrics.md)
+- [xdp-physical-benchmark-2026-03-19.zh.md](./testing/xdp-physical-benchmark-2026-03-19.zh.md)

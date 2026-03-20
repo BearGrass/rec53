@@ -25,7 +25,7 @@ Read first:
 
 - [Architecture](../architecture.md)
 - [Testing](testing.md)
-- [Coding Conventions](../../.rec53/CONVENTIONS.md)
+- [Coding Conventions](conventions.md)
 - [AGENTS.md](../../AGENTS.md)
 
 Pay special attention to:
