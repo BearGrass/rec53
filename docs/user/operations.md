@@ -49,6 +49,9 @@ Use metrics to watch:
 - query volume
 - response codes
 - end-to-end latency
+- cache lookup quality
+- snapshot restore/save behavior
+- upstream failure reasons and fallback activity
 - nameserver quality
 - XDP counters when XDP is enabled
 
@@ -90,10 +93,13 @@ For first deployments, focus on:
 - query rate
 - SERVFAIL ratio
 - p99 query latency
+- cache lookup outcome mix from `rec53_cache_lookup_total`
+- snapshot load/save outcomes from `rec53_snapshot_operations_total`
+- upstream timeout and bad-rcode trends from `rec53_upstream_failures_total`
 - degraded upstream IPs from `rec53_ipv2_p50_latency_ms`
 - XDP counters only when XDP is explicitly enabled
 
-See [Metrics](../metrics.md) for metric definitions and PromQL examples.
+See [Metrics](../metrics.md) for metric definitions and PromQL examples, [Observability Dashboard](observability-dashboard.md) for the baseline panel layout, and [Operator Checklist](operator-checklist.md) for symptom-first triage.
 
 ## pprof
 
@@ -128,6 +134,7 @@ Operational guidance:
 - make sure the snapshot path is writable
 - treat snapshot as a startup optimization, not a source of truth
 - verify shutdown completes cleanly so snapshots are actually written
+- watch `rec53_snapshot_operations_total`, `rec53_snapshot_entries_total`, and `rec53_snapshot_duration_ms` after restart if cold-start quality changes
 
 ## Optional Features
 

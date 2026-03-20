@@ -74,6 +74,8 @@ Check:
 - the server is actually listening on the configured address
 - local firewall or network policy is not blocking the port
 - the node can reach root servers or forwarding upstreams
+- `rec53_upstream_failures_total{reason="timeout"}` is not rising sharply
+- `rec53_upstream_fallback_total` is not dominated by failure
 
 Try:
 
@@ -89,12 +91,14 @@ Possible causes:
 - warmup still running
 - network path to upstream authoritative servers is slow
 - cache is cold after restart
+- snapshot load restored too few entries
 
 Mitigations:
 
 - keep warmup enabled
 - enable snapshot only after baseline validation
 - avoid turning on XDP while basic startup is still under investigation
+- inspect `rec53_cache_lookup_total`, `rec53_snapshot_operations_total`, and `rec53_snapshot_entries_total` before changing runtime knobs
 
 ## Forwarding Rules Do Not Match
 
@@ -119,5 +123,6 @@ Then check:
 - interface name
 - required privileges or capabilities
 - logs for degrade-to-Go-path messages
+- `rec53_xdp_status`, `rec53_xdp_cache_sync_errors_total`, and `rec53_xdp_entries`
 
 If XDP fails to attach, rec53 should still run through the normal Go cache path.

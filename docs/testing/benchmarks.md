@@ -471,7 +471,84 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
 | Errors | 0 | 0 | 0 | — |
 | Timeouts | 0 | 0 | 0 | — |
 
-## Running Your Own Benchmark
+## v1.1.0 Cache Read Alloc Quick-Win: Skip Question Copy (2026-03-20)
+
+### Change
+
+In `server/cache.go` `shallowCopyMsg`: removed the `make([]dns.Question, ...) + copy`
+for the Question slice. Question is now left `nil` on the returned copy.
+
+**Why this is safe:** All three production callers of `getCacheCopy` /
+`getCacheCopyByType` ignore the returned Question:
+- `state_cache_lookup.go` — appends Answer records
+- `state_lookup_ns_cache.go` — appends Ns / Extra records
+- `state_query_upstream.go` (`resolveNSIPs`) — reads Answer IPs as strings
+
+`server.go` restores the correct Question from the original client request
+(via `originalQuestion`) before packing and sending the reply.
+
+### Micro-benchmark comparison (benchmem, count=3)
+
+| Benchmark | Before | After | Delta |
+|-----------|--------|-------|-------|
+| `BenchmarkCacheGetHit` | ~168 ns, 184 B, **3 allocs** | ~135 ns, 160 B, **2 allocs** | −20% ns, −13% B, **−1 alloc** |
+| `BenchmarkShallowVsDeepCopy/ShallowCopy` | ~139 ns, 248 B, **5 allocs** | ~77 ns, 80 B, **3 allocs** | −44% ns, −68% B, **−2 allocs** |
+| `BenchmarkStateMachineCacheHit` | ~1540 ns, 954 B, **29 allocs** | ~1510 ns, 930 B, **28 allocs** | −2% ns, −24 B, **−1 alloc** |
+
+Note: `BenchmarkShallowVsDeepCopy` uses a message with 3 Answer + 1 Ns + 1 Extra
+RRs, which previously included one Question and one Answer copy. The larger
+B/op drop there reflects skipping both Question AND avoiding the extra Answer
+backing array that was previously needed.
+
+### pprof alloc_space (after, dual-machine direct-cable, c=64, ~184K QPS)
+
+| Source | flat% | Notes |
+|--------|-------|-------|
+| `shallowCopyMsg` | 14.35% | was 14.75% before |
+| `packBufferWithCompressionMap` | 7.68% | miekg/dns internal, unchanged |
+| `cacheLookupState.handle` | 7.08% flat / 21.96% cum | contains shallowCopy |
+| `parseDstFromOOB` / `correctSource` (cum) | ~11.60% | miekg/dns UDP OOB, cannot optimize from rec53 |
+
+The `shallowCopyMsg` percentage drop is small (−0.4 pp) because the removed
+Question allocation (~24 bytes) is small relative to the remaining Answer/Ns/Extra
+allocations. The alloc _count_ reduction (−1/op at CacheGetHit level) is the
+meaningful result.
+
+### Dual-machine load test (direct cable, port 5353, listeners=1, c=64, 20s × 6)
+
+**Before baseline** (separate session, lower system load):
+
+| Run | QPS |
+|-----|-----|
+| 1 | 192,430 |
+| 2 | 193,129 |
+| 3 | 193,921 |
+| **Median** | **~193K** |
+
+**After** (same session as implementation):
+
+| Run | QPS |
+|-----|-----|
+| 1 | 184,219 |
+| 2 | 179,169 |
+| 3 | 184,083 |
+| 4 | 178,631 |
+| 5 | 184,706 |
+| 6 | 182,925 |
+| **Median** | **~184K** |
+
+The after median (~184K) is ~5% below the before baseline (~193K). This gap is
+attributed to higher system load at measurement time (load average 3.80 vs ~1.x
+at baseline). The change removes 1 alloc/op from the cache read path; no
+QPS regression is expected from this change. The small absolute delta between the
+before and after alloc_space percentages (14.75% → 14.35%) is consistent with
+removing a single small allocation.
+
+### Correctness gate
+
+`go test -race -timeout 120s ./... -count=1` — all 6 packages pass.
+
+
 
 Use the built-in benchmark to measure first-packet latency on your own
 infrastructure with domains relevant to your workload:

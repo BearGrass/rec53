@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -24,11 +25,67 @@ func (m *Metric) LatencyHistogramObserve(stage string, qtype string, code string
 	LatencyHistogramObserver.WithLabelValues(stage, qtype, code).Observe(latency)
 }
 
+func (m *Metric) CacheLookupAdd(result string) {
+	CacheLookupTotal.WithLabelValues(result).Inc()
+}
+
+func (m *Metric) CacheEntriesSet(entries int) {
+	CacheEntries.Set(float64(entries))
+}
+
+func (m *Metric) CacheLifecycleAdd(event string, delta int) {
+	CacheLifecycleTotal.WithLabelValues(event).Add(float64(delta))
+}
+
 // IPQualityV2GaugeSet sets the P50, P95, P99 latency gauges for an IP
 func (m *Metric) IPQualityV2GaugeSet(ip string, p50, p95, p99 float64) {
 	IPQualityV2_P50.WithLabelValues(ip).Set(p50)
 	IPQualityV2_P95.WithLabelValues(ip).Set(p95)
 	IPQualityV2_P99.WithLabelValues(ip).Set(p99)
+}
+
+func (m *Metric) SnapshotOperationAdd(operation, result string) {
+	SnapshotOperationsTotal.WithLabelValues(operation, result).Inc()
+}
+
+func (m *Metric) SnapshotEntriesAdd(operation, result string, count int) {
+	SnapshotEntriesTotal.WithLabelValues(operation, result).Add(float64(count))
+}
+
+func (m *Metric) SnapshotDurationObserve(operation, result string, duration time.Duration) {
+	SnapshotDurationMs.WithLabelValues(operation, result).Observe(float64(duration.Milliseconds()))
+}
+
+func (m *Metric) UpstreamFailureAdd(reason, rcode string) {
+	UpstreamFailuresTotal.WithLabelValues(reason, rcode).Inc()
+}
+
+func (m *Metric) UpstreamFallbackAdd(result string) {
+	UpstreamFallbackTotal.WithLabelValues(result).Inc()
+}
+
+func (m *Metric) UpstreamWinnerAdd(path string) {
+	UpstreamWinnerTotal.WithLabelValues(path).Inc()
+}
+
+func (m *Metric) XDPSyncErrorAdd(reason string) {
+	XDPSyncErrorsTotal.WithLabelValues(reason).Inc()
+}
+
+func (m *Metric) XDPCleanupDeletedAdd(count int) {
+	XDPCleanupDeletedTotal.Add(float64(count))
+}
+
+func (m *Metric) XDPEntriesSet(count int) {
+	XDPEntries.Set(float64(count))
+}
+
+func (m *Metric) StateMachineStageAdd(stage string) {
+	StateMachineStageTotal.WithLabelValues(stage).Inc()
+}
+
+func (m *Metric) StateMachineFailureAdd(reason string) {
+	StateMachineFailuresTotal.WithLabelValues(reason).Inc()
 }
 
 // register metric
@@ -44,6 +101,20 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(XDPCacheMissesTotal)
 	m.reg.MustRegister(XDPPassTotal)
 	m.reg.MustRegister(XDPErrorsTotal)
+	m.reg.MustRegister(CacheLookupTotal)
+	m.reg.MustRegister(CacheEntries)
+	m.reg.MustRegister(CacheLifecycleTotal)
+	m.reg.MustRegister(SnapshotOperationsTotal)
+	m.reg.MustRegister(SnapshotEntriesTotal)
+	m.reg.MustRegister(SnapshotDurationMs)
+	m.reg.MustRegister(UpstreamFailuresTotal)
+	m.reg.MustRegister(UpstreamFallbackTotal)
+	m.reg.MustRegister(UpstreamWinnerTotal)
+	m.reg.MustRegister(XDPSyncErrorsTotal)
+	m.reg.MustRegister(XDPCleanupDeletedTotal)
+	m.reg.MustRegister(XDPEntries)
+	m.reg.MustRegister(StateMachineStageTotal)
+	m.reg.MustRegister(StateMachineFailuresTotal)
 }
 
 // MetricServer holds the HTTP server for metrics

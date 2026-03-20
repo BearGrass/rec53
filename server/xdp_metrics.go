@@ -126,6 +126,7 @@ func cleanupExpiredBPFEntries(cacheMap *ebpf.Map) int {
 	var (
 		key      dnsCacheCacheKey
 		val      dnsCacheCacheValue
+		active   int
 		deleted  int
 		toDelete []dnsCacheCacheKey
 	)
@@ -138,6 +139,8 @@ func cleanupExpiredBPFEntries(cacheMap *ebpf.Map) int {
 		if val.ExpireTs <= nowSec {
 			keyCopy := key
 			toDelete = append(toDelete, keyCopy)
+		} else {
+			active++
 		}
 	}
 	// iter.Err() can return an error if the map was modified during iteration;
@@ -153,6 +156,10 @@ func cleanupExpiredBPFEntries(cacheMap *ebpf.Map) int {
 
 	if deleted > 0 {
 		monitor.Rec53Log.Debugf("[XDP] cleanup: deleted %d expired entries", deleted)
+	}
+	if monitor.Rec53Metric != nil {
+		monitor.Rec53Metric.XDPCleanupDeletedAdd(deleted)
+		monitor.Rec53Metric.XDPEntriesSet(active)
 	}
 	return deleted
 }

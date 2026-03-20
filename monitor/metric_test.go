@@ -21,6 +21,25 @@ func unregisterMetrics() {
 	prometheus.Unregister(IPQualityV2_P50)
 	prometheus.Unregister(IPQualityV2_P95)
 	prometheus.Unregister(IPQualityV2_P99)
+	prometheus.Unregister(XDPStatus)
+	prometheus.Unregister(XDPCacheHitsTotal)
+	prometheus.Unregister(XDPCacheMissesTotal)
+	prometheus.Unregister(XDPPassTotal)
+	prometheus.Unregister(XDPErrorsTotal)
+	prometheus.Unregister(CacheLookupTotal)
+	prometheus.Unregister(CacheEntries)
+	prometheus.Unregister(CacheLifecycleTotal)
+	prometheus.Unregister(SnapshotOperationsTotal)
+	prometheus.Unregister(SnapshotEntriesTotal)
+	prometheus.Unregister(SnapshotDurationMs)
+	prometheus.Unregister(UpstreamFailuresTotal)
+	prometheus.Unregister(UpstreamFallbackTotal)
+	prometheus.Unregister(UpstreamWinnerTotal)
+	prometheus.Unregister(XDPSyncErrorsTotal)
+	prometheus.Unregister(XDPCleanupDeletedTotal)
+	prometheus.Unregister(XDPEntries)
+	prometheus.Unregister(StateMachineStageTotal)
+	prometheus.Unregister(StateMachineFailuresTotal)
 }
 
 // TestMetric_InCounterAdd tests the InCounterAdd method
@@ -162,6 +181,68 @@ func TestMetric_Register(t *testing.T) {
 	count := testutil.ToFloat64(InCounter.WithLabelValues("test", "A"))
 	if count != 1 {
 		t.Errorf("Expected counter to be 1 after register, got %f", count)
+	}
+}
+
+func TestMetric_RuntimeObservabilityHelpers(t *testing.T) {
+	unregisterMetrics()
+	reg := prometheus.NewRegistry()
+	m := &Metric{reg: reg}
+	m.Register()
+
+	m.CacheLookupAdd("positive_hit")
+	m.CacheEntriesSet(7)
+	m.CacheLifecycleAdd("write", 2)
+	m.SnapshotOperationAdd("load", "success")
+	m.SnapshotEntriesAdd("load", "imported", 3)
+	m.SnapshotDurationObserve("load", "success", 25*time.Millisecond)
+	m.UpstreamFailureAdd("timeout", "NONE")
+	m.UpstreamFallbackAdd("success")
+	m.UpstreamWinnerAdd("primary")
+	m.XDPSyncErrorAdd("update")
+	m.XDPCleanupDeletedAdd(4)
+	m.XDPEntriesSet(11)
+	m.StateMachineStageAdd("cache_lookup")
+	m.StateMachineFailureAdd("query_upstream_error")
+
+	if got := testutil.ToFloat64(CacheLookupTotal.WithLabelValues("positive_hit")); got != 1 {
+		t.Fatalf("CacheLookupTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(CacheEntries); got != 7 {
+		t.Fatalf("CacheEntries = %f, want 7", got)
+	}
+	if got := testutil.ToFloat64(CacheLifecycleTotal.WithLabelValues("write")); got != 2 {
+		t.Fatalf("CacheLifecycleTotal = %f, want 2", got)
+	}
+	if got := testutil.ToFloat64(SnapshotOperationsTotal.WithLabelValues("load", "success")); got != 1 {
+		t.Fatalf("SnapshotOperationsTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(SnapshotEntriesTotal.WithLabelValues("load", "imported")); got != 3 {
+		t.Fatalf("SnapshotEntriesTotal = %f, want 3", got)
+	}
+	if got := testutil.ToFloat64(UpstreamFailuresTotal.WithLabelValues("timeout", "NONE")); got != 1 {
+		t.Fatalf("UpstreamFailuresTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(UpstreamFallbackTotal.WithLabelValues("success")); got != 1 {
+		t.Fatalf("UpstreamFallbackTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(UpstreamWinnerTotal.WithLabelValues("primary")); got != 1 {
+		t.Fatalf("UpstreamWinnerTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(XDPSyncErrorsTotal.WithLabelValues("update")); got != 1 {
+		t.Fatalf("XDPSyncErrorsTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(XDPCleanupDeletedTotal); got != 4 {
+		t.Fatalf("XDPCleanupDeletedTotal = %f, want 4", got)
+	}
+	if got := testutil.ToFloat64(XDPEntries); got != 11 {
+		t.Fatalf("XDPEntries = %f, want 11", got)
+	}
+	if got := testutil.ToFloat64(StateMachineStageTotal.WithLabelValues("cache_lookup")); got != 1 {
+		t.Fatalf("StateMachineStageTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(StateMachineFailuresTotal.WithLabelValues("query_upstream_error")); got != 1 {
+		t.Fatalf("StateMachineFailuresTotal = %f, want 1", got)
 	}
 }
 

@@ -22,6 +22,31 @@ type stateMachine interface {
 	getContext() context.Context
 }
 
+func stateMetricName(state int) string {
+	switch state {
+	case STATE_INIT:
+		return "state_init"
+	case HOSTS_LOOKUP:
+		return "hosts_lookup"
+	case FORWARD_LOOKUP:
+		return "forward_lookup"
+	case CACHE_LOOKUP:
+		return "cache_lookup"
+	case CLASSIFY_RESP:
+		return "classify_resp"
+	case EXTRACT_GLUE:
+		return "extract_glue"
+	case LOOKUP_NS_CACHE:
+		return "lookup_ns_cache"
+	case QUERY_UPSTREAM:
+		return "query_upstream"
+	case RETURN_RESP:
+		return "return_resp"
+	default:
+		return "unknown"
+	}
+}
+
 // isNSRelevantForCNAME checks if NS records are relevant for resolving a CNAME target.
 // NS records are relevant if their zone matches or is a parent of the CNAME target.
 // This enables smart preservation of valid delegation info when following CNAME chains.
@@ -136,6 +161,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 
 	for iterations := 1; iterations <= MaxIterations; iterations++ {
 		st := stm.getCurrentState()
+		if monitor.Rec53Metric != nil {
+			monitor.Rec53Metric.StateMachineStageAdd(stateMetricName(st))
+		}
 		queryName := ""
 		if len(stm.getRequest().Question) > 0 {
 			queryName = stm.getRequest().Question[0].Name
@@ -146,6 +174,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 		case STATE_INIT:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("state_init_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -156,6 +187,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 		case HOSTS_LOOKUP:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("hosts_lookup_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -165,12 +199,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case HOSTS_LOOKUP_MISS:
 				stm = newForwardLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("hosts_lookup_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case FORWARD_LOOKUP:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -180,16 +220,25 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case FORWARD_LOOKUP_MISS:
 				stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case FORWARD_LOOKUP_SERVFAIL:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_servfail")
+				}
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case CACHE_LOOKUP:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("cache_lookup_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -199,12 +248,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case CACHE_LOOKUP_MISS:
 				stm = newExtractGlueState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("cache_lookup_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case CLASSIFY_RESP:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("classify_resp_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -216,18 +271,27 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CLASSIFY_RESP_GET_CNAME:
 				if err := followCNAME(stm, &cnameChain, visitedDomains); err != nil {
+					if monitor.Rec53Metric != nil {
+						monitor.Rec53Metric.StateMachineFailureAdd("cname_cycle")
+					}
 					return nil, err
 				}
 				stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CLASSIFY_RESP_GET_NS:
 				stm = newExtractGlueState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("classify_resp_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case EXTRACT_GLUE:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("extract_glue_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -237,12 +301,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 			case EXTRACT_GLUE_NOT_EXIST:
 				stm = newLookupNSCacheState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("extract_glue_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case LOOKUP_NS_CACHE:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("lookup_ns_cache_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -251,40 +321,61 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				LOOKUP_NS_CACHE_MISS:
 				stm = newQueryUpstreamState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("lookup_ns_cache_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case QUERY_UPSTREAM:
 			ret, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case QUERY_UPSTREAM_COMMON_ERROR:
 				// return servfail response
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_error")
+				}
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
 			case QUERY_UPSTREAM_NO_ERROR:
 				stm = newClassifyRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_wrong_state")
+				}
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
 		case RETURN_RESP:
 			_, err := handleState(stm)
 			if err != nil {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("return_resp_handle_error")
+				}
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			return buildFinalResponse(stm, originalQuestion, cnameChain), nil
 		default:
+			if monitor.Rec53Metric != nil {
+				monitor.Rec53Metric.StateMachineFailureAdd("unknown_state")
+			}
 			monitor.Rec53Log.Errorf("Wrong state %d", stm.getCurrentState())
 			return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
 		}
 	}
 
+	if monitor.Rec53Metric != nil {
+		monitor.Rec53Metric.StateMachineFailureAdd("max_iterations")
+	}
 	monitor.Rec53Log.Errorf("Max iterations (%d) exceeded, possible CNAME loop", MaxIterations)
 	return nil, fmt.Errorf("max iterations exceeded, possible CNAME loop")
 }

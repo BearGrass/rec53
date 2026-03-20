@@ -120,6 +120,8 @@ sudo ./rec53ctl uninstall --purge
 - [配置说明](docs/user/configuration.md)
 - [运维说明](docs/user/operations.md)
 - [故障排查](docs/user/troubleshooting.md)
+- [观测看板布局](docs/user/observability-dashboard.md)
+- [运维排查清单](docs/user/operator-checklist.md)
 
 开发者文档：
 
@@ -131,7 +133,7 @@ sudo ./rec53ctl uninstall --purge
 
 参考文档：
 
-- [指标说明](docs/metrics.md)
+- [指标说明](docs/metrics.zh.md)
 - [测试文档索引](docs/testing/README.md)
 - [基准测试](docs/testing/benchmarks.md)
 - [物理直连 XDP 基准测试报告（2026-03-19）](docs/testing/xdp-physical-benchmark-2026-03-19.zh.md)

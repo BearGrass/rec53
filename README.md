@@ -120,6 +120,8 @@ User docs:
 - [Configuration](docs/user/configuration.md)
 - [Operations](docs/user/operations.md)
 - [Troubleshooting](docs/user/troubleshooting.md)
+- [Observability Dashboard](docs/user/observability-dashboard.md)
+- [Operator Checklist](docs/user/operator-checklist.md)
 
 Developer docs:
 
@@ -132,6 +134,7 @@ Developer docs:
 Reference docs:
 
 - [Metrics](docs/metrics.md)
+- [Metrics (Chinese)](docs/metrics.zh.md)
 - [Testing Docs Index](docs/testing/README.md)
 - [Benchmarks](docs/testing/benchmarks.md)
 - [Physical NIC XDP Benchmark Report (Chinese)](docs/testing/xdp-physical-benchmark-2026-03-19.zh.md)

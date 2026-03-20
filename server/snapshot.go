@@ -43,6 +43,22 @@ func SaveSnapshot(cfg SnapshotConfig) error {
 		return nil
 	}
 
+	start := time.Now()
+	result := "success"
+	savedEntries := 0
+	skippedNonDNS := 0
+	skippedPackError := 0
+	defer func() {
+		if monitor.Rec53Metric == nil {
+			return
+		}
+		monitor.Rec53Metric.SnapshotOperationAdd("save", result)
+		monitor.Rec53Metric.SnapshotEntriesAdd("save", "saved", savedEntries)
+		monitor.Rec53Metric.SnapshotEntriesAdd("save", "skipped_non_dns", skippedNonDNS)
+		monitor.Rec53Metric.SnapshotEntriesAdd("save", "skipped_pack_error", skippedPackError)
+		monitor.Rec53Metric.SnapshotDurationObserve("save", result, time.Since(start))
+	}()
+
 	now := time.Now().Unix()
 	items := globalDnsCache.Items()
 
@@ -50,12 +66,14 @@ func SaveSnapshot(cfg SnapshotConfig) error {
 	for key, item := range items {
 		msg, ok := item.Object.(*dns.Msg)
 		if !ok {
+			skippedNonDNS++
 			continue
 		}
 
 		wire, err := msg.Pack()
 		if err != nil {
 			monitor.Rec53Log.Debugf("[SNAPSHOT] pack failed for key %s: %v", key, err)
+			skippedPackError++
 			continue
 		}
 		entries = append(entries, snapshotEntry{
@@ -68,15 +86,19 @@ func SaveSnapshot(cfg SnapshotConfig) error {
 	sf := snapshotFile{Entries: entries}
 	data, err := json.Marshal(sf)
 	if err != nil {
+		result = "failure"
 		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cfg.File), 0o755); err != nil {
+		result = "failure"
 		return err
 	}
 	if err := os.WriteFile(cfg.File, data, 0o644); err != nil {
+		result = "failure"
 		return err
 	}
+	savedEntries = len(entries)
 
 	monitor.Rec53Log.Infof("[SNAPSHOT] saved %d cache entries to %s", len(entries), cfg.File)
 	return nil
@@ -94,32 +116,52 @@ func LoadSnapshot(cfg SnapshotConfig) (int, error) {
 		return 0, nil
 	}
 
+	start := time.Now()
+	result := "success"
+	imported := 0
+	skippedExpired := 0
+	skippedCorrupt := 0
+	defer func() {
+		if monitor.Rec53Metric == nil {
+			return
+		}
+		monitor.Rec53Metric.SnapshotOperationAdd("load", result)
+		monitor.Rec53Metric.SnapshotEntriesAdd("load", "imported", imported)
+		monitor.Rec53Metric.SnapshotEntriesAdd("load", "skipped_expired", skippedExpired)
+		monitor.Rec53Metric.SnapshotEntriesAdd("load", "skipped_corrupt", skippedCorrupt)
+		monitor.Rec53Metric.SnapshotDurationObserve("load", result, time.Since(start))
+	}()
+
 	data, err := os.ReadFile(cfg.File)
 	if err != nil {
 		if os.IsNotExist(err) {
+			result = "not_found"
 			return 0, nil
 		}
+		result = "failure"
 		return 0, err
 	}
 
 	var sf snapshotFile
 	if err := json.Unmarshal(data, &sf); err != nil {
+		result = "failure"
 		return 0, err
 	}
 
 	now := time.Now().Unix()
-	imported := 0
 
 	for _, entry := range sf.Entries {
 		wire, err := base64.StdEncoding.DecodeString(entry.MsgB64)
 		if err != nil {
 			monitor.Rec53Log.Debugf("[SNAPSHOT] base64 decode failed for key %s: %v", entry.Key, err)
+			skippedCorrupt++
 			continue
 		}
 
 		var msg dns.Msg
 		if err := msg.Unpack(wire); err != nil {
 			monitor.Rec53Log.Debugf("[SNAPSHOT] unpack failed for key %s: %v", entry.Key, err)
+			skippedCorrupt++
 			continue
 		}
 
@@ -127,6 +169,7 @@ func LoadSnapshot(cfg SnapshotConfig) (int, error) {
 		// saved_at + minTTL gives the absolute expiry; skip if already past.
 		minTTL := remainingTTL(&msg, entry.SavedAt, now)
 		if minTTL == 0 {
+			skippedExpired++
 			continue // all RRs expired
 		}
 

@@ -11,6 +11,15 @@ import (
 	"rec53/monitor"
 )
 
+func safeBPFMapUpdate(m *ebpf.Map, key dnsCacheCacheKey, val dnsCacheCacheValue) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("bpf map update panic: %v", r)
+		}
+	}()
+	return m.Update(key, val, ebpf.UpdateAny)
+}
+
 // globalXDPCacheMap holds the BPF cache_map handle.
 // When nil (zero value), XDP cache sync is disabled (no-op).
 // Set by server integration when XDP is enabled.
@@ -113,17 +122,26 @@ func syncToBPFMap(name string, qtype uint16, msg *dns.Msg, ttlSeconds uint32) {
 
 	key, err := buildBPFCacheKey(name, qtype)
 	if err != nil {
+		if monitor.Rec53Metric != nil {
+			monitor.Rec53Metric.XDPSyncErrorAdd("key_build")
+		}
 		monitor.Rec53Log.Debugf("[XDP] sync skipped for %s (type %d): key build failed: %v", name, qtype, err)
 		return
 	}
 
 	val, err := buildBPFCacheValue(msg, ttlSeconds)
 	if err != nil {
+		if monitor.Rec53Metric != nil {
+			monitor.Rec53Metric.XDPSyncErrorAdd("value_build")
+		}
 		monitor.Rec53Log.Debugf("[XDP] sync skipped for %s (type %d): value build failed: %v", name, qtype, err)
 		return
 	}
 
-	if err := cacheMap.Update(key, val, ebpf.UpdateAny); err != nil {
+	if err := safeBPFMapUpdate(cacheMap, key, val); err != nil {
+		if monitor.Rec53Metric != nil {
+			monitor.Rec53Metric.XDPSyncErrorAdd("update")
+		}
 		monitor.Rec53Log.Debugf("[XDP] BPF map update failed for %s (type %d): %v", name, qtype, err)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"time"
 
+	"rec53/monitor"
+
 	"github.com/miekg/dns"
 	"github.com/patrickmn/go-cache"
 )
@@ -47,8 +49,11 @@ func setCacheCopyByType(name string, qtype uint16, value *dns.Msg, expire uint32
 //   - OPT records are stripped on write (setCacheCopy), so cached entries never
 //     contain *dns.OPT. This eliminates the only known Pack()-induced mutation.
 //   - The shallow copy allocates a new dns.Msg struct and new slice headers
-//     (Question, Answer, Ns, Extra) but shares the underlying RR pointers with
-//     the cached entry. Individual RR structs are NOT deep-copied.
+//     (Answer, Ns, Extra) but shares the underlying RR pointers with the cached
+//     entry. Individual RR structs are NOT deep-copied.
+//   - Question is intentionally NOT copied. All production callers ignore the
+//     returned Question; server.go restores the original question from the
+//     client request before sending the reply.
 //   - Callers may freely modify slice headers (append, truncate, nil) on the
 //     returned message — the cached entry is not affected because the new slices
 //     have cap == len, so any append triggers a new backing array.
@@ -59,7 +64,20 @@ func setCacheCopyByType(name string, qtype uint16, value *dns.Msg, expire uint32
 func getCacheCopy(key string) (*dns.Msg, bool) {
 	msg, found := getCache(key)
 	if !found {
+		if monitor.Rec53Metric != nil {
+			monitor.Rec53Metric.CacheLookupAdd("miss")
+		}
 		return nil, false
+	}
+	if monitor.Rec53Metric != nil {
+		result := "delegation_hit"
+		switch {
+		case len(msg.Answer) > 0:
+			result = "positive_hit"
+		case hasSOAInAuthority(msg):
+			result = "negative_hit"
+		}
+		monitor.Rec53Metric.CacheLookupAdd(result)
 	}
 	return shallowCopyMsg(msg), true
 }
@@ -67,15 +85,17 @@ func getCacheCopy(key string) (*dns.Msg, bool) {
 // shallowCopyMsg allocates a new dns.Msg with copied slice headers but shared
 // RR pointers. The returned slices have cap == len so that any caller append
 // triggers a new backing array, leaving the source slices untouched.
+//
+// Question is intentionally omitted: all production callers (state_cache_lookup,
+// state_lookup_ns_cache, state_query_upstream) do not use the returned Question,
+// and server.go restores the original question from the client request before
+// sending the reply. Skipping the Question allocation saves 1 alloc/op on every
+// cache read.
 func shallowCopyMsg(m *dns.Msg) *dns.Msg {
 	cp := new(dns.Msg)
 	cp.MsgHdr = m.MsgHdr
 	cp.Compress = m.Compress
 
-	if len(m.Question) > 0 {
-		cp.Question = make([]dns.Question, len(m.Question))
-		copy(cp.Question, m.Question)
-	}
 	if len(m.Answer) > 0 {
 		cp.Answer = make([]dns.RR, len(m.Answer))
 		copy(cp.Answer, m.Answer)
@@ -94,6 +114,10 @@ func shallowCopyMsg(m *dns.Msg) *dns.Msg {
 func setCache(key string, value interface{}, expire uint32) {
 	expireTime := time.Duration(expire) * time.Second
 	globalDnsCache.Set(key, value, expireTime)
+	if monitor.Rec53Metric != nil {
+		monitor.Rec53Metric.CacheLifecycleAdd("write", 1)
+		monitor.Rec53Metric.CacheEntriesSet(globalDnsCache.ItemCount())
+	}
 }
 
 // stripOPT removes all *dns.OPT records from msg.Extra in place.
@@ -140,11 +164,26 @@ func setCacheCopy(key string, value *dns.Msg, expire uint32) {
 }
 
 func deleteExpiredCache() {
+	before := globalDnsCache.ItemCount()
 	globalDnsCache.DeleteExpired()
+	if monitor.Rec53Metric != nil {
+		after := globalDnsCache.ItemCount()
+		if before > after {
+			monitor.Rec53Metric.CacheLifecycleAdd("delete_expired", before-after)
+		}
+		monitor.Rec53Metric.CacheEntriesSet(after)
+	}
 }
 
 func deleteAllCache() {
+	before := globalDnsCache.ItemCount()
 	globalDnsCache.Flush()
+	if monitor.Rec53Metric != nil {
+		if before > 0 {
+			monitor.Rec53Metric.CacheLifecycleAdd("flush", before)
+		}
+		monitor.Rec53Metric.CacheEntriesSet(0)
+	}
 }
 
 func getCacheSize() int {

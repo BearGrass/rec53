@@ -89,5 +89,106 @@ var (
 		},
 	)
 
+	CacheLookupTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_cache_lookup_total",
+			Help: "DNS cache lookup results by bounded outcome",
+		},
+		[]string{"result"},
+	)
+	CacheEntries = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_cache_entries",
+			Help: "Current number of entries in the Go DNS cache",
+		},
+	)
+	CacheLifecycleTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_cache_lifecycle_total",
+			Help: "DNS cache lifecycle events by bounded event type",
+		},
+		[]string{"event"},
+	)
+
+	SnapshotOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_snapshot_operations_total",
+			Help: "Snapshot save/load attempts by operation and result",
+		},
+		[]string{"operation", "result"},
+	)
+	SnapshotEntriesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_snapshot_entries_total",
+			Help: "Snapshot entry counts by operation and bounded result",
+		},
+		[]string{"operation", "result"},
+	)
+	SnapshotDurationMs = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "rec53_snapshot_duration_ms",
+			Help:    "Snapshot save/load duration in milliseconds",
+			Buckets: []float64{1, 5, 10, 50, 100, 250, 500, 1000, 5000},
+		},
+		[]string{"operation", "result"},
+	)
+
+	UpstreamFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_upstream_failures_total",
+			Help: "Upstream query failures by bounded reason and rcode",
+		},
+		[]string{"reason", "rcode"},
+	)
+	UpstreamFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_upstream_fallback_total",
+			Help: "Alternate upstream fallback attempts by bounded result",
+		},
+		[]string{"result"},
+	)
+	UpstreamWinnerTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_upstream_winner_total",
+			Help: "Happy Eyeballs winner path by bounded path name",
+		},
+		[]string{"path"},
+	)
+
+	XDPSyncErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_xdp_cache_sync_errors_total",
+			Help: "XDP cache sync failures by bounded reason",
+		},
+		[]string{"reason"},
+	)
+	XDPCleanupDeletedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "rec53_xdp_cleanup_deleted_total",
+			Help: "Total expired XDP cache entries deleted during cleanup",
+		},
+	)
+	XDPEntries = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_xdp_entries",
+			Help: "Current active XDP cache entry count after cleanup reconciliation",
+		},
+	)
+
+	StateMachineStageTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_state_machine_stage_total",
+			Help: "State machine stage transitions by bounded stage name",
+		},
+		[]string{"stage"},
+	)
+	StateMachineFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_state_machine_failures_total",
+			Help: "State machine terminal failures by bounded reason",
+		},
+		[]string{"reason"},
+	)
+
 	Rec53Metric *Metric
 )
