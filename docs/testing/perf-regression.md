@@ -20,6 +20,16 @@ go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
 ## 1.1) Tooling in `tools/`
 
+- `tools/run-dnsperf.sh`:
+  - Recommended day-to-day entrypoint for local load testing.
+  - Auto-builds `tools/dnsperf/dnsperf` by default.
+  - Presets:
+    - `hit`: replay sample file for cache-hit / steady-state checks
+    - `miss`: random-prefix mode for cache-miss / iterative stress
+    - `tcp`: replay over TCP
+    - `limited`: replay with explicit `QPS`
+    - `warmup`: short replay run to prefill cache
+    - `custom`: passthrough to raw `dnsperf` flags
 - `tools/dnsperf`:
   - Primary load tool for this repository.
   - Modes:
@@ -66,16 +76,13 @@ Required review points:
 Use `tools/dnsperf` for network-level regression checks:
 
 ```bash
-go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
-  -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
+CONCURRENCY=128 ./tools/run-dnsperf.sh hit
 ```
 
 Optional cache-miss stress profile:
 
 ```bash
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
-  -random-prefix example.com -c 32 -d 20s -proto udp
+./tools/run-dnsperf.sh miss
 ```
 
 Required review points:

@@ -2,16 +2,9 @@
 
 `rec53top` is the local terminal dashboard for rec53. It reads the rec53 Prometheus endpoint directly and renders a fixed six-panel view for traffic, cache, snapshot, upstream, XDP, and state-machine health.
 
-## Scope
+This page is the operational guide: how to launch it, which keys and states matter, how to self-test it locally, and how to read the detailed panels once you are already using the TUI.
 
-`v1.1.2` is intentionally a small MVP:
-
-- single target only
-- read-only dashboard
-- current-state and short-window summaries
-- no Prometheus server or Grafana required
-
-It does not try to replace `docs/metrics.md`, `docs/user/observability-dashboard.md`, or future multi-node observability work.
+For positioning, use cases, boundaries, and the stable overview entrypoint, start with [rec53top Overview](rec53top.md).
 
 ## Run
 
@@ -91,13 +84,29 @@ The TUI uses a small fixed set of states:
 
 ## Detail View
 
-The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add drill-down navigation or historical charts, but it does add bounded breakdowns that help explain the current summary.
+The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add drill-down navigation or historical charts, but the detail page is no longer just a longer copy of the overview card.
+
+Each detail page now follows the same reading order:
+
+- `status`: current panel state
+- `What stands out now`: the current dominant signal, abnormal condition, or the reason the panel is not yet interpretable
+- `Key metrics`: the main raw values behind that conclusion
+- breakdown sections such as response mix, lookup mix, winner mix, or failure reasons when that panel has them
+- `Next checks`: where to look next in rec53top or logs
 
 Recommended use:
 
 - stay in overview for first-check triage
-- press `1` to `6` when one panel already looks suspicious and you want the current response mix, lookup mix, winner mix, or top state buckets
+- press `1` to `6` when one panel already looks suspicious and you want the current standout condition plus the most relevant breakdown or next-check hint
 - press `0` or `Esc` to return to the overview
+
+Non-normal states are also explained directly in detail view:
+
+- `WARMING`: short-window rates are not stable yet because only one successful scrape exists
+- `UNAVAILABLE`: required metric families for that panel are missing from the scrape
+- `DISABLED`: the feature is intentionally off, most commonly XDP
+- `DISCONNECTED`: rec53top has not reached a successful scrape yet
+- `STALE`: the latest scrape failed, so the panel is showing older data with scrape troubleshooting hints instead of normal reading guidance
 
 `-plain` stays overview-only by design.
 
@@ -128,6 +137,8 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - the first successful scrape may show `WARMING`; after the next refresh, rate-based fields should become meaningful
 - `Traffic` shows non-zero QPS
 - `Cache` moves from warming into visible hit or miss rates
+- detail view (`1` to `6`) shows a `What stands out now` summary instead of only repeating the overview numbers
+- degraded or unavailable panels show `Next checks` that point to the next likely panel or troubleshooting direction
 - `State Machine` shows active stages such as `cache_lookup`, `forward_lookup`, or `return_resp`
 - `Upstream` shows winner-path activity when iterative queries actually touch upstream resolution
 - `Upstream` reflects fallback or timeout activity when upstream issues exist

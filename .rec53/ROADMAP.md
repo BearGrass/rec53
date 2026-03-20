@@ -15,9 +15,10 @@
 | v1.0.0 | 2026-03 | done | 1.0 发布收敛，形成单机 node-local 发布基线 |
 | v1.1.0 | 2026-03 | done | 热点复核完成，确认仅保留低风险 alloc quick win |
 | v1.1.1 | 2026-03 | done | 指标体系、运维入口、dashboard/checklist 收敛完成 |
-| v1.1.2 | planned | target | 本地运维 TUI 看板 |
-| v1.1.3 | planned | target | 运行韧性与节点级高可用 |
-| v1.1.4 | planned | target | DNSSEC 设计与预研 |
+| v1.1.2 | 2026-03 | done | 本地运维 TUI 看板 |
+| v1.1.3 | 2026-03 | done | TUI 增强、发布介绍文档与开发排障能力 |
+| v1.2.0 | planned | target | 运行韧性与节点级高可用 |
+| v1.2.1 | planned | target | DNSSEC 设计与预研 |
 
 ## Current Version: dev
 
@@ -49,32 +50,28 @@
 
 ## Next Up
 
-### 当前探索主线 — v1.1.2 本地运维 TUI 看板
+### 当前推进主线 — v1.2.0 运行韧性与节点级高可用
 
-**目标**：基于现有 `/metric` 数据源提供本地 CLI/TUI 看板，让开发和运维无需先部署 Grafana 也能快速查看 rec53 当前状态。
+**目标**：在 `v1.1` 可观测性与本地运维版本线完成后，把主线切到单节点运行韧性，优先解决重启、冷启动、上游抖动、配置变更时的稳定性与可恢复性。
 
-**当前观察**
+**当前判断**
 
-- `v1.1.1` 已经补齐 cache、snapshot、upstream、XDP、state machine 的核心观测面
-- `rec53top` MVP 已经落地，现有 `/metric` 可以直接转成本地六面板终端看板
-- 仓库里的 `rec53ctl` 仍然保持脚本入口，TUI 继续独立目录和命令边界
+- `v1.1.1` 到 `v1.1.3` 已经形成连续的 observability/local-ops 交付线
+- `rec53top` 已具备 overview、detail、bounded since-start counters 和发布入口文档
+- 下一阶段更值得投入的是 readiness / liveness / degraded、warmup 与 snapshot 行为、systemd / 容器友好退出与重启语义
 
-**本轮探索任务**
+**下一步焦点**
 
-- [x] 明确 TUI 的数据源边界与目录结构
-- [x] 确认首版最小面板：traffic、cache、snapshot、upstream、XDP、state machine
-- [x] 确认刷新频率、布局、自适应降级和不可达目标处理
-- [x] 决定首版采用独立二进制，不由 `rec53ctl` 包装调用
-- [x] 补上首版终端兼容性 fallback：`-plain` 纯文本模式
-- [x] 确认下一个最值得做的增强项优先是 detail 视图，不先做 history sparkline
-
-**退出条件**
-
-- [x] 能明确回答“TUI 首版做什么、不做什么、代码放哪里、如何接现有 metrics”
+- [x] 保持 `v1.1` 主线聚焦可观测性与本地运维，不并行展开新的大主题
+- [x] 将 `v1.1.3` 定义为 TUI 增强与发布介绍文档版本
+- [x] 将运行韧性工作顺延到 `v1.2.0`
+- [x] 将 DNSSEC 设计与预研顺延到 `v1.2.1`
+- [ ] 在 `v1.2.0` 中定义 `readiness` / `liveness` / `degraded` 行为与判断口径
+- [ ] 梳理 warmup / snapshot / 冷启动 / 重启的稳定性与告警边界
 
 ## v1.1 版本线
 
-`v1.1` 拆成连续小版本，先确认性能空间，再补观测，再补本地运维界面，再补运行韧性，最后评估 DNSSEC。
+`v1.1` 现在明确收敛为“可观测性与本地运维”版本线：先完成指标体系，再交付本地 TUI MVP，再继续补 TUI 的开发排障能力、发布介绍文档与后续增强骨架。运行韧性和 DNSSEC 不再与 `v1.1` 并行争抢主线。
 
 ### v1.1.0 — 性能收敛与热点复核
 
@@ -123,7 +120,7 @@
 
 ### v1.1.2 — 本地运维 TUI 看板 MVP
 
-**状态**：MVP 已落地，当前进入兼容性和增强项取舍阶段。
+**状态**：已完成。
 
 **目标**：先把 `v1.1.2` 收敛成一个可交付的 MVP：基于现有 `/metric` 数据源提供单实例、本地终端、只读的 CLI/TUI 看板，让开发和运维无需先部署 Grafana，也能快速查看 rec53 当前状态与退化方向。
 
@@ -171,12 +168,34 @@
 **后续增强候选**
 
 - [x] detail 视图：展开单个面板并补充 bounded breakdown，帮助解释当前 summary
+- [x] detail 累计计数器：在短窗口 rate/ratio 之外补充 since-start counters，方便开发定位代码路径与长期热点
+- [x] detail 面板语义统一：明确每个 detail 面板固定展示哪些当前值、累计值、top labels 和 next checks
+- [x] 发布介绍文档：提供一份面向用户/发布说明的 TUI 功能介绍页，解释适用场景、边界和阅读方式
 - [ ] panel drill-down：从 summary 进入更细的 cache / upstream / XDP 子视图
 - [ ] history sparklines：在终端内显示短历史趋势，而不接外部时序库
 - [ ] 排序 / 筛选：当后续引入更多细分项时，支持按失败原因或 stage 聚焦
 - [ ] 更完整的键位体系：页签、返回、帮助浮层、target 切换
 
-### v1.1.3 — 运行韧性与节点级高可用
+### v1.1.3 — TUI 增强、发布介绍文档与开发排障能力
+
+**状态**：已完成。
+
+**目标**：把 `rec53top` 从“本地可用的 MVP 看板”推进到“可发布介绍、能辅助开发定位问题、并为后续 UX polish 留出稳定语义基础”的阶段。
+
+**任务**
+
+- [x] detail 增加累计计数器与 bounded since-start 视图
+- [x] 统一各 detail 面板的语义层次：当前判断、累计计数、top labels、next checks
+- [x] 补一份面向发布的 TUI 介绍文档，可被 README / release notes 直接引用
+- [ ] 梳理 TUI 后续增强候选的优先级与依赖关系
+- [ ] 在完成信息层增强后，再处理文案压缩、布局密度和快捷键提示等 UX polish
+
+**不做**
+
+- [ ] 不在这一版把 TUI 扩成完整监控平台
+- [ ] 不引入多 target 聚合、外部时序库或复杂可视化历史
+
+### v1.2.0 — 运行韧性与节点级高可用
 
 **目标**：增强单节点在重启、冷启动、上游抖动、配置变更时的稳定性。
 
@@ -193,7 +212,7 @@
 - [ ] 不实现分布式缓存一致性
 - [ ] 不引入中心化控制面
 
-### v1.1.4 — DNSSEC 设计与预研
+### v1.2.1 — DNSSEC 设计与预研
 
 **目标**：先把 DNSSEC 的收益、边界、复杂度和上线风险说明白，再决定是否进入实现。
 

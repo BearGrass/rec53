@@ -51,6 +51,7 @@ func Run(ctx context.Context, cfg Config) error {
 	scraper := NewScraper(cfg.Timeout)
 	refreshCh := make(chan struct{}, 1)
 	var latest Dashboard
+	app.SetRoot(ui.layout(), true)
 
 	updateDashboard := func(d Dashboard) {
 		latest = d
@@ -58,7 +59,6 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	updateDashboard(deriveDashboard(cfg.Target, nil, nil, 0))
-	app.SetRoot(ui.layout(), true)
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -285,10 +285,12 @@ func (ui *dashboardUI) render(d Dashboard) {
 
 	ui.detail.SetTitle(" " + ui.detailTitle() + " ")
 	ui.detail.SetText(ui.renderDetail(d))
-	if ui.detailPanel == detailNone {
-		ui.pages.SwitchToPage("overview")
-	} else {
-		ui.pages.SwitchToPage("detail")
+	if ui.pages != nil {
+		if ui.detailPanel == detailNone {
+			ui.pages.SwitchToPage("overview")
+		} else {
+			ui.pages.SwitchToPage("detail")
+		}
 	}
 
 	if ui.helpShown {
@@ -320,131 +322,61 @@ func (ui *dashboardUI) detailTitle() string {
 func (ui *dashboardUI) renderDetail(d Dashboard) string {
 	switch ui.detailPanel {
 	case detailTraffic:
-		lines := []string{
-			statusLine(d.Traffic.Status),
-			fmt.Sprintf("qps                %s", number(d.Traffic.QPS)),
-			fmt.Sprintf("p99 latency        %s", latency(d.Traffic.P99MS)),
-			fmt.Sprintf("servfail ratio     %s", percent(d.Traffic.ServfailRatio)),
-			fmt.Sprintf("nxdomain ratio     %s", percent(d.Traffic.NXDomainRatio)),
-			fmt.Sprintf("noerror ratio      %s", percent(d.Traffic.NoErrorRatio)),
-			"",
-		}
-		lines = append(lines, detailBreakdownLines("Response mix:", d.Traffic.ResponseCodes)...)
-		lines = append(lines,
-			"",
-			"Reading guide:",
-			"- start here for first-check traffic and response quality",
-			"- sustained SERVFAIL growth usually points downstream to upstream or state-machine issues",
-			"- if this panel is WARMING, wait for one more refresh to get short-window rates",
-		)
-		return strings.Join(lines, "\n")
+		return renderDetailModel(buildTrafficDetailModel(d))
 	case detailCache:
-		lines := []string{
-			statusLine(d.Cache.Status),
-			fmt.Sprintf("hit ratio          %s", percent(d.Cache.HitRatio)),
-			fmt.Sprintf("positive hit       %s", rate(d.Cache.PositiveHitRate)),
-			fmt.Sprintf("negative hit       %s", rate(d.Cache.NegativeHitRate)),
-			fmt.Sprintf("delegation hit     %s", rate(d.Cache.DelegationRate)),
-			fmt.Sprintf("miss               %s", rate(d.Cache.MissRate)),
-			fmt.Sprintf("entries            %s", number(d.Cache.Entries)),
-			fmt.Sprintf("lifecycle          %s", d.Cache.Lifecycle),
-			"",
-		}
-		lines = append(lines, detailBreakdownLines("Lookup mix:", d.Cache.Results)...)
-		lines = append(lines,
-			"",
-			"Reading guide:",
-			"- high miss with falling hit ratio means cache effectiveness is dropping",
-			"- negative-hit growth is expected during NXDOMAIN-heavy tests",
-			"- lifecycle shows the dominant current cache maintenance activity",
-		)
-		return strings.Join(lines, "\n")
+		return renderDetailModel(buildCacheDetailModel(d))
 	case detailSnapshot:
-		return strings.Join([]string{
-			statusLine(d.Snapshot.Status),
-			fmt.Sprintf("load success       %s", number(d.Snapshot.LoadSuccess)),
-			fmt.Sprintf("load failure       %s", number(d.Snapshot.LoadFailure)),
-			fmt.Sprintf("imported           %s", number(d.Snapshot.Imported)),
-			fmt.Sprintf("skipped expired    %s", number(d.Snapshot.SkippedExpired)),
-			fmt.Sprintf("skipped corrupt    %s", number(d.Snapshot.SkippedCorrupt)),
-			fmt.Sprintf("saved              %s", number(d.Snapshot.SaveSuccess)),
-			fmt.Sprintf("duration p99       %s", latency(d.Snapshot.DurationP99MS)),
-			"",
-			"Reading guide:",
-			"- this panel matters most around restart and shutdown events",
-			"- failures or unexpectedly low imported counts suggest snapshot quality issues",
-			"- skipped-expired growth is normal when an older snapshot is restored",
-		}, "\n")
+		return renderDetailModel(buildSnapshotDetailModel(d))
 	case detailUpstream:
-		lines := []string{
-			statusLine(d.Upstream.Status),
-			fmt.Sprintf("timeout            %s", rate(d.Upstream.TimeoutRate)),
-			fmt.Sprintf("bad rcode          %s", rate(d.Upstream.BadRcodeRate)),
-			fmt.Sprintf("fallback           %s", rate(d.Upstream.FallbackRate)),
-			fmt.Sprintf("winner             %s %s", fallbackText(d.Upstream.Winner), rate(d.Upstream.WinnerRate)),
-			fmt.Sprintf("dominant reason    %s", fallbackText(d.Upstream.DominantReason)),
-			"",
-		}
-		lines = append(lines, detailBreakdownLines("Failure reasons:", d.Upstream.FailureReasons)...)
-		lines = append(lines, "")
-		lines = append(lines, detailBreakdownLines("Winner mix:", d.Upstream.Winners)...)
-		lines = append(lines,
-			"",
-			"Reading guide:",
-			"- timeout and bad-rcode are intentionally separated so transport and answer quality do not blur together",
-			"- fallback growth means the first upstream choice is not consistently enough",
-			"- winner helps explain primary vs secondary happy-eyeballs behavior",
-		)
-		return strings.Join(lines, "\n")
+		return renderDetailModel(buildUpstreamDetailModel(d))
 	case detailXDP:
-		return strings.Join([]string{
-			statusLine(d.XDP.Status),
-			fmt.Sprintf("mode               %s", d.XDP.Mode),
-			fmt.Sprintf("hit ratio          %s", percent(d.XDP.HitRatio)),
-			fmt.Sprintf("sync errors        %s", rate(d.XDP.SyncErrorRate)),
-			fmt.Sprintf("cleanup            %s", rate(d.XDP.CleanupRate)),
-			fmt.Sprintf("entries            %s", number(d.XDP.Entries)),
-			fmt.Sprintf("pass               %s", rate(d.XDP.PassRate)),
-			fmt.Sprintf("errors             %s", rate(d.XDP.ErrorRate)),
-			"",
-			"Reading guide:",
-			"- DISABLED is expected on normal non-XDP deployments",
-			"- DEGRADED here usually means sync or fast-path correctness pressure, not Go-path cache failure",
-			"- compare this panel with Cache when XDP is enabled and hit ratio looks off",
-		}, "\n")
+		return renderDetailModel(buildXDPDetailModel(d))
 	case detailState:
-		lines := []string{
-			statusLine(d.StateMachine.Status),
-			fmt.Sprintf("top stage          %s %s", fallbackText(d.StateMachine.TopStage), rate(d.StateMachine.TopStageRate)),
-			fmt.Sprintf("fail top 1         %s %s", fallbackText(d.StateMachine.TopFailure), rate(d.StateMachine.TopFailureRate)),
-			fmt.Sprintf("fail top 2         %s %s", fallbackText(d.StateMachine.SecondFailure), rate(d.StateMachine.SecondFailureRate)),
-			"",
-		}
-		lines = append(lines, detailBreakdownLines("Stage mix:", d.StateMachine.Stages)...)
-		lines = append(lines, "")
-		lines = append(lines, detailBreakdownLines("Failure reasons:", d.StateMachine.Failures)...)
-		lines = append(lines,
-			"",
-			"Reading guide:",
-			"- use this panel when traffic is failing but cache or upstream alone does not explain it",
-			"- top stage shows where current query volume concentrates",
-			"- failure categories are bounded summaries, so use logs for exact per-request detail",
-		)
-		return strings.Join(lines, "\n")
+		return renderDetailModel(buildStateMachineDetailModel(d))
 	default:
 		return "Press 1-6 to open a panel detail view.\n\n1 Traffic\n2 Cache\n3 Snapshot\n4 Upstream\n5 XDP\n6 State Machine"
 	}
 }
 
-func detailBreakdownLines(title string, items []BreakdownItem) []string {
-	lines := []string{title}
-	if len(items) == 0 {
-		return append(lines, "  no recent samples")
+func renderDetailModel(model detailModel) string {
+	lines := []string{
+		statusLine(model.Status),
+		"",
+		"What stands out now:",
+		"  " + fallbackText(model.Standout),
 	}
-	for _, item := range items {
-		lines = append(lines, fmt.Sprintf("  %-16s %8s  %6s", item.Label, rate(item.Rate), percent(item.Ratio)))
+
+	if len(model.CurrentWindowMetrics) > 0 || len(model.CurrentSections) > 0 {
+		lines = append(lines, "", "Current window:")
+		lines = append(lines, model.CurrentWindowMetrics...)
+		for _, section := range model.CurrentSections {
+			lines = append(lines, "")
+			lines = append(lines, detailSectionLines(section)...)
+		}
 	}
-	return lines
+
+	if len(model.SinceStartMetrics) > 0 || len(model.SinceStartSections) > 0 {
+		lines = append(lines, "", "Since start counters:")
+		lines = append(lines, model.SinceStartMetrics...)
+		for _, section := range model.SinceStartSections {
+			lines = append(lines, "")
+			lines = append(lines, detailSectionLines(section)...)
+		}
+	}
+
+	if len(model.NextChecks) > 0 {
+		lines = append(lines, "", "Next checks:")
+		for _, check := range model.NextChecks {
+			lines = append(lines, "- "+check)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func detailSectionLines(section detailSection) []string {
+	lines := []string{section.Title}
+	return append(lines, section.Lines...)
 }
 
 func statusColor(status panelStatus) string {

@@ -26,6 +26,33 @@ It is not positioned as:
 
 Keep XDP optional for now. The Go path is the `v1.0.0` baseline.
 
+## Prerequisites
+
+- Go `1.25.0` or newer
+- `git` to clone the repository
+- `dig` for the verification steps shown below
+- `systemd` only if you plan to use `./rec53ctl install`
+
+## Download Dependencies
+
+This repository does not vendor Go modules. Project dependencies are declared in `go.mod` / `go.sum` and downloaded by the Go toolchain.
+
+If you want to download everything up front:
+
+```bash
+go mod download
+```
+
+If you prefer to let Go fetch dependencies on demand, any of the following will do it automatically:
+
+```bash
+./rec53ctl build
+./rec53ctl top
+go test ./...
+```
+
+If your environment needs a module proxy, set `GOPROXY` before running those commands, for example `export GOPROXY=https://proxy.golang.org,direct`.
+
 ## Quick Start
 
 Recommended workflow:
@@ -51,6 +78,8 @@ dig @127.0.0.1 -p 5353 example.com AAAA
 ```
 
 `./generate-config.sh` is still available as a compatibility wrapper around `./rec53ctl config`.
+
+`./rec53ctl config` only writes the starter `config.yaml`. It does not download Go dependencies by itself.
 
 Manual run:
 
@@ -126,6 +155,7 @@ User docs:
 - [Quick Start](docs/user/quick-start.md)
 - [Configuration](docs/user/configuration.md)
 - [Operations](docs/user/operations.md)
+- [rec53top Overview](docs/user/rec53top.md)
 - [Local Ops TUI](docs/user/local-ops-tui.md)
 - [Troubleshooting](docs/user/troubleshooting.md)
 - [Observability Dashboard](docs/user/observability-dashboard.md)

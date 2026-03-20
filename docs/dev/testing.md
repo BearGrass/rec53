@@ -69,5 +69,8 @@ When changing metrics or labels, verify:
 For benchmark or performance claims:
 
 - prefer existing benchmark docs and tools under `tools/`
+- start with `./tools/run-dnsperf.sh hit` for a quick macro-load sanity check
+- use `./tools/run-dnsperf.sh miss` when you need cache-miss / iterative stress
+- use `./tools/validate-perf.sh` only for the full dual-metric gate (`dnsperf` + `pprof`)
 - do not present unmeasured improvements as fresh results
 - update performance docs only when you actually ran the relevant validation

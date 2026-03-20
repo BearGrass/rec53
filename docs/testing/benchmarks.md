@@ -69,6 +69,8 @@ The project now includes a built-in load tool at `tools/dnsperf` and a controlle
 pprof endpoint (`debug.pprof_enabled`, default off). Under local UDP load with
 `dnsperf -c 128`, rec53 sustained about `~100k QPS` with zero timeouts/errors.
 
+For daily local runs, prefer `./tools/run-dnsperf.sh hit` and `./tools/run-dnsperf.sh miss`; use raw `tools/dnsperf/dnsperf` commands when you need an exact reproducible command line for a report.
+
 Profile capture method:
 
 ```bash

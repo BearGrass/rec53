@@ -92,32 +92,50 @@ type BreakdownItem struct {
 	Label string
 	Rate  float64
 	Ratio float64
+	Total float64
 }
 
 type Dashboard struct {
-	Target         string
-	Mode           panelStatus
-	LastUpdate     time.Time
-	LastSuccess    time.Time
-	ScrapeDuration time.Duration
-	LastError      string
-	OverallSummary string
-	Traffic        TrafficPanel
-	Cache          CachePanel
-	Snapshot       SnapshotPanel
-	Upstream       UpstreamPanel
-	XDP            XDPPanel
-	StateMachine   StateMachinePanel
-	HelpExpanded   bool
+	Target          string
+	Mode            panelStatus
+	LastUpdate      time.Time
+	LastSuccess     time.Time
+	ScrapeDuration  time.Duration
+	LastError       string
+	OverallSummary  string
+	CurrentSnapshot *MetricsSnapshot
+	Traffic         TrafficPanel
+	Cache           CachePanel
+	Snapshot        SnapshotPanel
+	Upstream        UpstreamPanel
+	XDP             XDPPanel
+	StateMachine    StateMachinePanel
+	HelpExpanded    bool
+}
+
+type detailSection struct {
+	Title string
+	Lines []string
+}
+
+type detailModel struct {
+	Status               panelStatus
+	Standout             string
+	CurrentWindowMetrics []string
+	CurrentSections      []detailSection
+	SinceStartMetrics    []string
+	SinceStartSections   []detailSection
+	NextChecks           []string
 }
 
 func deriveDashboard(target string, prev, curr *MetricsSnapshot, scrapeDuration time.Duration) Dashboard {
 	dashboard := Dashboard{
-		Target:         target,
-		Mode:           statusOK,
-		LastUpdate:     time.Now(),
-		LastSuccess:    time.Now(),
-		ScrapeDuration: scrapeDuration,
+		Target:          target,
+		Mode:            statusOK,
+		LastUpdate:      time.Now(),
+		LastSuccess:     time.Now(),
+		ScrapeDuration:  scrapeDuration,
+		CurrentSnapshot: curr,
 	}
 
 	if curr == nil {
@@ -487,6 +505,394 @@ func buildOverallSummary(d Dashboard) string {
 	return strings.Join(parts, " | ")
 }
 
+func buildTrafficDetailModel(d Dashboard) detailModel {
+	panel := d.Traffic
+	model := detailModel{
+		Status: panel.Status,
+		CurrentWindowMetrics: []string{
+			detailMetricLine("qps", number(panel.QPS)),
+			detailMetricLine("p99 latency", latency(panel.P99MS)),
+			detailMetricLine("servfail ratio", percent(panel.ServfailRatio)),
+			detailMetricLine("nxdomain ratio", percent(panel.NXDomainRatio)),
+			detailMetricLine("noerror ratio", percent(panel.NoErrorRatio)),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Response mix:", panel.ResponseCodes),
+		},
+		SinceStartMetrics:  buildTrafficSinceStartMetrics(d.CurrentSnapshot),
+		SinceStartSections: buildTrafficSinceStartSections(d.CurrentSnapshot),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required traffic metric families are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	topLabel := topBreakdownLabel(panel.ResponseCodes)
+	switch panel.Status {
+	case statusDegraded:
+		switch {
+		case panel.ServfailRatio >= 0.05:
+			model.Standout = fmt.Sprintf("SERVFAIL is elevated at %s, so recent request quality is currently defined by failed answers more than by throughput.", percent(panel.ServfailRatio))
+		case panel.P99MS >= 1000:
+			model.Standout = fmt.Sprintf("Tail latency is high at %s while traffic is still flowing, so users are likely feeling slow recursive paths before they see hard failures.", latency(panel.P99MS))
+		case topLabel != "":
+			model.Standout = fmt.Sprintf("%s currently leads the response mix, and the traffic panel needs a closer look for answer quality rather than raw volume.", topLabel)
+		default:
+			model.Standout = "Traffic is degraded even though the top response bucket is not yet dominant enough to explain the whole picture."
+		}
+		model.NextChecks = []string{
+			"See 4 Upstream for timeout or bad-rcode growth.",
+			"See 6 State Machine for concentrated failure reasons.",
+			"Use rec53 logs if SERVFAIL keeps rising and the breakdown stays mixed.",
+		}
+	default:
+		if topLabel != "" {
+			model.Standout = fmt.Sprintf("%s is the dominant recent response bucket, so the current traffic shape still looks readable from a response-quality perspective.", topLabel)
+		} else {
+			model.Standout = "Traffic is currently healthy, but there is not enough recent response mix to elevate one code as the clear leader."
+		}
+		model.NextChecks = []string{
+			"Watch for SERVFAIL or P99 growth before treating traffic as degraded.",
+			"See 2 Cache if latency rises while traffic volume stays steady.",
+		}
+	}
+
+	return model
+}
+
+func buildCacheDetailModel(d Dashboard) detailModel {
+	panel := d.Cache
+	model := detailModel{
+		Status: panel.Status,
+		CurrentWindowMetrics: []string{
+			detailMetricLine("hit ratio", percent(panel.HitRatio)),
+			detailMetricLine("positive hit", rate(panel.PositiveHitRate)),
+			detailMetricLine("negative hit", rate(panel.NegativeHitRate)),
+			detailMetricLine("delegation hit", rate(panel.DelegationRate)),
+			detailMetricLine("miss", rate(panel.MissRate)),
+			detailMetricLine("entries", number(panel.Entries)),
+			detailMetricLine("lifecycle", panel.Lifecycle),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Lookup mix:", panel.Results),
+		},
+		SinceStartMetrics:  buildCacheSinceStartMetrics(d.CurrentSnapshot),
+		SinceStartSections: buildCacheSinceStartSections(d.CurrentSnapshot),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required cache metric families are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	totalHitRate := panel.PositiveHitRate + panel.NegativeHitRate + panel.DelegationRate
+	topLabel := topBreakdownLabel(panel.Results)
+	switch panel.Status {
+	case statusDegraded:
+		if panel.MissRate > totalHitRate {
+			model.Standout = fmt.Sprintf("Cache misses are currently outrunning cache-served answers at %s, and the overall hit ratio has fallen to %s.", rate(panel.MissRate), percent(panel.HitRatio))
+		} else {
+			model.Standout = fmt.Sprintf("Cache effectiveness is slipping: hit ratio is %s and miss pressure is visible even though hits still exist.", percent(panel.HitRatio))
+		}
+		model.NextChecks = []string{
+			"See 1 Traffic if latency or response quality dropped with miss growth.",
+			"See 4 Upstream when misses are forcing more iterative work.",
+			"See 6 State Machine if one failure reason is clustering around misses.",
+		}
+	default:
+		if topLabel != "" {
+			model.Standout = fmt.Sprintf("%s is the leading recent cache outcome, and lifecycle activity currently looks %s.", topLabel, panel.Lifecycle)
+		} else {
+			model.Standout = "Cache is currently healthy, but there are not enough recent lookups to promote one result class as the standout signal."
+		}
+		model.NextChecks = []string{
+			"Watch miss rate during traffic shifts or cold-name bursts.",
+			"Compare with 1 Traffic if latency rises without obvious cache regression.",
+		}
+	}
+
+	return model
+}
+
+func buildSnapshotDetailModel(d Dashboard) detailModel {
+	panel := d.Snapshot
+	model := detailModel{
+		Status: panel.Status,
+		SinceStartMetrics: []string{
+			detailMetricLine("load success", number(panel.LoadSuccess)),
+			detailMetricLine("load failure", number(panel.LoadFailure)),
+			detailMetricLine("imported", number(panel.Imported)),
+			detailMetricLine("skipped expired", number(panel.SkippedExpired)),
+			detailMetricLine("skipped corrupt", number(panel.SkippedCorrupt)),
+			detailMetricLine("saved", number(panel.SaveSuccess)),
+			detailMetricLine("duration p99", latency(panel.DurationP99MS)),
+		},
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required snapshot metric families are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	if panel.Status == statusDegraded || panel.LoadFailure > 0 {
+		model.Standout = fmt.Sprintf("Snapshot activity has seen failures, so restart and shutdown paths need attention before treating snapshot restore as trustworthy.")
+		model.NextChecks = []string{
+			"Check snapshot file integrity and related log lines around restart or shutdown.",
+			"Compare imported, skipped-expired, and skipped-corrupt counts before relying on restore quality.",
+		}
+		return model
+	}
+
+	if panel.Imported > 0 {
+		model.Standout = fmt.Sprintf("Recent snapshot history looks calm: imported entries are visible and duration remains at %s p99.", latency(panel.DurationP99MS))
+	} else {
+		model.Standout = "Snapshot metrics are available, but there is little recent restore or save activity to diagnose beyond current health."
+	}
+	model.NextChecks = []string{
+		"Revisit this panel around restart and shutdown events rather than steady-state traffic.",
+		"Use logs if imported counts look unexpectedly small for a known snapshot file.",
+	}
+	return model
+}
+
+func buildUpstreamDetailModel(d Dashboard) detailModel {
+	panel := d.Upstream
+	model := detailModel{
+		Status: panel.Status,
+		CurrentWindowMetrics: []string{
+			detailMetricLine("timeout", rate(panel.TimeoutRate)),
+			detailMetricLine("bad rcode", rate(panel.BadRcodeRate)),
+			detailMetricLine("fallback", rate(panel.FallbackRate)),
+			detailMetricLine("winner", fmt.Sprintf("%s %s", fallbackText(panel.Winner), rate(panel.WinnerRate))),
+			detailMetricLine("dominant reason", fallbackText(panel.DominantReason)),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Failure reasons:", panel.FailureReasons),
+			detailRateBreakdownSection("Winner mix:", panel.Winners),
+		},
+		SinceStartMetrics:  buildUpstreamSinceStartMetrics(d.CurrentSnapshot),
+		SinceStartSections: buildUpstreamSinceStartSections(d.CurrentSnapshot),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required upstream metric families are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	switch panel.Status {
+	case statusDegraded:
+		switch {
+		case panel.DominantReason != "":
+			model.Standout = fmt.Sprintf("%s is the dominant recent upstream failure reason, so transport or answer-quality instability is currently upstream-led.", panel.DominantReason)
+		case panel.FallbackRate > 0:
+			model.Standout = fmt.Sprintf("Fallbacks are active at %s, so the first upstream path is not consistently winning on its own.", rate(panel.FallbackRate))
+		default:
+			model.Standout = "Upstream is degraded even though no single failure reason cleanly dominates yet."
+		}
+		model.NextChecks = []string{
+			"Check network reachability and upstream responsiveness first.",
+			"Compare with 1 Traffic for SERVFAIL or latency growth.",
+			"See 6 State Machine if query-upstream failures are clustering.",
+		}
+	default:
+		if panel.Winner != "" {
+			model.Standout = fmt.Sprintf("%s is currently winning the upstream race most often, and no failure path is standing out as a dominant risk.", panel.Winner)
+		} else {
+			model.Standout = "Upstream looks healthy, but there are not enough recent winner or failure samples to elevate one path as the clear leader."
+		}
+		model.NextChecks = []string{
+			"Watch timeout and fallback growth before treating upstream as the root cause.",
+			"Use winner mix to judge whether primary or secondary paths are shifting over time.",
+		}
+	}
+
+	return model
+}
+
+func buildXDPDetailModel(d Dashboard) detailModel {
+	panel := d.XDP
+	model := detailModel{
+		Status: panel.Status,
+		CurrentWindowMetrics: []string{
+			detailMetricLine("mode", panel.Mode),
+			detailMetricLine("hit ratio", percent(panel.HitRatio)),
+			detailMetricLine("sync errors", rate(panel.SyncErrorRate)),
+			detailMetricLine("cleanup", rate(panel.CleanupRate)),
+			detailMetricLine("entries", number(panel.Entries)),
+			detailMetricLine("pass", rate(panel.PassRate)),
+			detailMetricLine("errors", rate(panel.ErrorRate)),
+		},
+		SinceStartMetrics: buildXDPSinceStartMetrics(d.CurrentSnapshot),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "XDP is intentionally disabled or unsupported for this deployment, so there is no fast-path activity to diagnose here.", "Required XDP metrics are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	if panel.Status == statusDegraded {
+		model.Standout = fmt.Sprintf("The XDP fast path is active, but sync or packet-path errors are non-zero, so correctness pressure matters more than raw hit ratio right now.")
+		model.NextChecks = []string{
+			"Compare XDP hit ratio with 2 Cache to see whether fast-path behavior matches the Go-path cache.",
+			"Check sync-error and error counters before trusting fast-path wins.",
+		}
+		return model
+	}
+
+	model.Standout = fmt.Sprintf("The XDP fast path is active and currently stable, with hit ratio %s and pass rate %s.", percent(panel.HitRatio), rate(panel.PassRate))
+	model.NextChecks = []string{
+		"Watch sync-error growth before treating XDP as clean under load.",
+		"Compare with 2 Cache if fast-path hit ratio looks unexpectedly low.",
+	}
+	return model
+}
+
+func buildStateMachineDetailModel(d Dashboard) detailModel {
+	panel := d.StateMachine
+	model := detailModel{
+		Status: panel.Status,
+		CurrentWindowMetrics: []string{
+			detailMetricLine("top stage", fmt.Sprintf("%s %s", fallbackText(panel.TopStage), rate(panel.TopStageRate))),
+			detailMetricLine("fail top 1", fmt.Sprintf("%s %s", fallbackText(panel.TopFailure), rate(panel.TopFailureRate))),
+			detailMetricLine("fail top 2", fmt.Sprintf("%s %s", fallbackText(panel.SecondFailure), rate(panel.SecondFailureRate))),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Stage mix:", panel.Stages),
+			detailRateBreakdownSection("Failure reasons:", panel.Failures),
+		},
+		SinceStartMetrics:  buildStateMachineSinceStartMetrics(d.CurrentSnapshot),
+		SinceStartSections: buildStateMachineSinceStartSections(d.CurrentSnapshot),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required state-machine metric families are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+
+	switch panel.Status {
+	case statusDegraded:
+		if panel.TopFailure != "" {
+			model.Standout = fmt.Sprintf("%s is the top recent state-machine failure, while %s remains the busiest stage. This is where the resolver flow is currently concentrating its pain.", panel.TopFailure, fallbackText(panel.TopStage))
+		} else {
+			model.Standout = fmt.Sprintf("%s is the busiest stage, but the current failure mix still needs more samples to identify a single dominant reason.", fallbackText(panel.TopStage))
+		}
+		model.NextChecks = stateMachineNextChecks(panel.TopFailure)
+	default:
+		if panel.TopStage != "" {
+			model.Standout = fmt.Sprintf("%s is currently the busiest state-machine stage, and there is no active failure leader competing with it.", panel.TopStage)
+		} else {
+			model.Standout = "State-machine metrics are healthy, but the current sample window is too quiet to elevate one stage as the clear standout."
+		}
+		model.NextChecks = []string{
+			"Watch this panel when traffic is failing but neither cache nor upstream alone explains it.",
+			"Use failure reasons as a bounded summary, then pivot to logs for request-level detail.",
+		}
+	}
+
+	return model
+}
+
+func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailableMsg string) (string, []string, bool) {
+	switch status {
+	case statusWarming:
+		return "Only one successful scrape is available, so short-window rates and ratios are not stable yet.", []string{
+			"Wait for the next refresh or press r to collect another successful sample.",
+			"Use the header timestamps to confirm when live short-window interpretation becomes meaningful.",
+		}, true
+	case statusUnavailable:
+		if unavailableMsg == "" {
+			unavailableMsg = "Required metric families for this panel are missing from the current scrape."
+		}
+		return unavailableMsg, []string{
+			"Verify that the target rec53 build exposes the expected metric families.",
+			"Inspect the raw /metric output if this capability should exist on this node.",
+		}, true
+	case statusDisabled:
+		if disabledMsg == "" {
+			disabledMsg = "This panel is intentionally disabled for the current deployment, so there is no live signal to interpret here."
+		}
+		return disabledMsg, []string{
+			"No action is required unless this feature is expected to be enabled.",
+			"Compare with the current configuration before treating this state as a fault.",
+		}, true
+	case statusDisconnected:
+		standout := "The target has not produced a successful scrape yet, so this panel is not showing live rec53 behavior."
+		if lastError != "" {
+			standout = "The target is disconnected from rec53top, so there is no fresh live-state interpretation. Last error: " + lastError
+		}
+		return standout, []string{
+			"Verify the metrics endpoint is reachable and the target address is correct.",
+			"Retry with r after connectivity returns or use -plain/curl to confirm scrape health.",
+		}, true
+	case statusStale:
+		standout := "This panel is showing stale data because the latest scrape failed, so live interpretation is temporarily frozen."
+		if lastError != "" {
+			standout += " Last error: " + lastError
+		}
+		return standout, []string{
+			"Treat current numbers as old until the next successful scrape lands.",
+			"Check scrape connectivity first before following normal panel guidance.",
+		}, true
+	default:
+		return "", nil, false
+	}
+}
+
+func stateMachineNextChecks(topFailure string) []string {
+	checks := []string{
+		"Use rec53 logs for exact per-request state transitions once a failure reason stands out.",
+	}
+	switch {
+	case strings.Contains(topFailure, "upstream"):
+		checks = append([]string{
+			"See 4 Upstream because the dominant state-machine failure is upstream-related.",
+		}, checks...)
+	case strings.Contains(topFailure, "cache"), strings.Contains(topFailure, "glue"):
+		checks = append([]string{
+			"See 2 Cache because the dominant state-machine failure is cache or referral related.",
+		}, checks...)
+	default:
+		checks = append([]string{
+			"Correlate this failure mix with 1 Traffic and 4 Upstream before assuming a single root cause.",
+		}, checks...)
+	}
+	return checks
+}
+
+func topBreakdownLabel(items []BreakdownItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0].Label
+}
+
+func detailMetricLine(label, value string) string {
+	return fmt.Sprintf("  %-16s %s", label, value)
+}
+
+func detailRateBreakdownSection(title string, items []BreakdownItem) detailSection {
+	lines := []string{"  no recent samples"}
+	if len(items) > 0 {
+		lines = make([]string, 0, len(items))
+		for _, item := range items {
+			lines = append(lines, fmt.Sprintf("  %-16s %8s  %6s", item.Label, rate(item.Rate), percent(item.Ratio)))
+		}
+	}
+	return detailSection{Title: title, Lines: lines}
+}
+
+func detailTotalBreakdownSection(title string, items []BreakdownItem) detailSection {
+	lines := []string{"  no cumulative samples"}
+	if len(items) > 0 {
+		lines = make([]string, 0, len(items))
+		for _, item := range items {
+			lines = append(lines, fmt.Sprintf("  %-16s %8s  %6s", item.Label, count(item.Total), percent(item.Ratio)))
+		}
+	}
+	return detailSection{Title: title, Lines: lines}
+}
+
 func buildBreakdown(delta map[string]float64, dt float64, limit int) []BreakdownItem {
 	if len(delta) == 0 || dt <= 0 || limit <= 0 {
 		return nil
@@ -530,6 +936,183 @@ func buildBreakdown(delta map[string]float64, dt float64, limit int) []Breakdown
 	return items
 }
 
+func buildTotalBreakdown(values map[string]float64, limit int) []BreakdownItem {
+	if len(values) == 0 || limit <= 0 {
+		return nil
+	}
+	type entry struct {
+		key   string
+		value float64
+	}
+	entries := make([]entry, 0, len(values))
+	total := 0.0
+	for key, value := range values {
+		if value <= 0 {
+			continue
+		}
+		entries = append(entries, entry{key: key, value: value})
+		total += value
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	items := make([]BreakdownItem, 0, limit)
+	for _, entry := range entries[:limit] {
+		item := BreakdownItem{
+			Label: entry.key,
+			Total: entry.value,
+		}
+		if total > 0 {
+			item.Ratio = entry.value / total
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func buildTrafficSinceStartMetrics(snapshot *MetricsSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	lines := make([]string, 0, 2)
+	if total, ok := snapshot.sum("rec53_query_counter"); ok {
+		lines = append(lines, detailMetricLine("queries total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_response_counter"); ok {
+		lines = append(lines, detailMetricLine("responses total", count(total)))
+	}
+	return lines
+}
+
+func buildTrafficSinceStartSections(snapshot *MetricsSnapshot) []detailSection {
+	if snapshot == nil {
+		return nil
+	}
+	if values, ok := snapshot.sumByLabel("rec53_response_counter", "code"); ok {
+		return []detailSection{detailTotalBreakdownSection("Response codes:", buildTotalBreakdown(values, 4))}
+	}
+	return nil
+}
+
+func buildCacheSinceStartMetrics(snapshot *MetricsSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	lines := make([]string, 0, 1)
+	if total, ok := snapshot.sum("rec53_cache_lookup_total"); ok {
+		lines = append(lines, detailMetricLine("lookups total", count(total)))
+	}
+	return lines
+}
+
+func buildCacheSinceStartSections(snapshot *MetricsSnapshot) []detailSection {
+	if snapshot == nil {
+		return nil
+	}
+	sections := make([]detailSection, 0, 2)
+	if values, ok := snapshot.sumByLabel("rec53_cache_lookup_total", "result"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Lookup results:", buildTotalBreakdown(values, 4)))
+	}
+	if values, ok := snapshot.sumByLabel("rec53_cache_lifecycle_total", "event"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Lifecycle events:", buildTotalBreakdown(values, 4)))
+	}
+	return sections
+}
+
+func buildUpstreamSinceStartMetrics(snapshot *MetricsSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	lines := make([]string, 0, 3)
+	if total, ok := snapshot.sum("rec53_upstream_failures_total"); ok {
+		lines = append(lines, detailMetricLine("failures total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_upstream_fallback_total"); ok {
+		lines = append(lines, detailMetricLine("fallback total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_upstream_winner_total"); ok {
+		lines = append(lines, detailMetricLine("winner total", count(total)))
+	}
+	return lines
+}
+
+func buildUpstreamSinceStartSections(snapshot *MetricsSnapshot) []detailSection {
+	if snapshot == nil {
+		return nil
+	}
+	sections := make([]detailSection, 0, 2)
+	if values, ok := snapshot.sumByLabel("rec53_upstream_failures_total", "reason"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Failure reasons:", buildTotalBreakdown(values, 4)))
+	}
+	if values, ok := snapshot.sumByLabel("rec53_upstream_winner_total", "path"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Winner paths:", buildTotalBreakdown(values, 3)))
+	}
+	return sections
+}
+
+func buildXDPSinceStartMetrics(snapshot *MetricsSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	lines := make([]string, 0, 6)
+	if total, ok := snapshot.sum("rec53_xdp_cache_hits_total"); ok {
+		lines = append(lines, detailMetricLine("hits total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_xdp_cache_misses_total"); ok {
+		lines = append(lines, detailMetricLine("misses total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_xdp_pass_total"); ok {
+		lines = append(lines, detailMetricLine("pass total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_xdp_errors_total"); ok {
+		lines = append(lines, detailMetricLine("error total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_xdp_cache_sync_errors_total"); ok {
+		lines = append(lines, detailMetricLine("sync error total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_xdp_cleanup_deleted_total"); ok {
+		lines = append(lines, detailMetricLine("cleanup total", count(total)))
+	}
+	return lines
+}
+
+func buildStateMachineSinceStartMetrics(snapshot *MetricsSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	lines := make([]string, 0, 2)
+	if total, ok := snapshot.sum("rec53_state_machine_stage_total"); ok {
+		lines = append(lines, detailMetricLine("stages total", count(total)))
+	}
+	if total, ok := snapshot.sum("rec53_state_machine_failures_total"); ok {
+		lines = append(lines, detailMetricLine("failures total", count(total)))
+	}
+	return lines
+}
+
+func buildStateMachineSinceStartSections(snapshot *MetricsSnapshot) []detailSection {
+	if snapshot == nil {
+		return nil
+	}
+	sections := make([]detailSection, 0, 2)
+	if values, ok := snapshot.sumByLabel("rec53_state_machine_stage_total", "stage"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Stage totals:", buildTotalBreakdown(values, 5)))
+	}
+	if values, ok := snapshot.sumByLabel("rec53_state_machine_failures_total", "reason"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Failure totals:", buildTotalBreakdown(values, 5)))
+	}
+	return sections
+}
+
 func percent(value float64) string {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return "--"
@@ -550,6 +1133,16 @@ func number(value float64) string {
 	}
 	if value >= 1000 {
 		return fmt.Sprintf("%.0f", value)
+	}
+	return fmt.Sprintf("%.1f", value)
+}
+
+func count(value float64) string {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return "--"
+	}
+	if math.Abs(value-math.Round(value)) < 0.000001 {
+		return fmt.Sprintf("%.0f", math.Round(value))
 	}
 	return fmt.Sprintf("%.1f", value)
 }

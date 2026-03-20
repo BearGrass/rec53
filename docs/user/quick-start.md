@@ -17,7 +17,7 @@ XDP is not required for the default path. Keep it disabled until the Go path is 
 ./rec53ctl config
 ```
 
-This creates `config.yaml`. Review it before first run.
+This creates `config.yaml`. Review it before first run. It does not install Go dependencies by itself; dependencies are fetched automatically when you run `./rec53ctl build`, `./rec53ctl top`, or `go test ./...`.
 
 ## 3. Build And Run
 
@@ -84,5 +84,6 @@ sudo ./rec53ctl uninstall --purge
 
 - [Configuration](configuration.md)
 - [Operations](operations.md)
+- [rec53top Overview](rec53top.md)
 - [Local Ops TUI](local-ops-tui.md)
 - [Troubleshooting](troubleshooting.md)

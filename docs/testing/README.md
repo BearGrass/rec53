@@ -8,6 +8,7 @@ data, and benchmark reports.
 - [Recursive DNS Test Plan](recursive-dns-test-plan.md)
 - [Performance Regression Rules](perf-regression.md)
 - [Benchmarks](benchmarks.md)
+- [dnsperf Tool Guide](../../tools/dnsperf/README.md)
 
 ## Reports
 
@@ -17,4 +18,6 @@ data, and benchmark reports.
 
 - start with `recursive-dns-test-plan.md` for the full testing strategy
 - use `perf-regression.md` when running benchmark/load/pprof comparisons
+- use `./tools/run-dnsperf.sh hit` for the fastest local replay test
+- use `./tools/run-dnsperf.sh miss` for cache-miss / iterative pressure
 - update `benchmarks.md` only with measured numbers

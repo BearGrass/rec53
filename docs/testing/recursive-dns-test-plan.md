@@ -21,6 +21,7 @@ Use this table to keep testing documentation and tooling aligned:
 | `docs/testing/perf-regression.md` | Performance execution protocol | Exact perf commands, acceptance thresholds, reproducible matrix method |
 | `docs/testing/benchmarks.md` | Baseline snapshots | Measured numbers only (no policy decisions) |
 | `tools/dnsperf` | Load generator | Macro load tests (`-f` replay / `-random-prefix` miss stress) |
+| `tools/run-dnsperf.sh` | Operator-friendly entrypoint | Auto-build + common perf presets for day-to-day load tests |
 | `tools/validate-perf.sh` | Dual-metric automation | One-command dnsperf + pprof validation workflow |
 
 Drift-prevention rule:
@@ -50,11 +51,22 @@ Drift-prevention rule:
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 ```
 
+- For day-to-day load testing, prefer the wrapper:
+
+```bash
+./tools/run-dnsperf.sh hit
+./tools/run-dnsperf.sh miss
+```
+
 - `tools/dnsperf` modes:
   - Replay mode (`-f tools/dnsperf/queries-sample.txt`): stable cache-hit and
     reproducible regression comparisons.
   - Random-prefix mode (`-random-prefix example.com`): cache-miss/iterative
     stress profile.
+- `tools/run-dnsperf.sh`:
+  - Rebuilds `dnsperf` automatically by default.
+  - Provides presets: `warmup`, `hit`, `miss`, `tcp`, `limited`, `custom`.
+  - Uses `tools/dnsperf/queries-sample.txt` by default for replay-based runs.
 - `tools/validate-perf.sh`:
   - Linux-oriented helper for dual-metric gate.
   - Requires `dig`, `curl`, `go tool pprof`, GNU `grep -P`.
@@ -131,8 +143,7 @@ go tool pprof -top -sample_index=alloc_space \
 go test ./server/... ./utils/...
 go test -race ./server/...
 go test -run '^$' -bench 'BenchmarkCacheGetHit|BenchmarkStateMachineCacheHit|BenchmarkRecordLatency' -benchmem ./server/...
-go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 64 -d 10s -proto udp
+./tools/run-dnsperf.sh hit -- -d 10s
 ```
 
 ### Performance PR Gate
@@ -140,11 +151,10 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt
 ```bash
 go test -race ./...
 go test -run '^$' -bench . -benchmem ./server/... ./monitor/... ./e2e/...
-go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
+CONCURRENCY=64 ./tools/run-dnsperf.sh hit
+CONCURRENCY=128 ./tools/run-dnsperf.sh hit
 # optional miss-stress
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -random-prefix example.com -c 32 -d 20s -proto udp
+./tools/run-dnsperf.sh miss
 ```
 
 ### Release Gate
