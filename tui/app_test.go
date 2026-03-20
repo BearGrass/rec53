@@ -117,3 +117,81 @@ func TestDashboardUIHelpKeyCompatibility(t *testing.T) {
 		t.Fatal("help should be hidden after second h")
 	}
 }
+
+func TestDashboardUIDetailSubviewNavigation(t *testing.T) {
+	ui := newDashboardUI()
+	latest := Dashboard{
+		Cache: CachePanel{Status: statusOK},
+	}
+	ui.openDetail(detailCache)
+
+	if got := ui.detailView[detailCache]; got != subviewSummary {
+		t.Fatalf("initial cache subview = %q, want %q", got, subviewSummary)
+	}
+
+	ui.handleKey(tcell.NewEventKey(tcell.KeyRight, 0, 0), latest, nil, nil)
+	if got := ui.detailView[detailCache]; got != subviewCacheLookup {
+		t.Fatalf("cache subview after right = %q, want %q", got, subviewCacheLookup)
+	}
+
+	ui.handleKey(tcell.NewEventKey(tcell.KeyTab, 0, 0), latest, nil, nil)
+	if got := ui.detailView[detailCache]; got != subviewCacheLifecycle {
+		t.Fatalf("cache subview after tab = %q, want %q", got, subviewCacheLifecycle)
+	}
+
+	ui.handleKey(tcell.NewEventKey(tcell.KeyBacktab, 0, 0), latest, nil, nil)
+	if got := ui.detailView[detailCache]; got != subviewCacheLookup {
+		t.Fatalf("cache subview after shift-tab = %q, want %q", got, subviewCacheLookup)
+	}
+
+	ui.handleKey(tcell.NewEventKey(tcell.KeyRune, '[', 0), latest, nil, nil)
+	if got := ui.detailView[detailCache]; got != subviewSummary {
+		t.Fatalf("cache subview after [ = %q, want %q", got, subviewSummary)
+	}
+}
+
+func TestDashboardUIDetailSubviewNavigationDisabledForUnsupportedPanels(t *testing.T) {
+	ui := newDashboardUI()
+	latest := Dashboard{
+		Traffic: TrafficPanel{Status: statusOK},
+	}
+	ui.openDetail(detailTraffic)
+
+	if ui.handleKey(tcell.NewEventKey(tcell.KeyRight, 0, 0), latest, nil, nil) {
+		t.Fatal("right should not be consumed for unsupported detail drilldown")
+	}
+}
+
+func TestDashboardUIPushHistoryIsBounded(t *testing.T) {
+	ui := newDashboardUI()
+	ui.maxHistory = 3
+
+	for i := 0; i < 5; i++ {
+		ui.pushHistory(Dashboard{
+			Cache: CachePanel{HitRatio: float64(i)},
+		})
+	}
+
+	if len(ui.history) != 3 {
+		t.Fatalf("history len = %d, want 3", len(ui.history))
+	}
+	if ui.history[0].Cache.HitRatio != 2 || ui.history[2].Cache.HitRatio != 4 {
+		t.Fatalf("history retained wrong range: %+v", ui.history)
+	}
+}
+
+func TestASCIISparklineAndDirection(t *testing.T) {
+	spark := asciiSparkline([]float64{1, 2, 3, 4, 5})
+	if len(spark) != 5 {
+		t.Fatalf("sparkline len = %d, want 5", len(spark))
+	}
+	if trendDirection([]float64{1, 2, 3, 4, 5}) != "rising" {
+		t.Fatalf("expected rising direction")
+	}
+	if trendDirection([]float64{5, 4, 3, 2, 1}) != "cooling" {
+		t.Fatalf("expected cooling direction")
+	}
+	if trendDirection([]float64{1, 1.01, 0.99, 1.0}) != "flat" {
+		t.Fatalf("expected flat direction")
+	}
+}

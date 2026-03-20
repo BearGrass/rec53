@@ -361,11 +361,12 @@ func TestRenderDetailIncludesBreakdowns(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Failure reasons:",
-		"Winner mix:",
-		"timeout",
-		"primary",
-		"80.0%",
+		"Subview:",
+		"Summary",
+		"Failures",
+		"Winners",
+		"timeout is the dominant recent upstream failure reason",
+		"winner           primary 3.0/s",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("detail view missing %q\n%s", want, text)

@@ -33,21 +33,24 @@ This makes it easier to tell whether a problem is still active now or whether yo
 - single target only
 - local terminal only
 - read-only dashboard
-- no historical storage
+- no persistent historical storage
 - no multi-node or fleet view
-- no drill-down tree beyond one detail page per panel
+- no multi-level drill-down tree beyond one detail page with lightweight subviews for selected panels
 
 It helps you narrow the search space. It does not replace raw `/metric`, logs, Prometheus queries, or future multi-node observability work.
+
+If the TUI shows a short trend cue, treat it as a session-local hint about whether a current signal is rising or cooling. Use Prometheus/Grafana for real historical monitoring.
 
 ## Recommended Path
 
 Use `rec53top` in this order:
 
 1. Open the overview and identify the first suspicious panel.
-2. Enter detail with `1` to `6`.
-3. Compare `What stands out now` with `Since start counters`.
-4. If both point at the same path, go to logs or raw metrics with a much smaller search area.
-5. If they diverge, treat the issue as either warming noise, old accumulation, or a regression that may already be fading.
+2. Enter detail with `Enter` or `1` to `6`.
+3. Start at `Summary`, then switch to a drill-down subview if the current panel offers one.
+4. Compare `What stands out now` with the relevant bounded totals or breakdown page.
+5. If both point at the same path, go to logs or raw metrics with a much smaller search area.
+6. If they diverge, treat the issue as either warming noise, old accumulation, or a regression that may already be fading.
 
 ## Where To Go Next
 

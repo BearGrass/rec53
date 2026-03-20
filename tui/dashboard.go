@@ -574,11 +574,7 @@ func buildCacheDetailModel(d Dashboard) detailModel {
 			detailMetricLine("entries", number(panel.Entries)),
 			detailMetricLine("lifecycle", panel.Lifecycle),
 		},
-		CurrentSections: []detailSection{
-			detailRateBreakdownSection("Lookup mix:", panel.Results),
-		},
-		SinceStartMetrics:  buildCacheSinceStartMetrics(d.CurrentSnapshot),
-		SinceStartSections: buildCacheSinceStartSections(d.CurrentSnapshot),
+		SinceStartMetrics: buildCacheSinceStartMetrics(d.CurrentSnapshot),
 	}
 	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required cache metric families are missing from the target scrape."); handled {
 		model.Standout = standout
@@ -612,6 +608,60 @@ func buildCacheDetailModel(d Dashboard) detailModel {
 		}
 	}
 
+	return model
+}
+
+func buildCacheLookupSubviewModel(d Dashboard) detailModel {
+	panel := d.Cache
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Cache lookup mix isolates which result classes are currently dominating and how that compares with cumulative lookup totals.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("hit ratio", percent(panel.HitRatio)),
+			detailMetricLine("positive hit", rate(panel.PositiveHitRate)),
+			detailMetricLine("negative hit", rate(panel.NegativeHitRate)),
+			detailMetricLine("delegation hit", rate(panel.DelegationRate)),
+			detailMetricLine("miss", rate(panel.MissRate)),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Lookup mix:", panel.Results),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_cache_lookup_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("lookups total", count(total)))
+		}
+		if values, ok := d.CurrentSnapshot.sumByLabel("rec53_cache_lookup_total", "result"); ok {
+			model.SinceStartSections = []detailSection{detailTotalBreakdownSection("Lookup results:", buildTotalBreakdown(values, 4))}
+		}
+	}
+	model.NextChecks = []string{
+		"Return to Summary when you want the overall cache verdict and next checks.",
+		"Switch to Lifecycle if lookup pressure looks normal but cache contents are still churning.",
+	}
+	return model
+}
+
+func buildCacheLifecycleSubviewModel(d Dashboard) detailModel {
+	panel := d.Cache
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Cache lifecycle activity shows whether writes, refreshes, or evictions are driving churn behind the summary hit ratio.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("entries", number(panel.Entries)),
+			detailMetricLine("lifecycle", panel.Lifecycle),
+		},
+	}
+	if d.CurrentSnapshot != nil {
+		if values, ok := d.CurrentSnapshot.sumByLabel("rec53_cache_lifecycle_total", "event"); ok {
+			model.SinceStartSections = []detailSection{detailTotalBreakdownSection("Lifecycle events:", buildTotalBreakdown(values, 4))}
+		}
+	}
+	model.NextChecks = []string{
+		"Compare with Lookup Mix if misses are climbing but lifecycle writes are not.",
+		"Use Summary to return to the higher-level cache diagnosis before pivoting to another panel.",
+	}
 	return model
 }
 
@@ -667,12 +717,7 @@ func buildUpstreamDetailModel(d Dashboard) detailModel {
 			detailMetricLine("winner", fmt.Sprintf("%s %s", fallbackText(panel.Winner), rate(panel.WinnerRate))),
 			detailMetricLine("dominant reason", fallbackText(panel.DominantReason)),
 		},
-		CurrentSections: []detailSection{
-			detailRateBreakdownSection("Failure reasons:", panel.FailureReasons),
-			detailRateBreakdownSection("Winner mix:", panel.Winners),
-		},
-		SinceStartMetrics:  buildUpstreamSinceStartMetrics(d.CurrentSnapshot),
-		SinceStartSections: buildUpstreamSinceStartSections(d.CurrentSnapshot),
+		SinceStartMetrics: buildUpstreamSinceStartMetrics(d.CurrentSnapshot),
 	}
 	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required upstream metric families are missing from the target scrape."); handled {
 		model.Standout = standout
@@ -707,6 +752,68 @@ func buildUpstreamDetailModel(d Dashboard) detailModel {
 		}
 	}
 
+	return model
+}
+
+func buildUpstreamFailuresSubviewModel(d Dashboard) detailModel {
+	panel := d.Upstream
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Upstream failures isolates the recent error mix so timeout, bad-rcode, and fallback pressure are not hidden behind the overall summary.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("timeout", rate(panel.TimeoutRate)),
+			detailMetricLine("bad rcode", rate(panel.BadRcodeRate)),
+			detailMetricLine("fallback", rate(panel.FallbackRate)),
+			detailMetricLine("dominant reason", fallbackText(panel.DominantReason)),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Failure reasons:", panel.FailureReasons),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_upstream_failures_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("failures total", count(total)))
+		}
+		if total, ok := d.CurrentSnapshot.sum("rec53_upstream_fallback_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("fallback total", count(total)))
+		}
+		if values, ok := d.CurrentSnapshot.sumByLabel("rec53_upstream_failures_total", "reason"); ok {
+			model.SinceStartSections = []detailSection{detailTotalBreakdownSection("Failure reasons:", buildTotalBreakdown(values, 4))}
+		}
+	}
+	model.NextChecks = []string{
+		"Switch to Winners if path selection changed without a single dominant failure reason.",
+		"Return to Summary before deciding whether upstream is the root cause or only a symptom.",
+	}
+	return model
+}
+
+func buildUpstreamWinnersSubviewModel(d Dashboard) detailModel {
+	panel := d.Upstream
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Winner paths isolates which upstream path is actually winning, which is useful when failures exist but one route still dominates overall behavior.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("winner", fmt.Sprintf("%s %s", fallbackText(panel.Winner), rate(panel.WinnerRate))),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Winner mix:", panel.Winners),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_upstream_winner_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("winner total", count(total)))
+		}
+		if values, ok := d.CurrentSnapshot.sumByLabel("rec53_upstream_winner_total", "path"); ok {
+			model.SinceStartSections = []detailSection{detailTotalBreakdownSection("Winner paths:", buildTotalBreakdown(values, 3))}
+		}
+	}
+	model.NextChecks = []string{
+		"Switch to Failures if path churn seems to be driven by timeout or bad-rcode pressure.",
+		"Use Summary to compare the winner picture with the overall upstream verdict.",
+	}
 	return model
 }
 
@@ -790,6 +897,67 @@ func buildStateMachineDetailModel(d Dashboard) detailModel {
 		}
 	}
 
+	return model
+}
+
+func buildXDPPacketPathsSubviewModel(d Dashboard) detailModel {
+	panel := d.XDP
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Packet paths isolates fast-path wins versus pass-through and error pressure, which helps judge whether XDP is paying for itself right now.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("hit ratio", percent(panel.HitRatio)),
+			detailMetricLine("pass", rate(panel.PassRate)),
+			detailMetricLine("errors", rate(panel.ErrorRate)),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_cache_hits_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("hits total", count(total)))
+		}
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_cache_misses_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("misses total", count(total)))
+		}
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_pass_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("pass total", count(total)))
+		}
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_errors_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("error total", count(total)))
+		}
+	}
+	model.NextChecks = []string{
+		"Switch to Sync/Cleanup if packet-path ratios look fine but correctness counters are still growing.",
+		"Return to Summary before comparing XDP behavior with the Go-path cache.",
+	}
+	return model
+}
+
+func buildXDPSyncCleanupSubviewModel(d Dashboard) detailModel {
+	panel := d.XDP
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Sync and cleanup isolates whether XDP maintenance overhead is staying quiet or quietly eroding fast-path confidence.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("mode", panel.Mode),
+			detailMetricLine("sync errors", rate(panel.SyncErrorRate)),
+			detailMetricLine("cleanup", rate(panel.CleanupRate)),
+			detailMetricLine("entries", number(panel.Entries)),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_cache_sync_errors_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("sync error total", count(total)))
+		}
+		if total, ok := d.CurrentSnapshot.sum("rec53_xdp_cleanup_deleted_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("cleanup total", count(total)))
+		}
+	}
+	model.NextChecks = []string{
+		"Switch to Packet Paths if maintenance looks calm but fast-path hit ratio is still lower than expected.",
+		"Use Summary when you want the top-line XDP verdict before pivoting away.",
+	}
 	return model
 }
 

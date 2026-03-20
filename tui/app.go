@@ -23,12 +23,16 @@ type dashboardUI struct {
 	helpShown   bool
 	detailPanel detailPanel
 	focusPanel  detailPanel
+	detailView  map[detailPanel]detailSubview
+	history     []Dashboard
+	maxHistory  int
 	pages       *tview.Pages
 	root        tview.Primitive
 	refresh     time.Duration
 }
 
 type detailPanel string
+type detailSubview string
 
 const (
 	detailNone     detailPanel = ""
@@ -39,6 +43,21 @@ const (
 	detailXDP      detailPanel = "xdp"
 	detailState    detailPanel = "state"
 )
+
+const (
+	subviewSummary          detailSubview = "summary"
+	subviewCacheLookup      detailSubview = "cache-lookup"
+	subviewCacheLifecycle   detailSubview = "cache-lifecycle"
+	subviewUpstreamFailures detailSubview = "upstream-failures"
+	subviewUpstreamWinners  detailSubview = "upstream-winners"
+	subviewXDPPacketPaths   detailSubview = "xdp-packet-paths"
+	subviewXDPSyncCleanup   detailSubview = "xdp-sync-cleanup"
+)
+
+type detailSubviewDef struct {
+	id    detailSubview
+	label string
+}
 
 var overviewPanelOrder = []detailPanel{
 	detailTraffic,
@@ -64,6 +83,7 @@ func Run(ctx context.Context, cfg Config) error {
 	app.SetRoot(ui.layout(), true)
 
 	updateDashboard := func(d Dashboard) {
+		ui.pushHistory(d)
 		latest = d
 		ui.render(d)
 	}
@@ -141,6 +161,12 @@ func newDashboardUI() *dashboardUI {
 		detail:     makePanel("Detail"),
 		footer:     tview.NewTextView().SetDynamicColors(true),
 		focusPanel: detailTraffic,
+		maxHistory: 16,
+		detailView: map[detailPanel]detailSubview{
+			detailCache:    subviewSummary,
+			detailUpstream: subviewSummary,
+			detailXDP:      subviewSummary,
+		},
 	}
 }
 
@@ -172,22 +198,38 @@ func (ui *dashboardUI) handleKey(event *tcell.EventKey, latest Dashboard, refres
 			return true
 		}
 	case tcell.KeyLeft:
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, -1) {
+			ui.render(latest)
+			return true
+		}
 		if ui.detailPanel == detailNone && ui.moveFocus(0, -1) {
 			ui.render(latest)
 			return true
 		}
 	case tcell.KeyRight:
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, 1) {
+			ui.render(latest)
+			return true
+		}
 		if ui.detailPanel == detailNone && ui.moveFocus(0, 1) {
 			ui.render(latest)
 			return true
 		}
 	case tcell.KeyTab:
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, 1) {
+			ui.render(latest)
+			return true
+		}
 		if ui.detailPanel == detailNone {
 			ui.cycleFocus(1)
 			ui.render(latest)
 			return true
 		}
 	case tcell.KeyBacktab:
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, -1) {
+			ui.render(latest)
+			return true
+		}
 		if ui.detailPanel == detailNone {
 			ui.cycleFocus(-1)
 			ui.render(latest)
@@ -238,6 +280,16 @@ func (ui *dashboardUI) handleKey(event *tcell.EventKey, latest Dashboard, refres
 		ui.openDetail(detailState)
 		ui.render(latest)
 		return true
+	case '[':
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, -1) {
+			ui.render(latest)
+			return true
+		}
+	case ']':
+		if ui.detailPanel != detailNone && ui.cycleDetailSubview(latest, 1) {
+			ui.render(latest)
+			return true
+		}
 	case 'j':
 		if ui.detailPanel == detailNone && ui.moveFocus(1, 0) {
 			ui.render(latest)
@@ -365,7 +417,7 @@ func (ui *dashboardUI) render(d Dashboard) {
 	}, "\n"))
 
 	ui.updateOverviewTitles()
-	ui.detail.SetTitle(" " + ui.detailTitle() + " ")
+	ui.detail.SetTitle(" " + ui.detailTitle(d) + " ")
 	ui.detail.SetText(ui.renderDetail(d))
 	if ui.pages != nil {
 		if ui.detailPanel == detailNone {
@@ -375,11 +427,7 @@ func (ui *dashboardUI) render(d Dashboard) {
 		}
 	}
 
-	if ui.helpShown {
-		ui.footer.SetText(fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s   statuses: OK / DEGRADED / DISABLED / UNAVAILABLE / STALE / DISCONNECTED / WARMING", ui.focusLabel()))
-	} else {
-		ui.footer.SetText(fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s", ui.focusLabel()))
-	}
+	ui.footer.SetText(ui.footerText(d))
 }
 
 func (ui *dashboardUI) updateOverviewTitles() {
@@ -400,34 +448,96 @@ func (ui *dashboardUI) focusLabel() string {
 	return panelTitle(ui.focusedPanel())
 }
 
-func (ui *dashboardUI) detailTitle() string {
+func (ui *dashboardUI) detailTitle(d Dashboard) string {
 	if ui.detailPanel == detailNone {
 		return "Detail"
+	}
+	if def, ok := ui.currentDetailSubviewDef(ui.detailPanel, d); ok {
+		return fmt.Sprintf("%s Detail [%s]", panelTitle(ui.detailPanel), def.label)
 	}
 	return panelTitle(ui.detailPanel) + " Detail"
 }
 
 func (ui *dashboardUI) renderDetail(d Dashboard) string {
+	if defs := ui.detailSubviewDefs(ui.detailPanel, d); len(defs) > 1 {
+		subview, _ := ui.currentDetailSubviewDef(ui.detailPanel, d)
+		return ui.renderDetailWithTabs(defs, subview.id, ui.renderDetailWithTrendCues(d, ui.renderDetailSubview(d, subview.id)))
+	}
 	switch ui.detailPanel {
 	case detailTraffic:
-		return renderDetailModel(buildTrafficDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildTrafficDetailModel(d)))
 	case detailCache:
-		return renderDetailModel(buildCacheDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildCacheDetailModel(d)))
 	case detailSnapshot:
-		return renderDetailModel(buildSnapshotDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildSnapshotDetailModel(d)))
 	case detailUpstream:
-		return renderDetailModel(buildUpstreamDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildUpstreamDetailModel(d)))
 	case detailXDP:
-		return renderDetailModel(buildXDPDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildXDPDetailModel(d)))
 	case detailState:
-		return renderDetailModel(buildStateMachineDetailModel(d))
+		return ui.renderDetailWithTrendCues(d, renderDetailModel(buildStateMachineDetailModel(d)))
 	default:
 		return "Use arrows, j/k/l, or Tab to focus an overview panel.\nPress Enter to open the focused detail view, or use 1-6 as direct shortcuts.\n\n1 Traffic\n2 Cache\n3 Snapshot\n4 Upstream\n5 XDP\n6 State Machine"
 	}
 }
 
+func (ui *dashboardUI) renderDetailWithTrendCues(d Dashboard, body string) string {
+	trends := ui.renderTrendCues(d)
+	if trends == "" {
+		return body
+	}
+	return body + "\n\nRecent trend cues:\n" + trends
+}
+
+func (ui *dashboardUI) renderDetailSubview(d Dashboard, subview detailSubview) string {
+	switch ui.detailPanel {
+	case detailCache:
+		switch subview {
+		case subviewCacheLookup:
+			return renderDetailModel(buildCacheLookupSubviewModel(d))
+		case subviewCacheLifecycle:
+			return renderDetailModel(buildCacheLifecycleSubviewModel(d))
+		default:
+			return renderDetailModel(buildCacheDetailModel(d))
+		}
+	case detailUpstream:
+		switch subview {
+		case subviewUpstreamFailures:
+			return renderDetailModel(buildUpstreamFailuresSubviewModel(d))
+		case subviewUpstreamWinners:
+			return renderDetailModel(buildUpstreamWinnersSubviewModel(d))
+		default:
+			return renderDetailModel(buildUpstreamDetailModel(d))
+		}
+	case detailXDP:
+		switch subview {
+		case subviewXDPPacketPaths:
+			return renderDetailModel(buildXDPPacketPathsSubviewModel(d))
+		case subviewXDPSyncCleanup:
+			return renderDetailModel(buildXDPSyncCleanupSubviewModel(d))
+		default:
+			return renderDetailModel(buildXDPDetailModel(d))
+		}
+	default:
+		return ui.renderDetail(d)
+	}
+}
+
+func (ui *dashboardUI) renderDetailWithTabs(defs []detailSubviewDef, current detailSubview, body string) string {
+	tabs := make([]string, 0, len(defs))
+	for _, def := range defs {
+		if def.id == current {
+			tabs = append(tabs, fmt.Sprintf("[yellow]> %s <[-]", def.label))
+			continue
+		}
+		tabs = append(tabs, def.label)
+	}
+	return fmt.Sprintf("Subview: %s\n\n%s", strings.Join(tabs, "   "), body)
+}
+
 func (ui *dashboardUI) openFocusedDetail() {
 	ui.detailPanel = ui.focusedPanel()
+	ui.resetDetailSubview(ui.detailPanel)
 }
 
 func (ui *dashboardUI) openDetail(panel detailPanel) {
@@ -436,6 +546,7 @@ func (ui *dashboardUI) openDetail(panel detailPanel) {
 	}
 	ui.focusPanel = panel
 	ui.detailPanel = panel
+	ui.resetDetailSubview(panel)
 }
 
 func (ui *dashboardUI) returnToOverview() {
@@ -467,6 +578,115 @@ func (ui *dashboardUI) moveFocus(rowDelta, colDelta int) bool {
 	}
 	ui.focusPanel = overviewPanelOrder[nextRow*2+nextCol]
 	return true
+}
+
+func (ui *dashboardUI) cycleDetailSubview(d Dashboard, step int) bool {
+	defs := ui.detailSubviewDefs(ui.detailPanel, d)
+	if len(defs) <= 1 {
+		return false
+	}
+	current, ok := ui.currentDetailSubviewDef(ui.detailPanel, d)
+	if !ok {
+		current = defs[0]
+	}
+	index := 0
+	for i, def := range defs {
+		if def.id == current.id {
+			index = i
+			break
+		}
+	}
+	size := len(defs)
+	index = (index + step + size) % size
+	ui.detailView[ui.detailPanel] = defs[index].id
+	return true
+}
+
+func (ui *dashboardUI) resetDetailSubview(panel detailPanel) {
+	if ui.detailView == nil {
+		ui.detailView = make(map[detailPanel]detailSubview)
+	}
+	ui.detailView[panel] = subviewSummary
+}
+
+func (ui *dashboardUI) currentDetailSubviewDef(panel detailPanel, d Dashboard) (detailSubviewDef, bool) {
+	defs := ui.detailSubviewDefs(panel, d)
+	if len(defs) == 0 {
+		return detailSubviewDef{}, false
+	}
+	current := subviewSummary
+	if ui.detailView != nil {
+		if value, ok := ui.detailView[panel]; ok {
+			current = value
+		}
+	}
+	for _, def := range defs {
+		if def.id == current {
+			return def, true
+		}
+	}
+	return defs[0], true
+}
+
+func (ui *dashboardUI) detailSubviewDefs(panel detailPanel, d Dashboard) []detailSubviewDef {
+	if !detailDrilldownEnabled(panel, d) {
+		return nil
+	}
+	switch panel {
+	case detailCache:
+		return []detailSubviewDef{
+			{id: subviewSummary, label: "Summary"},
+			{id: subviewCacheLookup, label: "Lookup Mix"},
+			{id: subviewCacheLifecycle, label: "Lifecycle"},
+		}
+	case detailUpstream:
+		return []detailSubviewDef{
+			{id: subviewSummary, label: "Summary"},
+			{id: subviewUpstreamFailures, label: "Failures"},
+			{id: subviewUpstreamWinners, label: "Winners"},
+		}
+	case detailXDP:
+		return []detailSubviewDef{
+			{id: subviewSummary, label: "Summary"},
+			{id: subviewXDPPacketPaths, label: "Packet Paths"},
+			{id: subviewXDPSyncCleanup, label: "Sync/Cleanup"},
+		}
+	default:
+		return nil
+	}
+}
+
+func (ui *dashboardUI) footerText(d Dashboard) string {
+	if ui.detailPanel != detailNone {
+		return ui.detailFooterText(d)
+	}
+	if ui.helpShown {
+		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s   statuses: OK / DEGRADED / DISABLED / UNAVAILABLE / STALE / DISCONNECTED / WARMING", ui.focusLabel())
+	}
+	return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s", ui.focusLabel())
+}
+
+func (ui *dashboardUI) detailFooterText(d Dashboard) string {
+	if def, ok := ui.currentDetailSubviewDef(ui.detailPanel, d); ok {
+		if ui.helpShown {
+			return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]tab/shift-tab[-] subview   [yellow][ / ][-] prev/next   [yellow]left/right[-] subview   [yellow]0/esc[-] overview   detail %s / %s", panelTitle(ui.detailPanel), def.label)
+		}
+		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]tab/shift-tab[-] subview   [yellow][ / ][-] prev/next   [yellow]left/right[-] subview   [yellow]0/esc[-] overview   detail %s / %s", panelTitle(ui.detailPanel), def.label)
+	}
+	if ui.helpShown {
+		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]0/esc[-] overview   detail %s", panelTitle(ui.detailPanel))
+	}
+	return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]0/esc[-] overview   detail %s", panelTitle(ui.detailPanel))
+}
+
+func (ui *dashboardUI) pushHistory(d Dashboard) {
+	ui.history = append(ui.history, d)
+	if ui.maxHistory <= 0 {
+		ui.maxHistory = 16
+	}
+	if len(ui.history) > ui.maxHistory {
+		ui.history = append([]Dashboard(nil), ui.history[len(ui.history)-ui.maxHistory:]...)
+	}
 }
 
 func (ui *dashboardUI) panelView(panel detailPanel) *tview.TextView {
@@ -518,6 +738,149 @@ func overviewPanelIndex(panel detailPanel) int {
 		}
 	}
 	return -1
+}
+
+func detailDrilldownEnabled(panel detailPanel, d Dashboard) bool {
+	status := detailPanelStatus(panel, d)
+	if status != statusOK && status != statusDegraded {
+		return false
+	}
+	switch panel {
+	case detailCache, detailUpstream, detailXDP:
+		return true
+	default:
+		return false
+	}
+}
+
+func detailPanelStatus(panel detailPanel, d Dashboard) panelStatus {
+	switch panel {
+	case detailTraffic:
+		return d.Traffic.Status
+	case detailCache:
+		return d.Cache.Status
+	case detailSnapshot:
+		return d.Snapshot.Status
+	case detailUpstream:
+		return d.Upstream.Status
+	case detailXDP:
+		return d.XDP.Status
+	case detailState:
+		return d.StateMachine.Status
+	default:
+		return statusUnavailable
+	}
+}
+
+func (ui *dashboardUI) renderTrendCues(d Dashboard) string {
+	if len(ui.history) < 2 {
+		return ""
+	}
+	type cue struct {
+		label  string
+		values []float64
+	}
+	cues := make([]cue, 0, 2)
+	switch ui.detailPanel {
+	case detailCache:
+		cues = append(cues,
+			cue{label: "hit ratio", values: ui.historyValues(func(item Dashboard) float64 { return item.Cache.HitRatio })},
+			cue{label: "miss rate", values: ui.historyValues(func(item Dashboard) float64 { return item.Cache.MissRate })},
+		)
+	case detailUpstream:
+		cues = append(cues,
+			cue{label: "timeout", values: ui.historyValues(func(item Dashboard) float64 { return item.Upstream.TimeoutRate })},
+			cue{label: "fallback", values: ui.historyValues(func(item Dashboard) float64 { return item.Upstream.FallbackRate })},
+		)
+	case detailXDP:
+		cues = append(cues,
+			cue{label: "hit ratio", values: ui.historyValues(func(item Dashboard) float64 { return item.XDP.HitRatio })},
+			cue{label: "sync errors", values: ui.historyValues(func(item Dashboard) float64 { return item.XDP.SyncErrorRate })},
+		)
+	default:
+		return ""
+	}
+	lines := make([]string, 0, len(cues)+1)
+	lines = append(lines, "  recent in-process samples only; use Prometheus/Grafana for long-range history")
+	for _, trend := range cues {
+		if len(trend.values) < 2 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  %-16s %s  %s", trend.label, asciiSparkline(trend.values), trendDirection(trend.values)))
+	}
+	if len(lines) == 1 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (ui *dashboardUI) historyValues(extract func(Dashboard) float64) []float64 {
+	values := make([]float64, 0, len(ui.history))
+	for _, item := range ui.history {
+		values = append(values, extract(item))
+	}
+	return values
+}
+
+func asciiSparkline(values []float64) string {
+	if len(values) == 0 {
+		return ""
+	}
+	const chars = "._:-=+*#"
+	minValue, maxValue := values[0], values[0]
+	for _, value := range values[1:] {
+		if value < minValue {
+			minValue = value
+		}
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	if maxValue == minValue {
+		return strings.Repeat("=", len(values))
+	}
+	var b strings.Builder
+	b.Grow(len(values))
+	scale := float64(len(chars) - 1)
+	for _, value := range values {
+		index := int(((value - minValue) / (maxValue - minValue) * scale) + 0.5)
+		if index < 0 {
+			index = 0
+		}
+		if index >= len(chars) {
+			index = len(chars) - 1
+		}
+		b.WriteByte(chars[index])
+	}
+	return b.String()
+}
+
+func trendDirection(values []float64) string {
+	if len(values) < 2 {
+		return "warming"
+	}
+	start := values[0]
+	end := values[len(values)-1]
+	delta := end - start
+	threshold := 0.0
+	if start != 0 {
+		if start < 0 {
+			threshold = -start * 0.1
+		} else {
+			threshold = start * 0.1
+		}
+	}
+	if threshold < 0.05 {
+		threshold = 0.05
+	}
+	switch {
+	case delta > threshold:
+		return "rising"
+	case delta < -threshold:
+		return "cooling"
+	default:
+		return "flat"
+	}
 }
 
 func renderDetailModel(model detailModel) string {

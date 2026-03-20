@@ -60,8 +60,9 @@ If the terminal still does not support the full-screen UI, use the plain compati
 - `h` or `?`: toggle help and status legend
 - `Left` / `Right` / `Up` / `Down`: move overview focus across the fixed 2x3 panel grid
 - `j` / `k` / `l`: move overview focus down, up, or right
-- `Tab` / `Shift-Tab`: cycle overview focus forward or backward
+- `Tab` / `Shift-Tab`: cycle overview focus in overview, or cycle drill-down subviews inside supported detail pages
 - `Enter`: open detail view for the currently focused panel
+- `[` / `]`: move to the previous or next drill-down subview when the current detail page supports it
 - `1` to `6`: open detail view for Traffic, Cache, Snapshot, Upstream, XDP, or State Machine directly
 - `0` or `Esc`: return to the overview dashboard
 
@@ -69,6 +70,7 @@ Default navigation path:
 
 - stay in the overview first and move the visible focus to the panel you want
 - press `Enter` to open that panel's detail page
+- if the current panel is `Cache`, `Upstream`, or `XDP`, use `Tab`, `Shift-Tab`, `Left`, `Right`, `[` or `]` to move through drill-down subviews
 - use `0` or `Esc` to return to the overview with the same panel still focused
 - keep `1` to `6` as fast paths when you already know the target panel
 
@@ -95,7 +97,13 @@ The TUI uses a small fixed set of states:
 
 ## Detail View
 
-The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add drill-down navigation or historical charts, but the detail page is no longer just a longer copy of the overview card.
+The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add historical charts or a multi-level page tree, but `Cache`, `Upstream`, and `XDP` now support drill-down subviews inside the same detail page.
+
+Recent trend cues are also intentionally lightweight:
+
+- they use only recent in-process samples from the current `rec53top` session
+- they help answer whether a suspicious signal is still rising or already cooling
+- they do not replace Prometheus or Grafana for longer-range history
 
 Each detail page now follows the same reading order:
 
@@ -103,13 +111,22 @@ Each detail page now follows the same reading order:
 - `What stands out now`: the current dominant signal, abnormal condition, or the reason the panel is not yet interpretable
 - `Key metrics`: the main raw values behind that conclusion
 - breakdown sections such as response mix, lookup mix, winner mix, or failure reasons when that panel has them
+- optional `Recent trend cues`: a very short in-process trend hint for selected metrics
 - `Next checks`: where to look next in rec53top or logs
+
+Supported drill-down panels:
+
+- `Cache`: `Summary`, `Lookup Mix`, `Lifecycle`
+- `Upstream`: `Summary`, `Failures`, `Winners`
+- `XDP`: `Summary`, `Packet Paths`, `Sync/Cleanup`
 
 Recommended use:
 
 - stay in overview for first-check triage
 - move focus with arrows, `j/k/l`, or `Tab` until the panel title is highlighted
 - press `Enter` when one panel looks suspicious and you want the current standout condition plus the most relevant breakdown or next-check hint
+- if the panel supports drill-down, move through subviews with `Tab` / `Shift-Tab`, `Left` / `Right`, or `[` / `]`
+- treat `Summary` as the verdict page, then use the themed subviews only when you need a narrower breakdown
 - keep `1` to `6` for direct jumps when you already know the target panel
 - press `0` or `Esc` to return to the overview
 

@@ -73,6 +73,7 @@ func TestBuildXDPDetailModelDisabled(t *testing.T) {
 func TestRenderDetailAddsDiagnosticSections(t *testing.T) {
 	ui := newDashboardUI()
 	ui.detailPanel = detailUpstream
+	ui.detailView[detailUpstream] = subviewUpstreamFailures
 	snapshot := mustParseMetricsForDetailTest(t, `
 # TYPE rec53_upstream_failures_total counter
 rec53_upstream_failures_total{reason="timeout",rcode=""} 7
@@ -106,18 +107,20 @@ rec53_upstream_winner_total{path="secondary"} 4
 	})
 
 	for _, want := range []string{
+		"Subview:",
 		"What stands out now:",
 		"Current window:",
 		"Since start counters:",
 		"Failure reasons:",
-		"Winner mix:",
-		"Winner paths:",
 		"Next checks:",
-		"timeout is the dominant recent upstream failure reason",
+		"Upstream failures isolates the recent error mix",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("detail view missing %q\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "Winner mix:") {
+		t.Fatalf("failure drilldown should not flatten winner sections into the same page\n%s", text)
 	}
 	if strings.Contains(text, "Reading guide:") {
 		t.Fatalf("detail view should not use static Reading guide section anymore\n%s", text)
@@ -143,6 +146,105 @@ func TestRenderDetailExplainsStaleState(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("stale detail missing %q\n%s", want, text)
+		}
+	}
+}
+
+func TestRenderDetailCacheSubviewShowsLookupOnly(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailCache
+	ui.detailView[detailCache] = subviewCacheLookup
+
+	text := ui.renderDetail(Dashboard{
+		CurrentSnapshot: mustParseMetricsForDetailTest(t, `
+# TYPE rec53_cache_lookup_total counter
+rec53_cache_lookup_total{result="positive_hit"} 100
+rec53_cache_lookup_total{result="negative_hit"} 18
+rec53_cache_lookup_total{result="miss"} 32
+# TYPE rec53_cache_lifecycle_total counter
+rec53_cache_lifecycle_total{event="write"} 52
+`),
+		Cache: CachePanel{
+			Status:          statusOK,
+			HitRatio:        0.68,
+			PositiveHitRate: 20,
+			NegativeHitRate: 5,
+			DelegationRate:  1,
+			MissRate:        8,
+			Results: []BreakdownItem{
+				{Label: "positive_hit", Rate: 20, Ratio: 0.59},
+				{Label: "miss", Rate: 8, Ratio: 0.24},
+			},
+			Lifecycle: "write 4.0/s",
+		},
+	})
+
+	for _, want := range []string{
+		"Subview:",
+		"Lookup mix:",
+		"Lookup results:",
+		"lookups total",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("cache lookup subview missing %q\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Lifecycle events:") {
+		t.Fatalf("cache lookup subview should not include lifecycle totals\n%s", text)
+	}
+}
+
+func TestRenderDetailDisabledStateDoesNotShowSubviewTabs(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailXDP
+	ui.detailView[detailXDP] = subviewXDPPacketPaths
+
+	text := ui.renderDetail(Dashboard{
+		XDP: XDPPanel{
+			Status: statusDisabled,
+			Mode:   "disabled",
+		},
+	})
+
+	if strings.Contains(text, "Subview:") {
+		t.Fatalf("disabled xdp detail should fall back to summary-only state explanation\n%s", text)
+	}
+	if !strings.Contains(text, "intentionally disabled") {
+		t.Fatalf("disabled xdp detail lost state explanation\n%s", text)
+	}
+}
+
+func TestRenderDetailAddsLightweightTrendCues(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailCache
+	ui.history = []Dashboard{
+		{Cache: CachePanel{HitRatio: 0.20, MissRate: 20}},
+		{Cache: CachePanel{HitRatio: 0.35, MissRate: 16}},
+		{Cache: CachePanel{HitRatio: 0.50, MissRate: 10}},
+		{Cache: CachePanel{HitRatio: 0.65, MissRate: 6}},
+	}
+
+	text := ui.renderDetail(Dashboard{
+		Cache: CachePanel{
+			Status:          statusOK,
+			HitRatio:        0.65,
+			PositiveHitRate: 22,
+			NegativeHitRate: 3,
+			DelegationRate:  1,
+			MissRate:        6,
+			Entries:         128,
+			Lifecycle:       "steady",
+		},
+	})
+
+	for _, want := range []string{
+		"Recent trend cues:",
+		"recent in-process samples only; use Prometheus/Grafana for long-range history",
+		"hit ratio",
+		"miss rate",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("trend cues missing %q\n%s", want, text)
 		}
 	}
 }
