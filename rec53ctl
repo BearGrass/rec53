@@ -3,6 +3,8 @@
 # Usage: ./rec53ctl <command> [options]
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ## --- Shared Variables ---
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
@@ -12,6 +14,7 @@ SERVICE_NAME="${SERVICE_NAME:-rec53}"
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 LOG_FILE="${LOG_FILE:-/var/log/rec53/rec53.log}"
 BUILD_OUTPUT="${BUILD_OUTPUT:-dist/rec53}"
+TUI_OUTPUT="${TUI_OUTPUT:-dist/rec53top}"
 
 UNIT_FILE="${SYSTEMD_UNIT_DIR}/${SERVICE_NAME}.service"
 MANAGED_MARKER_FILE="${CONFIG_DIR}/.managed-by-rec53ctl"
@@ -112,23 +115,251 @@ remove_empty_dir_if_possible() {
     fi
 }
 
-## --- build ---
+repo_path() {
+    local value="$1"
+    case "${value}" in
+        /*) printf '%s\n' "${value}" ;;
+        *) printf '%s\n' "${SCRIPT_DIR}/${value}" ;;
+    esac
+}
 
-cmd_build() {
+local_config_path() {
+    printf '%s\n' "${SCRIPT_DIR}/config.yaml"
+}
+
+require_go() {
     if ! command -v go >/dev/null 2>&1; then
         die "go toolchain not found. Please install Go: https://go.dev/dl/"
     fi
+}
 
+write_default_config() {
+    local output_file="$1"
+    cat > "${output_file}" <<'EOF'
+dns:
+  listen: "127.0.0.1:5353"
+  metric: ":9999"
+  log_level: "info"
+  # upstream_timeout controls the per-query timeout when forwarding to authoritative NS servers.
+  # Default: 1.5s (fast-fail; Happy Eyeballs concurrent queries absorb most reliability risk).
+  # Increase to 3s-5s on high-latency networks; minimum allowed value is 100ms.
+  # upstream_timeout: 1500ms
+  # listeners controls the number of UDP+TCP listener pairs bound to the same address
+  # via SO_REUSEPORT.  Each pair gets its own kernel receive queue, enabling
+  # kernel-level load balancing across goroutines.
+  # 0 or 1 = single listener pair (classic, no SO_REUSEPORT).
+  # >1 = N parallel listener pairs with SO_REUSEPORT.
+  # Recommended: match the number of CPU cores for maximum throughput.
+  # listeners: 0
+
+warmup:
+  enabled: true
+  timeout: 5s
+  duration: 5s
+  # Concurrency for warmup queries: dynamically calculated as min(NumCPU() * 2, 8).
+  # On 4-core systems: 8 goroutines; on 2-core: 4; on 16-core+: 8 (capped).
+  # You can override this value here if your deployment has special requirements.
+  concurrency: 0  # 0 means use dynamic calculation; set to >0 to override (e.g., 16)
+  # Curated list of 30 TLDs optimized for warmup.
+  # Covers 85%+ of global domain registrations while keeping memory footprint low.
+  # You can override this list with your own TLDs if needed.
+  tlds:
+    # Tier 1: Global mega-TLDs (8 domains)
+    - com    # ~160M domains, 45% of all domains
+    - cn     # China, ~20M
+    - de     # Germany, ~16M
+    - net    # ~12M
+    - org    # ~11M
+    - uk     # Britain
+    - ru     # Russia
+    - nl     # Netherlands, ~6M
+
+    # Tier 2: Major ccTLDs & strategic gTLDs (22 domains)
+    - br
+    - xyz
+    - info
+    - top
+    - it
+    - fr
+    - au
+    - in
+    - us
+    - pl
+    - ir
+    - eu
+    - es
+    - ca
+    - io
+    - ai
+    - me
+    - site
+    - shop
+    - online
+    - biz
+    - app
+
+# hosts: Static local DNS records answered authoritatively before cache or iterative resolution.
+# Priority: hosts > forwarding > cache > iterative.
+# Supported types: A, AAAA, CNAME. TTL defaults to 60 seconds if omitted.
+#
+# hosts:
+#   - name: db.internal
+#     type: A
+#     value: 10.0.0.5
+#     ttl: 300
+#   - name: ipv6.internal
+#     type: AAAA
+#     value: "::1"
+#   - name: alias.internal
+#     type: CNAME
+#     value: real.internal
+
+# forwarding: Forward queries for specific domain suffixes to dedicated upstream DNS servers.
+# Longest-suffix match wins. Forwarded results are NOT written to the global cache.
+# All upstreams are tried in order; SERVFAIL is returned if all fail (no iterative fallback).
+#
+# forwarding:
+#   - zone: corp.example.com
+#     upstreams:
+#       - 192.168.1.1:53
+#       - 192.168.1.2:53
+#   - zone: internal
+#     upstreams:
+#       - 10.0.0.53:53
+
+# xdp: XDP/eBPF DNS cache fast path.
+# When enabled, DNS cache hits are served directly from the kernel via XDP_TX,
+# bypassing the Go runtime entirely (zero syscalls, zero goroutine overhead).
+# Requirements: Linux kernel >= 5.15, CAP_BPF or root, clang >= 14 (build time only).
+# interface: the network interface to attach the XDP program to (e.g. eth0, ens33).
+#
+# xdp:
+#   enabled: false
+#   interface: ""
+
+# snapshot: Persist DNS cache on graceful shutdown and restore it on startup.
+# This eliminates the cold-start latency (typically 300ms+) caused by rebuilding
+# the cache after a restart.  Completely optional — omitting this block or
+# setting enabled: false leaves existing behaviour unchanged.
+# File must be set to a writable path; an empty or missing file field disables the feature
+# even when enabled: true.  Recommended paths:
+#   Desktop / user service:  ~/.rec53/cache-snapshot.json
+#   System service (root):   /var/lib/rec53/cache-snapshot.json
+#
+# snapshot:
+#   enabled: false
+#   file: ""       # e.g. /var/lib/rec53/cache-snapshot.json
+
+# debug: Development and profiling tools.
+# pprof_enabled: Start a pprof HTTP endpoint for heap/cpu/goroutine profiling.
+#   Default: false (off).  Only enable for debugging sessions.
+# pprof_listen: Address the pprof server binds to.
+#   Default: 127.0.0.1:6060 (localhost only — do NOT bind 0.0.0.0 in production).
+#   Access via: go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+#
+# debug:
+#   pprof_enabled: false
+#   pprof_listen: "127.0.0.1:6060"
+EOF
+}
+
+## --- build ---
+
+cmd_build() {
+    require_go
+
+    local build_output
+    build_output="$(repo_path "${BUILD_OUTPUT}")"
     local outdir
-    outdir="$(dirname "${BUILD_OUTPUT}")"
+    outdir="$(dirname "${build_output}")"
     mkdir -p "${outdir}"
 
-    echo "Building rec53 -> ${BUILD_OUTPUT} ..."
-    if go build -o "${BUILD_OUTPUT}" ./cmd; then
-        echo "Build successful: ${BUILD_OUTPUT}"
+    echo "Building rec53 -> ${build_output} ..."
+    if (cd "${SCRIPT_DIR}" && go build -o "${build_output}" ./cmd); then
+        echo "Build successful: ${build_output}"
     else
         die "Build failed."
     fi
+}
+
+cmd_build_top() {
+    require_go
+
+    local tui_output
+    tui_output="$(repo_path "${TUI_OUTPUT}")"
+    local outdir
+    outdir="$(dirname "${tui_output}")"
+    mkdir -p "${outdir}"
+
+    echo "Building rec53top -> ${tui_output} ..."
+    if (cd "${SCRIPT_DIR}" && go build -o "${tui_output}" ./cmd/rec53top); then
+        echo "Build successful: ${tui_output}"
+    else
+        die "Build failed."
+    fi
+}
+
+## --- config ---
+
+cmd_config() {
+    local output_file
+    output_file="$(local_config_path)"
+    local force=0
+    local stdout_mode=0
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -o|--output)
+                [ $# -ge 2 ] || die "missing value for $1"
+                output_file="$2"
+                shift 2
+                ;;
+            --force)
+                force=1
+                shift
+                ;;
+            --stdout)
+                stdout_mode=1
+                shift
+                ;;
+            -h|--help)
+                cat <<EOF
+Usage: ./rec53ctl config [options]
+
+Options:
+  -o, --output <path>  Output path (default: $(local_config_path))
+  --force              Overwrite an existing file
+  --stdout             Print the template to stdout instead of writing a file
+EOF
+                return 0
+                ;;
+            *)
+                die "Unknown option: $1"
+                ;;
+        esac
+    done
+
+    if [ "${stdout_mode}" -eq 1 ]; then
+        write_default_config /dev/stdout
+        return 0
+    fi
+
+    case "${output_file}" in
+        /*) ;;
+        *) output_file="${PWD}/${output_file}" ;;
+    esac
+
+    if [ -e "${output_file}" ] && [ "${force}" -ne 1 ]; then
+        die "${output_file} already exists. Re-run with --force to overwrite."
+    fi
+
+    mkdir -p "$(dirname "${output_file}")"
+    write_default_config "${output_file}"
+    echo "Config template generated: ${output_file}"
+    echo "Next steps:"
+    echo "  1. Review and edit ${output_file}"
+    echo "  2. ./rec53ctl build"
+    echo "  3. CONFIG_FILE=${output_file} ./rec53ctl run"
 }
 
 ## --- install ---
@@ -153,8 +384,8 @@ cmd_install() {
         echo "Config ${CONFIG_DIR}/config.yaml already exists; skipping config copy."
     else
         # Target missing OR --force-config specified: require source config.yaml
-        if [ ! -f "./config.yaml" ]; then
-            die "config.yaml not found. Run ./generate-config.sh first, then re-run install."
+        if [ ! -f "$(local_config_path)" ]; then
+            die "config.yaml not found at $(local_config_path). Run ./rec53ctl config first, then re-run install."
         fi
         need_config_copy=1
     fi
@@ -178,7 +409,7 @@ cmd_install() {
     # Deploy config
     mkdir -p "${CONFIG_DIR}"
     if [ "${need_config_copy}" -eq 1 ]; then
-        cp "./config.yaml" "${CONFIG_DIR}/config.yaml"
+        cp "$(local_config_path)" "${CONFIG_DIR}/config.yaml"
         echo "Installed config: ${CONFIG_DIR}/config.yaml"
     fi
 
@@ -236,9 +467,9 @@ cmd_upgrade() {
     # Build (unless SKIP_BUILD=1)
     if [ "${SKIP_BUILD:-0}" = "1" ]; then
         echo "SKIP_BUILD=1: skipping compilation."
-        if [ ! -f "${BUILD_OUTPUT}" ]; then
+        if [ ! -f "$(repo_path "${BUILD_OUTPUT}")" ]; then
             rm -f "${INSTALL_DIR}/${BINARY_NAME}.bak"
-            die "SKIP_BUILD=1 but ${BUILD_OUTPUT} not found. Build first."
+            die "SKIP_BUILD=1 but $(repo_path "${BUILD_OUTPUT}") not found. Build first."
         fi
     else
         cmd_build
@@ -249,7 +480,7 @@ cmd_upgrade() {
     systemctl stop "${SERVICE_NAME}"
 
     # Replace binary
-    cp "${BUILD_OUTPUT}" "${INSTALL_DIR}/${BINARY_NAME}"
+    cp "$(repo_path "${BUILD_OUTPUT}")" "${INSTALL_DIR}/${BINARY_NAME}"
     chmod 755 "${INSTALL_DIR}/${BINARY_NAME}"
     echo "Replaced binary: ${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -345,10 +576,10 @@ cmd_run() {
     local bin=""
     if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         bin="${INSTALL_DIR}/${BINARY_NAME}"
-    elif [ -f "${BUILD_OUTPUT}" ]; then
-        bin="${BUILD_OUTPUT}"
+    elif [ -f "$(repo_path "${BUILD_OUTPUT}")" ]; then
+        bin="$(repo_path "${BUILD_OUTPUT}")"
     else
-        die "rec53 binary not found at ${INSTALL_DIR}/${BINARY_NAME} or ${BUILD_OUTPUT}. Run build or install first."
+        die "rec53 binary not found at ${INSTALL_DIR}/${BINARY_NAME} or $(repo_path "${BUILD_OUTPUT}"). Run build or install first."
     fi
 
     # Locate config
@@ -357,14 +588,28 @@ cmd_run() {
         cfg="${CONFIG_FILE}"
     elif [ -f "${CONFIG_DIR}/config.yaml" ]; then
         cfg="${CONFIG_DIR}/config.yaml"
-    elif [ -f "./config.yaml" ]; then
-        cfg="./config.yaml"
+    elif [ -f "$(local_config_path)" ]; then
+        cfg="$(local_config_path)"
     else
-        die "No config file found. Set CONFIG_FILE, or place config.yaml in ${CONFIG_DIR} or the current directory."
+        die "No config file found. Set CONFIG_FILE, or place config.yaml in ${CONFIG_DIR} or ${SCRIPT_DIR}."
     fi
 
     echo "Starting rec53: ${bin} --config ${cfg}"
     exec "${bin}" --config "${cfg}" -rec53.log /dev/stderr "$@"
+}
+
+## --- top ---
+
+cmd_top() {
+    local bin
+    bin="$(repo_path "${TUI_OUTPUT}")"
+    if [ ! -f "${bin}" ]; then
+        echo "rec53top not found at ${bin}; building it first."
+        cmd_build_top
+    fi
+
+    echo "Starting rec53top: ${bin} $*"
+    exec "${bin}" "$@"
 }
 
 ## --- help ---
@@ -375,10 +620,13 @@ Usage: rec53ctl <command> [options]
 
 Commands:
   build      Compile rec53 binary to \${BUILD_OUTPUT} (default: dist/rec53)
+  build-top  Compile rec53top to \${TUI_OUTPUT} (default: dist/rec53top)
+  config     Generate a starter config template
   install    Build, deploy binary, write config, install and start systemd service
   upgrade    Build new binary and hot-swap the running service (with auto-rollback)
   uninstall  Stop/disable service and remove managed binary; preserve config/logs unless --purge is used
   run        Run rec53 in the foreground with terminal log output
+  top        Run the local ops TUI, auto-building it if needed
   help       Show this help message
 
 Environment variables (override defaults):
@@ -389,11 +637,17 @@ Environment variables (override defaults):
   SYSTEMD_UNIT_DIR Systemd unit directory      (default: /etc/systemd/system)
   LOG_FILE      Service log file path          (default: /var/log/rec53/rec53.log)
   BUILD_OUTPUT  Build output path              (default: dist/rec53)
+  TUI_OUTPUT    rec53top build output path     (default: dist/rec53top)
   SKIP_BUILD    Set to 1 to skip build in upgrade  (default: 0)
   CONFIG_FILE   Config file path for run command   (default: auto-detect)
 
 Examples:
+  ./rec53ctl config
+  ./rec53ctl config --force
   ./rec53ctl build
+  ./rec53ctl build-top
+  ./rec53ctl top
+  ./rec53ctl top -plain
   sudo ./rec53ctl install
   sudo ./rec53ctl install --force-config
   sudo ./rec53ctl upgrade
@@ -412,10 +666,13 @@ shift || true
 
 case "${COMMAND}" in
     build)     cmd_build "$@" ;;
+    build-top) cmd_build_top "$@" ;;
+    config)    cmd_config "$@" ;;
     install)   cmd_install "$@" ;;
     upgrade)   cmd_upgrade "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
     run)       cmd_run "$@" ;;
+    top)       cmd_top "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
         echo "error: unknown command '${COMMAND}'" >&2

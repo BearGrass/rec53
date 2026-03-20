@@ -15,7 +15,13 @@ It does not try to replace `docs/metrics.md`, `docs/user/observability-dashboard
 
 ## Run
 
-Build:
+Recommended:
+
+```bash
+./rec53ctl top
+```
+
+Manual build:
 
 ```bash
 go build -o rec53top ./cmd/rec53top

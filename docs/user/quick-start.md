@@ -14,7 +14,7 @@ XDP is not required for the default path. Keep it disabled until the Go path is 
 ## 2. Generate Configuration
 
 ```bash
-./generate-config.sh
+./rec53ctl config
 ```
 
 This creates `config.yaml`. Review it before first run.
@@ -52,8 +52,7 @@ What to check:
 Optional local observability check:
 
 ```bash
-go build -o rec53top ./cmd/rec53top
-./rec53top
+./rec53ctl top
 ```
 
 This gives you a local six-panel summary of traffic, cache, snapshot, upstream, XDP, and state-machine health without deploying Prometheus first.

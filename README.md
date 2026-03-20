@@ -32,7 +32,7 @@ Recommended workflow:
 
 ```bash
 # 1. Generate a config template
-./generate-config.sh
+./rec53ctl config
 
 # 2. Review and edit config.yaml
 
@@ -45,7 +45,12 @@ Recommended workflow:
 # 5. Verify DNS answers
 dig @127.0.0.1 -p 5353 example.com
 dig @127.0.0.1 -p 5353 example.com AAAA
+
+# 6. Optional: open the local ops TUI
+./rec53ctl top
 ```
+
+`./generate-config.sh` is still available as a compatibility wrapper around `./rec53ctl config`.
 
 Manual run:
 
@@ -90,8 +95,10 @@ Recommended operator path:
 `rec53ctl` is the recommended operational entrypoint:
 
 ```bash
+./rec53ctl config
 ./rec53ctl build
 ./rec53ctl run
+./rec53ctl top
 sudo ./rec53ctl install
 sudo ./rec53ctl upgrade
 sudo ./rec53ctl uninstall

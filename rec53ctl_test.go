@@ -151,6 +151,71 @@ func TestRec53ctlInstallRefusesUnmanagedExistingUnit(t *testing.T) {
 	}
 }
 
+func TestRec53ctlConfigWritesTemplateAndNextSteps(t *testing.T) {
+	workDir, fakeBin, systemctlLog := setupRec53ctlWorkspace(t)
+	outputPath := filepath.Join(workDir, "custom", "config.yaml")
+
+	output, err := runRec53ctl(t, workDir, fakeBin, systemctlLog, nil, "config", "-o", outputPath)
+	if err != nil {
+		t.Fatalf("config failed: %v\n%s", err, output)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "dns:") || !strings.Contains(text, "warmup:") || !strings.Contains(text, "metric: \":9999\"") {
+		t.Fatalf("generated config missing expected sections:\n%s", text)
+	}
+	if !strings.Contains(output, "Next steps:") {
+		t.Fatalf("config output missing next steps:\n%s", output)
+	}
+}
+
+func TestRec53ctlRunUsesScriptRelativePathsFromSubdir(t *testing.T) {
+	workDir, fakeBin, systemctlLog := setupRec53ctlWorkspace(t)
+	subDir := filepath.Join(workDir, "nested")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(workDir, "dist"), 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	writeExecutable(t, filepath.Join(workDir, "dist", "rec53"), "#!/bin/sh\nprintf 'run-ok %s\\n' \"$*\"\n")
+
+	output, err := runRec53ctlAtPath(t, subDir, "../rec53ctl", fakeBin, systemctlLog, nil, "run", "-no-warmup")
+	if err != nil {
+		t.Fatalf("run failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "Starting rec53: "+filepath.Join(workDir, "dist", "rec53")+" --config "+filepath.Join(workDir, "config.yaml")) {
+		t.Fatalf("run did not use script-relative paths:\n%s", output)
+	}
+	if !strings.Contains(output, "run-ok --config "+filepath.Join(workDir, "config.yaml")+" -rec53.log /dev/stderr -no-warmup") {
+		t.Fatalf("binary did not receive expected argv:\n%s", output)
+	}
+}
+
+func TestRec53ctlTopBuildsAndExecsTUIBinary(t *testing.T) {
+	workDir, fakeBin, systemctlLog := setupRec53ctlWorkspace(t)
+
+	output, err := runRec53ctl(t, workDir, fakeBin, systemctlLog, nil, "top", "-plain")
+	if err != nil {
+		t.Fatalf("top failed: %v\n%s", err, output)
+	}
+
+	if !strings.Contains(output, "rec53top not found") {
+		t.Fatalf("expected top to auto-build when missing:\n%s", output)
+	}
+	if !strings.Contains(output, "Starting rec53top: "+filepath.Join(workDir, "dist", "rec53top")+" -plain") {
+		t.Fatalf("expected top start message:\n%s", output)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "dist", "rec53top")); err != nil {
+		t.Fatalf("expected rec53top binary to be built: %v", err)
+	}
+}
+
 func setupRec53ctlWorkspace(t *testing.T) (string, string, string) {
 	t.Helper()
 
@@ -207,7 +272,13 @@ func writeManagedInstallFixture(t *testing.T, installDir, configDir, unitDir, lo
 func runRec53ctl(t *testing.T, workDir, fakeBin, systemctlLog string, env map[string]string, args ...string) (string, error) {
 	t.Helper()
 
-	cmd := exec.Command("/bin/bash", append([]string{"./rec53ctl"}, args...)...)
+	return runRec53ctlAtPath(t, workDir, "./rec53ctl", fakeBin, systemctlLog, env, args...)
+}
+
+func runRec53ctlAtPath(t *testing.T, workDir, scriptPath, fakeBin, systemctlLog string, env map[string]string, args ...string) (string, error) {
+	t.Helper()
+
+	cmd := exec.Command("/bin/bash", append([]string{scriptPath}, args...)...)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(),
 		"PATH="+fakeBin+":"+os.Getenv("PATH"),
