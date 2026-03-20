@@ -79,10 +79,11 @@ Try:
 
 ```bash
 TERM=xterm-256color ./rec53top
+./rec53top -plain
 curl -s http://127.0.0.1:9999/metric | head
 ```
 
-If the terminal still fails, keep using raw metrics or Prometheus temporarily and capture the terminal type before debugging further.
+If the full-screen UI still fails, keep using `-plain`, raw metrics, or Prometheus temporarily and capture the terminal type before debugging further.
 
 ## DNS Queries Time Out
 

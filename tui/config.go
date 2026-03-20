@@ -8,6 +8,7 @@ type Config struct {
 	Target          string
 	RefreshInterval time.Duration
 	Timeout         time.Duration
+	Plain           bool
 }
 
 func (c Config) normalized() Config {

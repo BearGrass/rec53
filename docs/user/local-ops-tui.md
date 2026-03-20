@@ -38,12 +38,21 @@ Useful flags:
 - `-target`: metrics endpoint, default `http://127.0.0.1:9999/metric`
 - `-refresh`: dashboard refresh interval, default `2s`
 - `-timeout`: scrape timeout, default `1500ms`
+- `-plain`: print periodic plain-text summaries instead of starting the full-screen TUI
 
 If the terminal opens but does not render correctly, first retry with an explicit terminal type:
 
 ```bash
 TERM=xterm-256color ./rec53top
 ```
+
+If the terminal still does not support the full-screen UI, use the plain compatibility mode:
+
+```bash
+./rec53top -plain
+```
+
+`-plain` prints periodic plain-text summaries using the same dashboard model, but avoids the full-screen terminal UI dependency.
 
 ## Keys
 

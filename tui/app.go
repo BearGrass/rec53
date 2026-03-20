@@ -26,6 +26,9 @@ type dashboardUI struct {
 
 func Run(ctx context.Context, cfg Config) error {
 	cfg = cfg.normalized()
+	if cfg.Plain {
+		return RunPlain(ctx, cfg)
+	}
 
 	app := tview.NewApplication()
 	ui := newDashboardUI()
@@ -100,7 +103,10 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}()
 
-	return app.Run()
+	if err := app.Run(); err != nil {
+		return fmt.Errorf("%w; retry with -plain or TERM=xterm-256color", err)
+	}
+	return nil
 }
 
 func newDashboardUI() *dashboardUI {

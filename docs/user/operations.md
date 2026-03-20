@@ -51,6 +51,12 @@ go build -o rec53top ./cmd/rec53top
 ./rec53top
 ```
 
+If the terminal environment does not support the full-screen UI, use:
+
+```bash
+./rec53top -plain
+```
+
 Use metrics to watch:
 
 - query volume

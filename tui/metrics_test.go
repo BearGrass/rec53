@@ -285,6 +285,38 @@ func TestWithScrapeErrorPreservesStaleStateAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestRenderPlainDashboard(t *testing.T) {
+	dashboard := Dashboard{
+		Target:         DefaultTarget,
+		Mode:           statusOK,
+		LastUpdate:     time.Unix(100, 0),
+		ScrapeDuration: 25 * time.Millisecond,
+		OverallSummary: "TRAFFIC OK | CACHE OK",
+		Traffic:        TrafficPanel{Status: statusOK, QPS: 12.5},
+		Cache:          CachePanel{Status: statusOK, HitRatio: 0.9},
+		Upstream:       UpstreamPanel{Status: statusDisabled},
+		XDP:            XDPPanel{Status: statusDisabled, Mode: "disabled"},
+		StateMachine:   StateMachinePanel{Status: statusOK},
+		Snapshot:       SnapshotPanel{Status: statusWarming},
+	}
+
+	out := renderPlainDashboard(dashboard, 2*time.Second)
+	for _, want := range []string{
+		"rec53top OK",
+		"target=http://127.0.0.1:9999/metric",
+		"Traffic",
+		"qps=12.5",
+		"Cache",
+		"hit_ratio=90.0%",
+		"XDP",
+		"mode=disabled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plain dashboard missing %q\n%s", want, out)
+		}
+	}
+}
+
 var errTestScrape = testError("scrape failed")
 
 type testError string
