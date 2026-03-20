@@ -12,7 +12,7 @@
 - **THEN** `.rec53/ARCHITECTURE.md` SHALL 被删除，避免内容重复
 
 ### Requirement: docs/architecture.md 文件路径使用小写
-`docs/architecture.md` SHALL 使用全小写文件名，与 `docs/benchmarks.md`、`docs/metrics.md` 命名风格一致。
+`docs/architecture.md` SHALL 使用全小写文件名，与 `docs/testing/benchmarks.md`、`docs/metrics.md` 命名风格一致。
 
 #### Scenario: 文件名格式
 - **WHEN** 在 `docs/` 目录下创建文件

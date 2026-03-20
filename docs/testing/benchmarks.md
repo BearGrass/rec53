@@ -496,9 +496,9 @@ REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
 dot is added automatically. Separate multiple domains with commas and no spaces.
 
 For standardized performance regression rules (bench, load, pprof, acceptance
-criteria), see [`docs/perf-regression.md`](perf-regression.md).
+criteria), see [`docs/testing/perf-regression.md`](perf-regression.md).
 For the complete recursive DNS test strategy (correctness + performance +
-release gates), see [`docs/recursive-dns-test-plan.md`](recursive-dns-test-plan.md).
+release gates), see [`docs/testing/recursive-dns-test-plan.md`](recursive-dns-test-plan.md).
 
 ## XDP Cache Fast-Path Benchmark (v0.6.1, 2026-03-18)
 

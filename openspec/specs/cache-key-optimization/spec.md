@@ -31,7 +31,7 @@ and `ns/op` for `getCacheKey`. The new implementation MUST NOT regress on `alloc
 (must be less than or equal to the `fmt.Sprintf` baseline). For `ns/op`, minor
 fluctuations within normal microbenchmark noise are acceptable; only a statistically
 significant regression (consistently >10% slower across multiple runs) constitutes a
-failure. Both before and after numbers SHALL be reported in `docs/benchmarks.md`.
+failure. Both before and after numbers SHALL be reported in `docs/testing/benchmarks.md`.
 
 #### Scenario: Benchmark shows no regression
 - **WHEN** `go test -bench BenchmarkCacheKey -benchmem -count=5 ./server/...` is run

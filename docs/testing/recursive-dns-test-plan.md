@@ -17,17 +17,17 @@ Use this table to keep testing documentation and tooling aligned:
 
 | Item | Role | Canonical Scope |
 |------|------|-----------------|
-| `docs/recursive-dns-test-plan.md` | Master test strategy (this doc) | Layering, release gates, artifacts, ownership boundaries |
-| `docs/perf-regression.md` | Performance execution protocol | Exact perf commands, acceptance thresholds, reproducible matrix method |
-| `docs/benchmarks.md` | Baseline snapshots | Measured numbers only (no policy decisions) |
+| `docs/testing/recursive-dns-test-plan.md` | Master test strategy (this doc) | Layering, release gates, artifacts, ownership boundaries |
+| `docs/testing/perf-regression.md` | Performance execution protocol | Exact perf commands, acceptance thresholds, reproducible matrix method |
+| `docs/testing/benchmarks.md` | Baseline snapshots | Measured numbers only (no policy decisions) |
 | `tools/dnsperf` | Load generator | Macro load tests (`-f` replay / `-random-prefix` miss stress) |
 | `tools/validate-perf.sh` | Dual-metric automation | One-command dnsperf + pprof validation workflow |
 
 Drift-prevention rule:
 
 - If perf command templates or thresholds change, update
-  `docs/perf-regression.md` first, then update references in this file and
-  `docs/benchmarks.md` in the same commit.
+  `docs/testing/perf-regression.md` first, then update references in this file
+  and `docs/testing/benchmarks.md` in the same commit.
 - Do not copy divergent command variants across docs; reference canonical
   commands when possible.
 
@@ -60,6 +60,24 @@ go build -o tools/dnsperf/dnsperf ./tools/dnsperf
   - Requires `dig`, `curl`, `go tool pprof`, GNU `grep -P`.
   - Writes outputs to `/tmp/rec53-perf-validation`.
 
+## 2.2 Topology Profiles
+
+Use explicit test topology names in notes and reports:
+
+| Topology | Purpose | Typical Use |
+|----------|---------|-------------|
+| loopback | Fast local developer iteration | micro + quick macro checks |
+| dual-host direct-link | Removes client/server CPU contention on one machine | `SO_REUSEPORT`, physical NIC, syscall-path evaluation |
+| veth / netns | Controlled local XDP and namespace experiments | XDP functional/perf validation |
+
+Rule:
+
+- once a performance question involves socket contention, NIC behavior, or
+  direct-link throughput ceilings, prefer the dual-host direct-link profile over
+  loopback
+- execution details for the dual-host profile live in
+  [`docs/testing/perf-regression.md`](perf-regression.md)
+
 ## 3. Functional Coverage Checklist
 
 Minimum functional scenarios:
@@ -88,6 +106,8 @@ Required load profile set:
   and use median QPS per level.
 - Optional miss-stress profile: `-random-prefix example.com`.
 - Record QPS, P50, P95, P99, errors, timeouts.
+- For `SO_REUSEPORT`, physical NIC, or socket-path work, add a dual-host
+  direct-link run using the method in [`docs/testing/perf-regression.md`](perf-regression.md).
 
 Required pprof set (denoised):
 
@@ -153,9 +173,11 @@ For performance-sensitive changes, attach:
 - `dnsperf` summary output for required concurrency levels.
 - Denoised `pprof -top` output (CPU + alloc_space).
 - Environment metadata: Go version, CPU model, config profile.
+- When dual-host direct-link is used: both host identities, NIC names, direct-link
+  IPs, and negotiated link speed/duplex.
 
-Store baseline snapshots in [`docs/benchmarks.md`](benchmarks.md), and keep
-execution rules in [`docs/perf-regression.md`](perf-regression.md).
+Store baseline snapshots in [`docs/testing/benchmarks.md`](benchmarks.md), and
+keep execution rules in [`docs/testing/perf-regression.md`](perf-regression.md).
 
 Testing tool outputs to preserve when relevant:
 

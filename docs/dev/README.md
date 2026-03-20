@@ -14,7 +14,7 @@ This section is for contributors and maintainers. It focuses on how rec53 is org
 - [Coding Conventions](../../.rec53/CONVENTIONS.md)
 - [Roadmap](../../.rec53/ROADMAP.md)
 - [Metrics](../metrics.md)
-- [Benchmarks](../benchmarks.md)
+- [Testing Docs Index](../testing/README.md)
 
 ## Working Style
 

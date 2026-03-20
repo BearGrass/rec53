@@ -132,8 +132,9 @@ sudo ./rec53ctl uninstall --purge
 参考文档：
 
 - [指标说明](docs/metrics.md)
-- [基准测试](docs/benchmarks.md)
-- [物理直连 XDP 基准测试报告（2026-03-19）](docs/xdp-physical-benchmark-2026-03-19.zh.md)
-- [性能回归说明](docs/perf-regression.md)
+- [测试文档索引](docs/testing/README.md)
+- [基准测试](docs/testing/benchmarks.md)
+- [物理直连 XDP 基准测试报告（2026-03-19）](docs/testing/xdp-physical-benchmark-2026-03-19.zh.md)
+- [性能回归说明](docs/testing/perf-regression.md)
 - [编码约定](.rec53/CONVENTIONS.md)
 - [路线图](.rec53/ROADMAP.md)

@@ -176,7 +176,7 @@ sleep 3
 info "Capturing heap profile (alloc_space)..."
 curl -sS "http://$PPROF_ADDR/debug/pprof/heap" -o "$RESULTS_DIR/heap.pb.gz" 2>&1
 
-# Run pprof -top with denoised focus (same filters as docs/benchmarks.md)
+# Run pprof -top with denoised focus (same filters as docs/testing/benchmarks.md)
 info ""
 info "┌──────────────────────────────────────────────────────────┐"
 info "│  pprof alloc_space (denoised: rec53/server + miekg/dns) │"
@@ -247,5 +247,5 @@ echo "  pprof top:        $RESULTS_DIR/pprof-alloc-top.txt"
 echo ""
 echo "══════════════════════════════════════════════════════════"
 echo ""
-info "Done! Compare the results above against the baseline in docs/benchmarks.md."
+info "Done! Compare the results above against the baseline in docs/testing/benchmarks.md."
 info "If both gates pass, update the baseline numbers in this script and docs."
