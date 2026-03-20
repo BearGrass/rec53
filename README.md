@@ -119,6 +119,7 @@ User docs:
 - [Quick Start](docs/user/quick-start.md)
 - [Configuration](docs/user/configuration.md)
 - [Operations](docs/user/operations.md)
+- [Local Ops TUI](docs/user/local-ops-tui.md)
 - [Troubleshooting](docs/user/troubleshooting.md)
 - [Observability Dashboard](docs/user/observability-dashboard.md)
 - [Operator Checklist](docs/user/operator-checklist.md)

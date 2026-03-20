@@ -49,6 +49,15 @@ What to check:
 - answers match the query type
 - logs do not show repeated startup or bind errors
 
+Optional local observability check:
+
+```bash
+go build -o rec53top ./cmd/rec53top
+./rec53top
+```
+
+This gives you a local six-panel summary of traffic, cache, snapshot, upstream, XDP, and state-machine health without deploying Prometheus first.
+
 ## 5. Deploy As A Service
 
 ```bash
@@ -76,4 +85,5 @@ sudo ./rec53ctl uninstall --purge
 
 - [Configuration](configuration.md)
 - [Operations](operations.md)
+- [Local Ops TUI](local-ops-tui.md)
 - [Troubleshooting](troubleshooting.md)

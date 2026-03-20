@@ -44,6 +44,13 @@ journalctl -u rec53 -f
 
 Metrics are exposed on `http://<host>:9999/metric` by default.
 
+For local validation, `rec53top` can read the same endpoint directly and show a fixed six-panel terminal dashboard without requiring Prometheus or Grafana:
+
+```bash
+go build -o rec53top ./cmd/rec53top
+./rec53top
+```
+
 Use metrics to watch:
 
 - query volume
@@ -99,7 +106,7 @@ For first deployments, focus on:
 - degraded upstream IPs from `rec53_ipv2_p50_latency_ms`
 - XDP counters only when XDP is explicitly enabled
 
-See [Metrics](../metrics.md) for metric definitions and PromQL examples, [Observability Dashboard](observability-dashboard.md) for the baseline panel layout, and [Operator Checklist](operator-checklist.md) for symptom-first triage.
+See [Metrics](../metrics.md) for metric definitions and PromQL examples, [Local Ops TUI](local-ops-tui.md) for the zero-dependency local dashboard path, [Observability Dashboard](observability-dashboard.md) for the baseline panel layout, and [Operator Checklist](operator-checklist.md) for symptom-first triage.
 
 ## pprof
 

@@ -119,6 +119,7 @@ sudo ./rec53ctl uninstall --purge
 - [快速开始](docs/user/quick-start.md)
 - [配置说明](docs/user/configuration.md)
 - [运维说明](docs/user/operations.md)
+- [本地运维 TUI](docs/user/local-ops-tui.md)
 - [故障排查](docs/user/troubleshooting.md)
 - [观测看板布局](docs/user/observability-dashboard.md)
 - [运维排查清单](docs/user/operator-checklist.md)

@@ -56,19 +56,21 @@
 **当前观察**
 
 - `v1.1.1` 已经补齐 cache、snapshot、upstream、XDP、state machine 的核心观测面
-- 当前仍缺一个“本地可直接看”的运维界面，现有 dashboard/checklist 主要还是文档形式
-- 仓库里的 `rec53ctl` 目前是脚本入口，TUI 需要单独目录和实现边界，不能直接塞进主服务路径
+- `rec53top` MVP 已经落地，现有 `/metric` 可以直接转成本地六面板终端看板
+- 仓库里的 `rec53ctl` 仍然保持脚本入口，TUI 继续独立目录和命令边界
 
 **本轮探索任务**
 
-- [ ] 明确 TUI 的数据源边界与目录结构
-- [ ] 确认首版最小面板：traffic、cache、snapshot、upstream、XDP、state machine
-- [ ] 确认刷新频率、布局、自适应降级和不可达目标处理
-- [ ] 决定首版是独立二进制还是由 `rec53ctl` 包装调用
+- [x] 明确 TUI 的数据源边界与目录结构
+- [x] 确认首版最小面板：traffic、cache、snapshot、upstream、XDP、state machine
+- [x] 确认刷新频率、布局、自适应降级和不可达目标处理
+- [x] 决定首版采用独立二进制，不由 `rec53ctl` 包装调用
+- [ ] 继续做首版终端兼容性和显示稳定性打磨
+- [ ] 评估下一个最值得做的增强项是 detail 视图还是 history sparkline
 
 **退出条件**
 
-- [ ] 能明确回答“TUI 首版做什么、不做什么、代码放哪里、如何接现有 metrics”
+- [x] 能明确回答“TUI 首版做什么、不做什么、代码放哪里、如何接现有 metrics”
 
 ## v1.1 版本线
 
@@ -119,24 +121,60 @@
 - [x] 不引入高基数 label
 - [x] 不一次性把 tracing / logging / profiling 平台化
 
-### v1.1.2 — 本地运维 TUI 看板
+### v1.1.2 — 本地运维 TUI 看板 MVP
 
-**目标**：提供一个基于现有 `/metric` 数据源的本地 CLI/TUI 看板，让开发和运维无需先部署 Grafana，也能快速查看 rec53 当前状态与退化方向。
+**状态**：MVP 已落地，当前进入兼容性和增强项取舍阶段。
 
-**任务**
+**目标**：先把 `v1.1.2` 收敛成一个可交付的 MVP：基于现有 `/metric` 数据源提供单实例、本地终端、只读的 CLI/TUI 看板，让开发和运维无需先部署 Grafana，也能快速查看 rec53 当前状态与退化方向。
 
-- [ ] 明确 TUI 的数据源边界：默认消费 `http://127.0.0.1:9999/metric`
-- [ ] 为 TUI 单独开目录，避免把主服务和运维界面代码混在一起
-- [ ] 设计最小可用面板：traffic、cache、snapshot、upstream、XDP、state machine
-- [ ] 确定刷新频率、配色、布局和降级行为（指标缺失、XDP 未启用、目标不可达）
-- [ ] 先支持单实例、本地终端使用，再评估是否扩展多 target 或历史趋势
-- [ ] 补充使用文档与终端截图/示意
+**范围判断**
+
+- [x] 当前不再继续扩版；`v1.1.2` 本身可以收敛为一个足够小的 MVP
+- [x] 版本边界定为：单 target、当前状态 + 短窗口速率、固定六面板、只读
+- [x] 多 target、历史趋势、交互式 drill-down 留到后续版本或 backlog
+
+**任务拆解**
+
+**Batch 1：边界与骨架**
+
+- [x] 冻结命令形态、目录结构和默认 target：`http://127.0.0.1:9999/metric`
+- [x] TUI 单独开目录，不混入 `server/` 和主服务启动路径
+- [x] 引入专门的 Go TUI 依赖，并限制其只作用于独立命令
+
+**Batch 2：数据采集与状态模型**
+
+- [x] 直连抓取 `/metric`，不依赖 Grafana、Prometheus server 或外部数据库
+- [x] 把六类指标收敛成固定状态模型：traffic、cache、snapshot、upstream、XDP、state machine
+- [x] 在本地用连续 scrape 计算短窗口 rate/ratio，而不是只显示原始 counter
+- [x] 明确三种降级状态：目标不可达、指标缺失、XDP 未启用
+
+**Batch 3：界面与交互**
+
+- [x] 落地固定六面板布局与状态摘要
+- [x] 确定刷新频率、配色、终端宽度适配和最小交互（退出、刷新、帮助）
+- [x] 确保“是否正常、哪里退化了”一眼能看出来，而不是逼用户先懂 PromQL
+- [x] 在实现上保留后续 detail / drill-down / history 的扩展点，但不把它们塞进 MVP
+- [ ] 继续收敛终端兼容性，避免“可启动但无显示”一类问题
+
+**Batch 4：文档与验收**
+
+- [x] 补充使用文档、自测路径和终端截图/示意
+- [x] 更新 README 和 roadmap 入口
+- [x] 用本地 rec53 实例做一轮手工验收，确认六面板都能读到合理状态
 
 **不做**
 
 - [ ] 不把 TUI 直接嵌入主服务进程
-- [ ] 不依赖 Grafana、Prometheus server 或外部数据库
-- [ ] 不在首版承诺交互式历史图、告警管理或多节点聚合
+- [ ] 不接 Prometheus query API 或外部时序库
+- [ ] 不在首版承诺多节点聚合、历史图、告警管理或自定义面板布局
+
+**后续增强候选**
+
+- [ ] detail 视图：展开单个面板查看更多字段与解释
+- [ ] panel drill-down：从 summary 进入更细的 cache / upstream / XDP 子视图
+- [ ] history sparklines：在终端内显示短历史趋势，而不接外部时序库
+- [ ] 排序 / 筛选：当后续引入更多细分项时，支持按失败原因或 stage 聚焦
+- [ ] 更完整的键位体系：页签、返回、帮助浮层、target 切换
 
 ### v1.1.3 — 运行韧性与节点级高可用
 

@@ -67,6 +67,23 @@ journalctl -u rec53 -f
 tail -f /var/log/rec53/rec53.log
 ```
 
+## `rec53top` Opens With No Visible Content
+
+Check:
+
+- the terminal supports cursor-addressable full-screen applications
+- `TERM` is set to a capable value such as `xterm-256color`
+- the metrics endpoint is reachable at the configured target
+
+Try:
+
+```bash
+TERM=xterm-256color ./rec53top
+curl -s http://127.0.0.1:9999/metric | head
+```
+
+If the terminal still fails, keep using raw metrics or Prometheus temporarily and capture the terminal type before debugging further.
+
 ## DNS Queries Time Out
 
 Check:
