@@ -58,8 +58,19 @@ If the terminal still does not support the full-screen UI, use the plain compati
 - `q`: quit
 - `r`: refresh immediately
 - `h` or `?`: toggle help and status legend
-- `1` to `6`: open detail view for Traffic, Cache, Snapshot, Upstream, XDP, or State Machine
+- `Left` / `Right` / `Up` / `Down`: move overview focus across the fixed 2x3 panel grid
+- `j` / `k` / `l`: move overview focus down, up, or right
+- `Tab` / `Shift-Tab`: cycle overview focus forward or backward
+- `Enter`: open detail view for the currently focused panel
+- `1` to `6`: open detail view for Traffic, Cache, Snapshot, Upstream, XDP, or State Machine directly
 - `0` or `Esc`: return to the overview dashboard
+
+Default navigation path:
+
+- stay in the overview first and move the visible focus to the panel you want
+- press `Enter` to open that panel's detail page
+- use `0` or `Esc` to return to the overview with the same panel still focused
+- keep `1` to `6` as fast paths when you already know the target panel
 
 ## Status Model
 
@@ -97,7 +108,9 @@ Each detail page now follows the same reading order:
 Recommended use:
 
 - stay in overview for first-check triage
-- press `1` to `6` when one panel already looks suspicious and you want the current standout condition plus the most relevant breakdown or next-check hint
+- move focus with arrows, `j/k/l`, or `Tab` until the panel title is highlighted
+- press `Enter` when one panel looks suspicious and you want the current standout condition plus the most relevant breakdown or next-check hint
+- keep `1` to `6` for direct jumps when you already know the target panel
 - press `0` or `Esc` to return to the overview
 
 Non-normal states are also explained directly in detail view:

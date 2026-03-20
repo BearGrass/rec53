@@ -22,6 +22,7 @@ type dashboardUI struct {
 	footer      *tview.TextView
 	helpShown   bool
 	detailPanel detailPanel
+	focusPanel  detailPanel
 	pages       *tview.Pages
 	root        tview.Primitive
 	refresh     time.Duration
@@ -38,6 +39,15 @@ const (
 	detailXDP      detailPanel = "xdp"
 	detailState    detailPanel = "state"
 )
+
+var overviewPanelOrder = []detailPanel{
+	detailTraffic,
+	detailCache,
+	detailSnapshot,
+	detailUpstream,
+	detailXDP,
+	detailState,
+}
 
 func Run(ctx context.Context, cfg Config) error {
 	cfg = cfg.normalized()
@@ -61,56 +71,12 @@ func Run(ctx context.Context, cfg Config) error {
 	updateDashboard(deriveDashboard(cfg.Target, nil, nil, 0))
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyCtrlC:
-			app.Stop()
-			return nil
-		case tcell.KeyEscape:
-			ui.detailPanel = detailNone
-			ui.render(latest)
-			return nil
-		}
-		switch event.Rune() {
-		case 'q':
-			app.Stop()
-			return nil
-		case 'r':
+		if ui.handleKey(event, latest, func() {
 			select {
 			case refreshCh <- struct{}{}:
 			default:
 			}
-			return nil
-		case 'h', '?':
-			ui.helpShown = !ui.helpShown
-			ui.render(latest)
-			return nil
-		case '0', 'o':
-			ui.detailPanel = detailNone
-			ui.render(latest)
-			return nil
-		case '1':
-			ui.detailPanel = detailTraffic
-			ui.render(latest)
-			return nil
-		case '2':
-			ui.detailPanel = detailCache
-			ui.render(latest)
-			return nil
-		case '3':
-			ui.detailPanel = detailSnapshot
-			ui.render(latest)
-			return nil
-		case '4':
-			ui.detailPanel = detailUpstream
-			ui.render(latest)
-			return nil
-		case '5':
-			ui.detailPanel = detailXDP
-			ui.render(latest)
-			return nil
-		case '6':
-			ui.detailPanel = detailState
-			ui.render(latest)
+		}, app.Stop) {
 			return nil
 		}
 		return event
@@ -165,16 +131,131 @@ func newDashboardUI() *dashboardUI {
 	}
 
 	return &dashboardUI{
-		header:   tview.NewTextView().SetDynamicColors(true),
-		traffic:  makePanel("Traffic"),
-		cache:    makePanel("Cache"),
-		snapshot: makePanel("Snapshot"),
-		upstream: makePanel("Upstream"),
-		xdp:      makePanel("XDP"),
-		state:    makePanel("State Machine"),
-		detail:   makePanel("Detail"),
-		footer:   tview.NewTextView().SetDynamicColors(true),
+		header:     tview.NewTextView().SetDynamicColors(true),
+		traffic:    makePanel("Traffic"),
+		cache:      makePanel("Cache"),
+		snapshot:   makePanel("Snapshot"),
+		upstream:   makePanel("Upstream"),
+		xdp:        makePanel("XDP"),
+		state:      makePanel("State Machine"),
+		detail:     makePanel("Detail"),
+		footer:     tview.NewTextView().SetDynamicColors(true),
+		focusPanel: detailTraffic,
 	}
+}
+
+func (ui *dashboardUI) handleKey(event *tcell.EventKey, latest Dashboard, refresh func(), stop func()) bool {
+	switch event.Key() {
+	case tcell.KeyCtrlC:
+		if stop != nil {
+			stop()
+		}
+		return true
+	case tcell.KeyEscape:
+		ui.returnToOverview()
+		ui.render(latest)
+		return true
+	case tcell.KeyEnter:
+		if ui.detailPanel == detailNone {
+			ui.openFocusedDetail()
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyUp:
+		if ui.detailPanel == detailNone && ui.moveFocus(-1, 0) {
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyDown:
+		if ui.detailPanel == detailNone && ui.moveFocus(1, 0) {
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyLeft:
+		if ui.detailPanel == detailNone && ui.moveFocus(0, -1) {
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyRight:
+		if ui.detailPanel == detailNone && ui.moveFocus(0, 1) {
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyTab:
+		if ui.detailPanel == detailNone {
+			ui.cycleFocus(1)
+			ui.render(latest)
+			return true
+		}
+	case tcell.KeyBacktab:
+		if ui.detailPanel == detailNone {
+			ui.cycleFocus(-1)
+			ui.render(latest)
+			return true
+		}
+	}
+
+	switch event.Rune() {
+	case 'q':
+		if stop != nil {
+			stop()
+		}
+		return true
+	case 'r':
+		if refresh != nil {
+			refresh()
+		}
+		return true
+	case 'h', '?':
+		ui.helpShown = !ui.helpShown
+		ui.render(latest)
+		return true
+	case '0', 'o':
+		ui.returnToOverview()
+		ui.render(latest)
+		return true
+	case '1':
+		ui.openDetail(detailTraffic)
+		ui.render(latest)
+		return true
+	case '2':
+		ui.openDetail(detailCache)
+		ui.render(latest)
+		return true
+	case '3':
+		ui.openDetail(detailSnapshot)
+		ui.render(latest)
+		return true
+	case '4':
+		ui.openDetail(detailUpstream)
+		ui.render(latest)
+		return true
+	case '5':
+		ui.openDetail(detailXDP)
+		ui.render(latest)
+		return true
+	case '6':
+		ui.openDetail(detailState)
+		ui.render(latest)
+		return true
+	case 'j':
+		if ui.detailPanel == detailNone && ui.moveFocus(1, 0) {
+			ui.render(latest)
+			return true
+		}
+	case 'k':
+		if ui.detailPanel == detailNone && ui.moveFocus(-1, 0) {
+			ui.render(latest)
+			return true
+		}
+	case 'l':
+		if ui.detailPanel == detailNone && ui.moveFocus(0, 1) {
+			ui.render(latest)
+			return true
+		}
+	}
+
+	return false
 }
 
 func (ui *dashboardUI) layout() tview.Primitive {
@@ -283,6 +364,7 @@ func (ui *dashboardUI) render(d Dashboard) {
 		fmt.Sprintf("fail top 2     %s %s", fallbackText(d.StateMachine.SecondFailure), rate(d.StateMachine.SecondFailureRate)),
 	}, "\n"))
 
+	ui.updateOverviewTitles()
 	ui.detail.SetTitle(" " + ui.detailTitle() + " ")
 	ui.detail.SetText(ui.renderDetail(d))
 	if ui.pages != nil {
@@ -294,29 +376,35 @@ func (ui *dashboardUI) render(d Dashboard) {
 	}
 
 	if ui.helpShown {
-		ui.footer.SetText("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h[-] hide help   [yellow]1-6[-] detail   [yellow]0/esc[-] overview   statuses: OK / DEGRADED / DISABLED / UNAVAILABLE / STALE")
+		ui.footer.SetText(fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s   statuses: OK / DEGRADED / DISABLED / UNAVAILABLE / STALE / DISCONNECTED / WARMING", ui.focusLabel()))
 	} else {
-		ui.footer.SetText("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h[-] help   [yellow]1-6[-] detail   [yellow]0[-] overview")
+		ui.footer.SetText(fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s", ui.focusLabel()))
 	}
 }
 
+func (ui *dashboardUI) updateOverviewTitles() {
+	for _, panel := range overviewPanelOrder {
+		view := ui.panelView(panel)
+		if view == nil {
+			continue
+		}
+		title := panelTitle(panel)
+		if panel == ui.focusedPanel() {
+			title = "> " + title + " <"
+		}
+		view.SetTitle(" " + title + " ")
+	}
+}
+
+func (ui *dashboardUI) focusLabel() string {
+	return panelTitle(ui.focusedPanel())
+}
+
 func (ui *dashboardUI) detailTitle() string {
-	switch ui.detailPanel {
-	case detailTraffic:
-		return "Traffic Detail"
-	case detailCache:
-		return "Cache Detail"
-	case detailSnapshot:
-		return "Snapshot Detail"
-	case detailUpstream:
-		return "Upstream Detail"
-	case detailXDP:
-		return "XDP Detail"
-	case detailState:
-		return "State Machine Detail"
-	default:
+	if ui.detailPanel == detailNone {
 		return "Detail"
 	}
+	return panelTitle(ui.detailPanel) + " Detail"
 }
 
 func (ui *dashboardUI) renderDetail(d Dashboard) string {
@@ -334,8 +422,102 @@ func (ui *dashboardUI) renderDetail(d Dashboard) string {
 	case detailState:
 		return renderDetailModel(buildStateMachineDetailModel(d))
 	default:
-		return "Press 1-6 to open a panel detail view.\n\n1 Traffic\n2 Cache\n3 Snapshot\n4 Upstream\n5 XDP\n6 State Machine"
+		return "Use arrows, j/k/l, or Tab to focus an overview panel.\nPress Enter to open the focused detail view, or use 1-6 as direct shortcuts.\n\n1 Traffic\n2 Cache\n3 Snapshot\n4 Upstream\n5 XDP\n6 State Machine"
 	}
+}
+
+func (ui *dashboardUI) openFocusedDetail() {
+	ui.detailPanel = ui.focusedPanel()
+}
+
+func (ui *dashboardUI) openDetail(panel detailPanel) {
+	if !isOverviewPanel(panel) {
+		return
+	}
+	ui.focusPanel = panel
+	ui.detailPanel = panel
+}
+
+func (ui *dashboardUI) returnToOverview() {
+	ui.detailPanel = detailNone
+}
+
+func (ui *dashboardUI) focusedPanel() detailPanel {
+	if !isOverviewPanel(ui.focusPanel) {
+		return detailTraffic
+	}
+	return ui.focusPanel
+}
+
+func (ui *dashboardUI) cycleFocus(step int) {
+	index := overviewPanelIndex(ui.focusedPanel())
+	size := len(overviewPanelOrder)
+	index = (index + step + size) % size
+	ui.focusPanel = overviewPanelOrder[index]
+}
+
+func (ui *dashboardUI) moveFocus(rowDelta, colDelta int) bool {
+	index := overviewPanelIndex(ui.focusedPanel())
+	row := index / 2
+	col := index % 2
+	nextRow := row + rowDelta
+	nextCol := col + colDelta
+	if nextRow < 0 || nextRow >= 3 || nextCol < 0 || nextCol >= 2 {
+		return false
+	}
+	ui.focusPanel = overviewPanelOrder[nextRow*2+nextCol]
+	return true
+}
+
+func (ui *dashboardUI) panelView(panel detailPanel) *tview.TextView {
+	switch panel {
+	case detailTraffic:
+		return ui.traffic
+	case detailCache:
+		return ui.cache
+	case detailSnapshot:
+		return ui.snapshot
+	case detailUpstream:
+		return ui.upstream
+	case detailXDP:
+		return ui.xdp
+	case detailState:
+		return ui.state
+	default:
+		return nil
+	}
+}
+
+func panelTitle(panel detailPanel) string {
+	switch panel {
+	case detailTraffic:
+		return "Traffic"
+	case detailCache:
+		return "Cache"
+	case detailSnapshot:
+		return "Snapshot"
+	case detailUpstream:
+		return "Upstream"
+	case detailXDP:
+		return "XDP"
+	case detailState:
+		return "State Machine"
+	default:
+		return "Detail"
+	}
+}
+
+func isOverviewPanel(panel detailPanel) bool {
+	return overviewPanelIndex(panel) >= 0
+}
+
+func overviewPanelIndex(panel detailPanel) int {
+	for i, candidate := range overviewPanelOrder {
+		if candidate == panel {
+			return i
+		}
+	}
+	return -1
 }
 
 func renderDetailModel(model detailModel) string {

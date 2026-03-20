@@ -17,7 +17,8 @@
 | v1.1.1 | 2026-03 | done | 指标体系、运维入口、dashboard/checklist 收敛完成 |
 | v1.1.2 | 2026-03 | done | 本地运维 TUI 看板 |
 | v1.1.3 | 2026-03 | done | TUI 增强、发布介绍文档与开发排障能力 |
-| v1.2.0 | planned | target | 运行韧性与节点级高可用 |
+| v1.1.4 | planned | target | TUI 导航完成度与交互体验收口 |
+| v1.2.0 | planned | queued | 运行韧性与节点级高可用 |
 | v1.2.1 | planned | target | DNSSEC 设计与预研 |
 
 ## Current Version: dev
@@ -50,24 +51,26 @@
 
 ## Next Up
 
-### 当前推进主线 — v1.2.0 运行韧性与节点级高可用
+### 当前推进主线 — v1.1.4 TUI 导航完成度与交互收口
 
-**目标**：在 `v1.1` 可观测性与本地运维版本线完成后，把主线切到单节点运行韧性，优先解决重启、冷启动、上游抖动、配置变更时的稳定性与可恢复性。
+**目标**：在 `v1.1.3` 已经补齐 detail 信息层和发布介绍文档后，继续把 `rec53top` 的交互完成度收口，优先解决 overview 焦点、进入 detail 的统一路径、键位可发现性和回退体验。
 
 **当前判断**
 
 - `v1.1.1` 到 `v1.1.3` 已经形成连续的 observability/local-ops 交付线
-- `rec53top` 已具备 overview、detail、bounded since-start counters 和发布入口文档
-- 下一阶段更值得投入的是 readiness / liveness / degraded、warmup 与 snapshot 行为、systemd / 容器友好退出与重启语义
+- `rec53top` 已具备 overview、detail、bounded since-start counters 和发布入口文档，但导航仍偏“记数字键”
+- 在 TUI 还没有完成开发前，不应把主线切到 `v1.2.0`
 
 **下一步焦点**
 
 - [x] 保持 `v1.1` 主线聚焦可观测性与本地运维，不并行展开新的大主题
 - [x] 将 `v1.1.3` 定义为 TUI 增强与发布介绍文档版本
+- [x] 将 `v1.1.4` 定义为 TUI 导航、焦点和 UX 收口版本
 - [x] 将运行韧性工作顺延到 `v1.2.0`
 - [x] 将 DNSSEC 设计与预研顺延到 `v1.2.1`
-- [ ] 在 `v1.2.0` 中定义 `readiness` / `liveness` / `degraded` 行为与判断口径
-- [ ] 梳理 warmup / snapshot / 冷启动 / 重启的稳定性与告警边界
+- [ ] 完成 overview 焦点导航、`Enter` 进入 detail、返回后保留焦点
+- [ ] 收口 footer/help、键位提示和概览页默认操作路径
+- [ ] 补齐 `tui/` 导航测试并完成文档更新
 
 ## v1.1 版本线
 
@@ -194,6 +197,26 @@
 
 - [ ] 不在这一版把 TUI 扩成完整监控平台
 - [ ] 不引入多 target 聚合、外部时序库或复杂可视化历史
+
+### v1.1.4 — TUI 导航完成度与交互体验收口
+
+**状态**：进行中。
+
+**目标**：让 `rec53top` 的默认使用路径从“记住 `1-6`”变成“概览聚焦 -> `Enter` -> 查看 detail -> 返回概览继续排查”，把 TUI 从可用 MVP 收口到更完整的终端操作面板。
+
+**任务**
+
+- [ ] 为 overview 六面板增加稳定可见的当前焦点
+- [ ] 支持方向键、`j/k/l`、`Tab/Shift-Tab` 导航，并保留 `h` 为 help
+- [ ] 支持 `Enter` 打开当前焦点 detail，并在返回概览后保留焦点
+- [ ] 收口 footer/help，让当前焦点和下一步动作更易发现
+- [ ] 更新 TUI 用户文档和 roadmap 主线说明
+- [ ] 补齐 `tui/` 导航测试
+
+**不做**
+
+- [ ] 不在这一版引入多层 drill-down
+- [ ] 不引入历史图、排序筛选或多 target
 
 ### v1.2.0 — 运行韧性与节点级高可用
 
