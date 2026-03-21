@@ -1,5 +1,7 @@
 # Release Checklist
 
+English | [中文](release.zh.md)
+
 This checklist is for preparing a deployable release such as `v1.0.0`.
 
 ## 1. Scope Control

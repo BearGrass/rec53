@@ -1,4 +1,6 @@
 # single machine mod
+
+English | [中文](README.zh.md)
 * run docker 
 ```
 docker-compose up -d

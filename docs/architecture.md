@@ -1,5 +1,7 @@
 # Architecture
 
+English | [中文](architecture.zh.md)
+
 `docs/architecture.md` is developer-facing. It explains how rec53 resolves DNS queries, how core modules interact, and which implementation constraints matter when you modify the code. For deployment and operator guidance, use the documents under `docs/user/`.
 
 ## Scope

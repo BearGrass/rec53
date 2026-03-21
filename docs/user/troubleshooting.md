@@ -1,5 +1,7 @@
 # Troubleshooting
 
+English | [中文](troubleshooting.zh.md)
+
 Start with the default path: config generation, foreground run, a simple `dig` query, then service deployment.
 
 ## Server Does Not Start

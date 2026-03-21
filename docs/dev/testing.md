@@ -1,5 +1,7 @@
 # Testing
 
+English | [中文](testing.zh.md)
+
 rec53 includes unit, package, benchmark, and end-to-end tests. Prefer targeted runs while iterating, then run a wider verification pass before merging or releasing.
 
 ## Common Commands

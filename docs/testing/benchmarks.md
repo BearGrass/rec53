@@ -1,5 +1,7 @@
 # Benchmarks
 
+English | [中文](benchmarks.zh.md)
+
 > All latency figures are measured on an Intel i7-1165G7 @ 2.80GHz running Linux.
 > Network benchmarks reflect real iterative resolution over a typical home/office
 > internet connection in China. Results on your hardware and network will differ —

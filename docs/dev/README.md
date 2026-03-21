@@ -1,5 +1,7 @@
 # Developer Docs
 
+English | [中文](README.zh.md)
+
 This section is for contributors and maintainers. It focuses on how rec53 is organized, how to change it safely, and how to prepare a release.
 
 ## Core Docs

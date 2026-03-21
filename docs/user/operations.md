@@ -1,5 +1,7 @@
 # Operations
 
+English | [中文](operations.zh.md)
+
 This document covers routine operations for a running rec53 instance.
 
 ## Run Modes

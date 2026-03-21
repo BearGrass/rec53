@@ -1,5 +1,7 @@
 # Metrics
 
+English | [中文](metrics.zh.md)
+
 Prometheus is the primary observability interface for rec53. This document is the metric contract for both contributors and operators: metric names, label sets, and semantics are treated as part of the public operational surface.
 
 The synchronized Chinese version lives at [docs/metrics.zh.md](./metrics.zh.md).

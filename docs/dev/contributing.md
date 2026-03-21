@@ -1,5 +1,7 @@
 # Contributing
 
+English | [中文](contributing.zh.md)
+
 This guide covers the expected development workflow for rec53.
 
 ## Local Setup

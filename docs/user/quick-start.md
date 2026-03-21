@@ -1,5 +1,7 @@
 # Quick Start
 
+English | [中文](quick-start.zh.md)
+
 This guide covers the default operator path for rec53: generate a config, run in foreground, validate DNS answers, then deploy as a service.
 
 ## 1. Prerequisites

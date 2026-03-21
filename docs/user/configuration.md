@@ -1,5 +1,7 @@
 # Configuration
 
+English | [中文](configuration.zh.md)
+
 This document covers the main configuration blocks used for a deployable rec53 setup. Start simple and enable optional features only after the baseline path is stable.
 
 ## Minimal Configuration
