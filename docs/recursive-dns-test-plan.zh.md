@@ -16,14 +16,14 @@
 | Item | Role | Canonical Scope |
 |------|------|-----------------|
 | `docs/recursive-dns-test-plan.md` | Master test strategy | 分层、release gate、产物、职责边界 |
-| `docs/perf-regression.md` | Performance execution protocol | 精确 perf 命令、验收阈值、可复现矩阵方法 |
+| `docs/testing/perf-regression.md` | Performance execution protocol | 精确 perf 命令、验收阈值、可复现矩阵方法 |
 | `docs/benchmarks.md` | Baseline snapshots | 只记录测量值（不做策略决策） |
 | `tools/dnsperf` | Load generator | 宏观负载测试（`-f` replay / `-random-prefix` miss stress） |
 | `tools/validate-perf.sh` | Dual-metric automation | 一键 dnsperf + pprof 验证流程 |
 
 防漂移规则：
 
-- 如果 perf 命令模板或阈值发生变化，先更新 `docs/perf-regression.md`，再在同一 commit 里更新本文和 `docs/benchmarks.md`。
+- 如果 perf 命令模板或阈值发生变化，先更新 `docs/testing/perf-regression.md`，再在同一 commit 里更新本文和 `docs/benchmarks.md`。
 - 不要在多个文档里复制出不同版本的命令；尽量引用权威命令。
 
 ## 2. 测试层级
@@ -145,7 +145,7 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 -random-prefix example.com -c 32 -d
 - 去噪后的 `pprof -top` 输出（CPU + alloc_space）。
 - 环境元数据：Go 版本、CPU 型号、config profile。
 
-基线快照保存在 [`docs/benchmarks.md`](benchmarks.md)，执行规则保存在 [`docs/perf-regression.md`](perf-regression.md)。
+基线快照保存在 [`docs/benchmarks.md`](benchmarks.md)，执行规则保存在 [`docs/testing/perf-regression.md`](perf-regression.md)。
 
 需要保留的测试输出（按需）：
 

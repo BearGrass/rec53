@@ -435,7 +435,7 @@ REC53_BENCH_DOMAINS="www.example.com,api.myservice.net" \
 
 `REC53_BENCH_DOMAINS` 接受逗号分隔的主机名列表。末尾的点会自动补上。多个域名之间用逗号分隔，不要加空格。
 
-关于标准化性能回归规则（bench、load、pprof、验收标准），见 [`docs/perf-regression.md`](perf-regression.md)。
+关于标准化性能回归规则（bench、load、pprof、验收标准），见 [`docs/testing/perf-regression.md`](perf-regression.md)。
 关于完整递归 DNS 测试策略（正确性 + 性能 + release gate），见 [`docs/recursive-dns-test-plan.md`](recursive-dns-test-plan.md)。
 
 ## XDP Cache 快速路径基准（v0.6.1，2026-03-18）

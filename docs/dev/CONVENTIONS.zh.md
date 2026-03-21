@@ -110,7 +110,7 @@ func TestWithMockServer(t *testing.T) {
 
 ## 性能回归流程
 
-基准/load/pprof 回归规则以 `docs/perf-regression.md` 为准。
+基准/load/pprof 回归规则以 `docs/testing/perf-regression.md` 为准。
 任何性能敏感变更都应按该文档给出前后数据。
 
 ## Code review 清单
