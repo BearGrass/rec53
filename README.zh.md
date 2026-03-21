@@ -153,13 +153,13 @@ sudo ./rec53ctl uninstall --purge
 用户文档：
 
 - [快速开始](docs/user/quick-start.md)
-- [配置说明](docs/user/configuration.md)
-- [运维说明](docs/user/operations.md)
-- [rec53top 总览](docs/user/rec53top.md)
-- [本地运维 TUI](docs/user/local-ops-tui.md)
-- [故障排查](docs/user/troubleshooting.md)
-- [观测看板布局](docs/user/observability-dashboard.md)
-- [运维排查清单](docs/user/operator-checklist.md)
+- [配置说明](docs/user/configuration.zh.md)
+- [运维说明](docs/user/operations.zh.md)
+- [rec53top 总览](docs/user/rec53top.zh.md)
+- [本地运维 TUI](docs/user/local-ops-tui.zh.md)
+- [故障排查](docs/user/troubleshooting.zh.md)
+- [观测看板布局](docs/user/observability-dashboard.zh.md)
+- [运维排查清单](docs/user/operator-checklist.zh.md)
 
 开发者文档：
 
