@@ -150,6 +150,167 @@ func TestRenderDetailExplainsStaleState(t *testing.T) {
 	}
 }
 
+func TestRenderDetailStateSummaryShowsCounters(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailState
+
+	text := ui.renderDetail(Dashboard{
+		CurrentSnapshot: mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="cache_lookup"} 120
+rec53_state_machine_stage_total{stage="query_upstream"} 40
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 130
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 130
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 100
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 96
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 90
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 90
+# TYPE rec53_state_machine_failures_total counter
+rec53_state_machine_failures_total{reason="query_upstream_error"} 3
+`),
+		StateMachine: StateMachinePanel{
+			Status:          statusOK,
+			TopStage:        "cache_lookup",
+			TopStageRate:    15,
+			TopTerminal:     "success_exit",
+			TopTerminalRate: 10,
+			TopFailure:      "",
+			Terminals: []BreakdownItem{
+				{Label: "success_exit", Rate: 10, Ratio: 1},
+			},
+			Stages: []BreakdownItem{
+				{Label: "cache_lookup", Rate: 15, Ratio: 0.75},
+				{Label: "query_upstream", Rate: 5, Ratio: 0.25},
+			},
+			Failures: []BreakdownItem{
+				{Label: "query_upstream_error", Rate: 1.5, Ratio: 1},
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"What stands out now:",
+		"Current window:",
+		"Stage mix:",
+		"Terminal exits:",
+		"Failure reasons:",
+		"success_exit",
+		"cache_lookup",
+		"trace-domain",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("state summary missing %q\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Subview:") {
+		t.Fatalf("state summary should not render subview tabs\n%s", text)
+	}
+}
+
+func TestRenderDetailStateDegradedHighlightsFailureAndTerminal(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailState
+
+	text := ui.renderDetail(Dashboard{
+		CurrentSnapshot: mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="query_upstream"} 7
+# TYPE rec53_state_machine_failures_total counter
+rec53_state_machine_failures_total{reason="query_upstream_error"} 7
+rec53_state_machine_failures_total{reason="max_iterations"} 2
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 7
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 2
+`),
+		StateMachine: StateMachinePanel{
+			Status:          statusDegraded,
+			TopStage:        "query_upstream",
+			TopStageRate:    2,
+			TopFailure:      "query_upstream_error",
+			TopFailureRate:  2,
+			TopTerminal:     "servfail_exit",
+			TopTerminalRate: 2,
+			Terminals: []BreakdownItem{
+				{Label: "servfail_exit", Rate: 2, Ratio: 0.8},
+				{Label: "success_exit", Rate: 0.5, Ratio: 0.2},
+			},
+			Stages: []BreakdownItem{
+				{Label: "query_upstream", Rate: 2, Ratio: 1},
+			},
+			Failures: []BreakdownItem{
+				{Label: "query_upstream_error", Rate: 2, Ratio: 0.8},
+				{Label: "max_iterations", Rate: 0.5, Ratio: 0.2},
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"query_upstream_error is the top recent failure reason",
+		"Failure reasons:",
+		"query_upstream_error",
+		"servfail_exit",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("state degraded summary missing %q\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Subview:") {
+		t.Fatalf("state degraded summary should not render subview tabs\n%s", text)
+	}
+}
+
+func TestRenderDetailStateStaleDoesNotShowSubviewTabs(t *testing.T) {
+	ui := newDashboardUI()
+	ui.detailPanel = detailState
+
+	text := ui.renderDetail(Dashboard{
+		LastError: "scrape timeout",
+		StateMachine: StateMachinePanel{
+			Status: statusStale,
+		},
+	})
+
+	if !strings.Contains(text, "stale data because the latest scrape failed") {
+		t.Fatalf("state stale detail lost stale explanation\n%s", text)
+	}
+	if strings.Contains(text, "Subview:") {
+		t.Fatalf("state stale detail should not show subview tabs\n%s", text)
+	}
+}
+
+func TestRenderDetailStateOverrideStatusesStayReadable(t *testing.T) {
+	tests := []struct {
+		name   string
+		status panelStatus
+		want   string
+	}{
+		{name: "warming", status: statusWarming, want: "Only one successful scrape is available"},
+		{name: "unavailable", status: statusUnavailable, want: "Required state-machine metric families are missing"},
+		{name: "disconnected", status: statusDisconnected, want: "has not produced a successful scrape yet"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ui := newDashboardUI()
+			ui.detailPanel = detailState
+
+			text := ui.renderDetail(Dashboard{
+				StateMachine: StateMachinePanel{
+					Status: tc.status,
+				},
+			})
+
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("detail missing %q\n%s", tc.want, text)
+			}
+			if strings.Contains(text, "Subview:") {
+				t.Fatalf("override state should not show subview tabs\n%s", text)
+			}
+		})
+	}
+}
+
 func TestRenderDetailCacheSubviewShowsLookupOnly(t *testing.T) {
 	ui := newDashboardUI()
 	ui.detailPanel = detailCache

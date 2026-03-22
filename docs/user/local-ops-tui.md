@@ -6,6 +6,17 @@ This page is the operational guide: how to launch it, which keys and states matt
 
 For positioning, use cases, boundaries, and the stable overview entrypoint, start with [rec53top Overview](rec53top.md).
 
+## First-Time Reading Order
+
+If the newer pages feel hard to read, use this order instead of jumping straight into every subview:
+
+1. stay in overview and find the first suspicious panel
+2. open detail and stop at `Summary`
+3. read `What stands out now`, then `Key metrics`, then `Next checks`
+4. only switch subviews when `Summary` is already pointing in the right area but you still need a narrower explanation
+
+This keeps totals and short trend cues from becoming noise too early.
+
 ## Run
 
 Recommended:
@@ -93,11 +104,11 @@ The TUI uses a small fixed set of states:
 - `Snapshot`: load or save success totals, imported entries, skipped entries, and duration
 - `Upstream`: timeout rate, bad-rcode rate, fallback activity, and winner path
 - `XDP`: active or disabled state, hit ratio, sync errors, cleanup activity, and entry count
-- `State Machine`: most active stage and top failure reasons
+- `State Machine`: hottest recent stage, top terminal exit, and bounded failure focus
 
 ## Detail View
 
-The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add historical charts or a multi-level page tree, but `Cache`, `Upstream`, and `XDP` now support drill-down subviews inside the same detail page.
+The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add historical charts or a multi-level page tree, but `Cache`, `Upstream`, and `XDP` support drill-down subviews inside the same detail page.
 
 Recent trend cues are also intentionally lightweight:
 
@@ -119,6 +130,22 @@ Supported drill-down panels:
 - `Cache`: `Summary`, `Lookup Mix`, `Lifecycle`
 - `Upstream`: `Summary`, `Failures`, `Winners`
 - `XDP`: `Summary`, `Packet Paths`, `Sync/Cleanup`
+- `State Machine`: summary only
+
+How to read `State Machine` now:
+
+- `top stage` answers which resolver stage is hottest in the current window
+- `top terminal` answers how sampled flows are ending right now
+- `top failure` answers whether one bounded failure bucket is clustering
+- use this panel for aggregate diagnosis only; it is not the place to reconstruct one request path
+
+Exact per-domain trace lives outside the TUI:
+
+```bash
+./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+```
+
+That command runs one real resolution, prints the ordered states, and shows the final terminal exit and rcode.
 
 Recommended use:
 
@@ -127,6 +154,7 @@ Recommended use:
 - press `Enter` when one panel looks suspicious and you want the current standout condition plus the most relevant breakdown or next-check hint
 - if the panel supports drill-down, move through subviews with `Tab` / `Shift-Tab`, `Left` / `Right`, or `[` / `]`
 - treat `Summary` as the verdict page, then use the themed subviews only when you need a narrower breakdown
+- in `State Machine`, stop at the summary counters first; use trace mode when you need one real request path
 - keep `1` to `6` for direct jumps when you already know the target panel
 - press `0` or `Esc` to return to the overview
 
@@ -170,6 +198,8 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - detail view (`1` to `6`) shows a `What stands out now` summary instead of only repeating the overview numbers
 - degraded or unavailable panels show `Next checks` that point to the next likely panel or troubleshooting direction
 - `State Machine` shows active stages such as `cache_lookup`, `forward_lookup`, or `return_resp`
+- `State Machine` detail shows `Stage mix`, `Terminal exits`, and `Failure reasons` without pushing you into a path graph first
+- a domain trace such as `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` prints one real request path outside the aggregate TUI
 - `Upstream` shows winner-path activity when iterative queries actually touch upstream resolution
 - `Upstream` reflects fallback or timeout activity when upstream issues exist
 - `XDP` shows `DISABLED` on normal non-XDP deployments instead of pretending to be healthy

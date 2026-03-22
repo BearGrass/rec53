@@ -25,25 +25,53 @@ type stateMachine interface {
 func stateMetricName(state int) string {
 	switch state {
 	case STATE_INIT:
-		return "state_init"
+		return monitor.StateMachineStateInit
 	case HOSTS_LOOKUP:
-		return "hosts_lookup"
+		return monitor.StateMachineHostsLookup
 	case FORWARD_LOOKUP:
-		return "forward_lookup"
+		return monitor.StateMachineForwardLookup
 	case CACHE_LOOKUP:
-		return "cache_lookup"
+		return monitor.StateMachineCacheLookup
 	case CLASSIFY_RESP:
-		return "classify_resp"
+		return monitor.StateMachineClassifyResp
 	case EXTRACT_GLUE:
-		return "extract_glue"
+		return monitor.StateMachineExtractGlue
 	case LOOKUP_NS_CACHE:
-		return "lookup_ns_cache"
+		return monitor.StateMachineLookupNSCache
 	case QUERY_UPSTREAM:
-		return "query_upstream"
+		return monitor.StateMachineQueryUpstream
 	case RETURN_RESP:
-		return "return_resp"
+		return monitor.StateMachineReturnResp
 	default:
-		return "unknown"
+		return monitor.StateMachineUnknownState
+	}
+}
+
+func recordStateTransition(from, to int) {
+	if monitor.Rec53Metric == nil {
+		return
+	}
+	monitor.Rec53Metric.StateMachineTransitionAdd(stateMetricName(from), stateMetricName(to))
+}
+
+func recordTraceState(ctx context.Context, state string) {
+	if recorder := resolutionTraceFromContext(ctx); recorder != nil {
+		recorder.recordState(state)
+	}
+}
+
+func recordTerminalExit(ctx context.Context, from int, exit string) {
+	if monitor.Rec53Metric == nil {
+		recordTraceTerminal(ctx, exit)
+		return
+	}
+	monitor.Rec53Metric.StateMachineTransitionAdd(stateMetricName(from), exit)
+	recordTraceTerminal(ctx, exit)
+}
+
+func recordTraceTerminal(ctx context.Context, exit string) {
+	if recorder := resolutionTraceFromContext(ctx); recorder != nil {
+		recorder.recordTerminal(exit)
 	}
 }
 
@@ -161,6 +189,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 
 	for iterations := 1; iterations <= MaxIterations; iterations++ {
 		st := stm.getCurrentState()
+		recordTraceState(stm.getContext(), stateMetricName(st))
 		if monitor.Rec53Metric != nil {
 			monitor.Rec53Metric.StateMachineStageAdd(stateMetricName(st))
 		}
@@ -177,12 +206,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("state_init_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			if ret == STATE_INIT_FORMERR {
+				if monitor.Rec53Metric != nil {
+					monitor.Rec53Metric.StateMachineFailureAdd("formerr")
+				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineFormerrExit)
 				return stm.getResponse(), nil
 			}
+			recordStateTransition(st, HOSTS_LOOKUP)
 			stm = newHostsLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 		case HOSTS_LOOKUP:
 			ret, err := handleState(stm)
@@ -190,18 +225,22 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("hosts_lookup_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case HOSTS_LOOKUP_HIT:
+				recordStateTransition(st, RETURN_RESP)
 				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case HOSTS_LOOKUP_MISS:
+				recordStateTransition(st, FORWARD_LOOKUP)
 				stm = newForwardLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("hosts_lookup_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -211,18 +250,22 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case FORWARD_LOOKUP_HIT:
+				recordStateTransition(st, RETURN_RESP)
 				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case FORWARD_LOOKUP_MISS:
+				recordStateTransition(st, CACHE_LOOKUP)
 				stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case FORWARD_LOOKUP_SERVFAIL:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_servfail")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineServfailExit)
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
@@ -230,6 +273,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -239,18 +283,22 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("cache_lookup_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case CACHE_LOOKUP_HIT:
+				recordStateTransition(st, CLASSIFY_RESP)
 				stm = newClassifyRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CACHE_LOOKUP_MISS:
+				recordStateTransition(st, EXTRACT_GLUE)
 				stm = newExtractGlueState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("cache_lookup_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -260,29 +308,36 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("classify_resp_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case CLASSIFY_RESP_COMMON_ERROR:
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				return stm.getResponse(), nil
 			case CLASSIFY_RESP_GET_ANS, CLASSIFY_RESP_GET_NEGATIVE:
 				// Negative response (NXDOMAIN/NODATA) - return directly to client
+				recordStateTransition(st, RETURN_RESP)
 				stm = newReturnRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CLASSIFY_RESP_GET_CNAME:
 				if err := followCNAME(stm, &cnameChain, visitedDomains); err != nil {
 					if monitor.Rec53Metric != nil {
 						monitor.Rec53Metric.StateMachineFailureAdd("cname_cycle")
 					}
+					recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 					return nil, err
 				}
+				recordStateTransition(st, CACHE_LOOKUP)
 				stm = newCacheLookupState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CLASSIFY_RESP_GET_NS:
+				recordStateTransition(st, EXTRACT_GLUE)
 				stm = newExtractGlueState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("classify_resp_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -292,18 +347,22 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("extract_glue_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case EXTRACT_GLUE_EXIST:
+				recordStateTransition(st, QUERY_UPSTREAM)
 				stm = newQueryUpstreamState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case EXTRACT_GLUE_NOT_EXIST:
+				recordStateTransition(st, LOOKUP_NS_CACHE)
 				stm = newLookupNSCacheState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("extract_glue_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -313,17 +372,20 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("lookup_ns_cache_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
 			switch ret {
 			case LOOKUP_NS_CACHE_HIT,
 				LOOKUP_NS_CACHE_MISS:
+				recordStateTransition(st, QUERY_UPSTREAM)
 				stm = newQueryUpstreamState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("lookup_ns_cache_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -333,6 +395,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
@@ -342,15 +405,18 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineServfailExit)
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
 			case QUERY_UPSTREAM_NO_ERROR:
+				recordStateTransition(st, CLASSIFY_RESP)
 				stm = newClassifyRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("query_upstream_wrong_state")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("Wrong state %d %v", stm.getCurrentState(), err)
 				return nil, fmt.Errorf("wrong state %d %v", stm.getCurrentState(), err)
 			}
@@ -360,14 +426,17 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("return_resp_handle_error")
 				}
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 				monitor.Rec53Log.Errorf("%v", err)
 				return nil, err
 			}
+			recordTerminalExit(stm.getContext(), st, monitor.StateMachineSuccessExit)
 			return buildFinalResponse(stm, originalQuestion, cnameChain), nil
 		default:
 			if monitor.Rec53Metric != nil {
 				monitor.Rec53Metric.StateMachineFailureAdd("unknown_state")
 			}
+			recordTerminalExit(stm.getContext(), st, monitor.StateMachineErrorExit)
 			monitor.Rec53Log.Errorf("Wrong state %d", stm.getCurrentState())
 			return nil, fmt.Errorf("wrong state %d", stm.getCurrentState())
 		}
@@ -376,6 +445,7 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 	if monitor.Rec53Metric != nil {
 		monitor.Rec53Metric.StateMachineFailureAdd("max_iterations")
 	}
+	recordTerminalExit(stm.getContext(), stm.getCurrentState(), monitor.StateMachineMaxItersExit)
 	monitor.Rec53Log.Errorf("Max iterations (%d) exceeded, possible CNAME loop", MaxIterations)
 	return nil, fmt.Errorf("max iterations exceeded, possible CNAME loop")
 }

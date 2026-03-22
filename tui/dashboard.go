@@ -80,12 +80,22 @@ type StateMachinePanel struct {
 	Status            panelStatus
 	TopStage          string
 	TopStageRate      float64
+	TopTerminal       string
+	TopTerminalRate   float64
 	TopFailure        string
 	TopFailureRate    float64
 	SecondFailure     string
 	SecondFailureRate float64
+	Terminals         []BreakdownItem
+	TerminalTotals    []BreakdownItem
+	DominantPath      StateMachinePath
+	PathSummary       string
 	Stages            []BreakdownItem
 	Failures          []BreakdownItem
+	LiveEdges         []TransitionBreakdownItem
+	LiveTerminals     []TransitionBreakdownItem
+	SinceStartEdges   []TransitionBreakdownItem
+	FailureContexts   []StateMachineFailureContext
 }
 
 type BreakdownItem struct {
@@ -93,6 +103,28 @@ type BreakdownItem struct {
 	Rate  float64
 	Ratio float64
 	Total float64
+}
+
+type TransitionBreakdownItem struct {
+	From  string
+	To    string
+	Rate  float64
+	Ratio float64
+	Total float64
+}
+
+type StateMachinePath struct {
+	Summary       string
+	MainEdges     []TransitionBreakdownItem
+	BranchPoint   string
+	BranchOptions []TransitionBreakdownItem
+	Ambiguous     bool
+}
+
+type StateMachineFailureContext struct {
+	Reason string
+	Exit   string
+	Rate   float64
 }
 
 type Dashboard struct {
@@ -451,10 +483,14 @@ func buildXDPPanel(prev, curr *MetricsSnapshot, dt float64) XDPPanel {
 }
 
 func buildStateMachinePanel(prev, curr *MetricsSnapshot, dt float64) StateMachinePanel {
-	if !curr.hasMetric("rec53_state_machine_stage_total") || !curr.hasMetric("rec53_state_machine_failures_total") {
+	if !curr.hasMetric("rec53_state_machine_stage_total") || !curr.hasMetric("rec53_state_machine_transition_total") {
 		return StateMachinePanel{Status: statusUnavailable}
 	}
 	panel := StateMachinePanel{Status: statusWarming}
+	if transitionsCurr, ok := curr.sumByLabelPair("rec53_state_machine_transition_total", "from", "to"); ok {
+		panel.TerminalTotals = buildTerminalTotalBreakdown(transitionsCurr, 4)
+		panel.SinceStartEdges = buildTransitionTotalBreakdown(transitionsCurr, 5)
+	}
 	if prev == nil || dt == 0 {
 		return panel
 	}
@@ -484,8 +520,27 @@ func buildStateMachinePanel(prev, curr *MetricsSnapshot, dt float64) StateMachin
 		}
 	}
 
+	if transitionsCurr, ok := curr.sumByLabelPair("rec53_state_machine_transition_total", "from", "to"); ok {
+		transitionsPrev, _ := prev.sumByLabelPair("rec53_state_machine_transition_total", "from", "to")
+		transitionDelta := deltaTransitionMap(transitionsCurr, transitionsPrev)
+		panel.LiveEdges = buildTransitionBreakdown(transitionDelta, dt, 6)
+		panel.Terminals = buildTerminalBreakdown(transitionDelta, dt, 4)
+		panel.LiveTerminals = buildFilteredTransitionBreakdown(transitionDelta, dt, 3, func(key transitionKey) bool {
+			return isStateMachineTerminalNode(key.To)
+		})
+		panel.TerminalTotals = buildTerminalTotalBreakdown(transitionsCurr, 4)
+		panel.SinceStartEdges = buildTransitionTotalBreakdown(transitionsCurr, 5)
+		panel.DominantPath = buildStateMachinePath(transitionDelta, dt)
+		panel.PathSummary = panel.DominantPath.Summary
+		if len(panel.Terminals) > 0 {
+			panel.TopTerminal = panel.Terminals[0].Label
+			panel.TopTerminalRate = panel.Terminals[0].Rate
+		}
+	}
+
+	panel.FailureContexts = buildStateMachineFailureContexts(panel.Failures)
 	panel.Status = statusOK
-	if panel.TopFailureRate > 0 {
+	if panel.TopFailureRate > 0 || (panel.TopTerminalRate > 0 && panel.TopTerminal != "" && panel.TopTerminal != "success_exit") {
 		panel.Status = statusDegraded
 	}
 	return panel
@@ -861,11 +916,12 @@ func buildStateMachineDetailModel(d Dashboard) detailModel {
 		Status: panel.Status,
 		CurrentWindowMetrics: []string{
 			detailMetricLine("top stage", fmt.Sprintf("%s %s", fallbackText(panel.TopStage), rate(panel.TopStageRate))),
-			detailMetricLine("fail top 1", fmt.Sprintf("%s %s", fallbackText(panel.TopFailure), rate(panel.TopFailureRate))),
-			detailMetricLine("fail top 2", fmt.Sprintf("%s %s", fallbackText(panel.SecondFailure), rate(panel.SecondFailureRate))),
+			detailMetricLine("top terminal", fmt.Sprintf("%s %s", fallbackText(panel.TopTerminal), rate(panel.TopTerminalRate))),
+			detailMetricLine("top failure", fmt.Sprintf("%s %s", fallbackText(panel.TopFailure), rate(panel.TopFailureRate))),
 		},
 		CurrentSections: []detailSection{
 			detailRateBreakdownSection("Stage mix:", panel.Stages),
+			detailRateBreakdownSection("Terminal exits:", panel.Terminals),
 			detailRateBreakdownSection("Failure reasons:", panel.Failures),
 		},
 		SinceStartMetrics:  buildStateMachineSinceStartMetrics(d.CurrentSnapshot),
@@ -879,24 +935,102 @@ func buildStateMachineDetailModel(d Dashboard) detailModel {
 
 	switch panel.Status {
 	case statusDegraded:
-		if panel.TopFailure != "" {
-			model.Standout = fmt.Sprintf("%s is the top recent state-machine failure, while %s remains the busiest stage. This is where the resolver flow is currently concentrating its pain.", panel.TopFailure, fallbackText(panel.TopStage))
+		if panel.TopFailure != "" && panel.TopTerminal != "" {
+			model.Standout = fmt.Sprintf("%s is the top recent failure reason and %s is the exit currently accumulating fastest.", panel.TopFailure, panel.TopTerminal)
+		} else if panel.TopFailure != "" {
+			model.Standout = fmt.Sprintf("%s is the top recent state-machine failure while %s remains the busiest stage.", panel.TopFailure, fallbackText(panel.TopStage))
+		} else if panel.TopTerminal != "" {
+			model.Standout = fmt.Sprintf("%s is the terminal exit currently growing fastest, so the resolver is ending too many flows there.", panel.TopTerminal)
 		} else {
-			model.Standout = fmt.Sprintf("%s is the busiest stage, but the current failure mix still needs more samples to identify a single dominant reason.", fallbackText(panel.TopStage))
+			model.Standout = fmt.Sprintf("%s is the busiest stage right now, but the failure mix still needs more samples before one reason clearly dominates.", fallbackText(panel.TopStage))
 		}
-		model.NextChecks = stateMachineNextChecks(panel.TopFailure)
+		model.NextChecks = stateMachineNextChecks(panel.TopStage, panel.TopTerminal, panel.TopFailure)
 	default:
-		if panel.TopStage != "" {
-			model.Standout = fmt.Sprintf("%s is currently the busiest state-machine stage, and there is no active failure leader competing with it.", panel.TopStage)
+		if panel.TopTerminal == "success_exit" {
+			model.Standout = fmt.Sprintf("%s is the leading terminal exit and %s is the hottest recent stage, so the aggregate resolver flow still looks healthy.", panel.TopTerminal, fallbackText(panel.TopStage))
+		} else if panel.TopStage != "" {
+			model.Standout = fmt.Sprintf("%s is the hottest recent stage, and no failure reason is currently strong enough to define this window.", panel.TopStage)
 		} else {
-			model.Standout = "State-machine metrics are healthy, but the current sample window is too quiet to elevate one stage as the clear standout."
+			model.Standout = "State-machine metrics are healthy, but the current sample window is too quiet to elevate one stage or terminal exit as the standout signal."
 		}
 		model.NextChecks = []string{
-			"Watch this panel when traffic is failing but neither cache nor upstream alone explains it.",
-			"Use failure reasons as a bounded summary, then pivot to logs for request-level detail.",
+			"Watch whether a non-success terminal exit starts climbing before treating this panel as degraded.",
+			"Use `rec53 --config ./config.yaml --trace-domain example.com --trace-type A` when you need one real request path.",
 		}
 	}
 
+	return model
+}
+
+func buildStateMachinePathGraphSubviewModel(d Dashboard) detailModel {
+	panel := d.StateMachine
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Path Graph shows the real resolver edges taken in the current window, then keeps cumulative transition totals bounded for baseline comparison.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("top stage", fmt.Sprintf("%s %s", fallbackText(panel.TopStage), rate(panel.TopStageRate))),
+			detailMetricLine("top terminal", fmt.Sprintf("%s %s", fallbackText(panel.TopTerminal), rate(panel.TopTerminalRate))),
+		},
+		CurrentSections: []detailSection{
+			detailTextSection("Live path graph:", stateMachinePathGraphLines(panel.DominantPath)),
+			detailTransitionRateSection("Branch hotspots:", panel.DominantPath.BranchOptions),
+			detailTransitionRateSection("Terminal exits:", panel.LiveTerminals),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_state_machine_transition_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("transitions total", count(total)))
+		}
+	}
+	model.SinceStartSections = []detailSection{
+		detailTransitionTotalSection("Transition totals:", panel.SinceStartEdges),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required state-machine transition metrics are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+	model.NextChecks = []string{
+		"Switch to Failures if the dominant live path ends in a non-success terminal exit.",
+		"Return to Summary when you want the concise verdict before pivoting to another panel.",
+	}
+	return model
+}
+
+func buildStateMachineFailuresSubviewModel(d Dashboard) detailModel {
+	panel := d.StateMachine
+	model := detailModel{
+		Status:   panel.Status,
+		Standout: "Failures reconciles bounded failure reasons with terminal exits so the path view and the error view tell the same story.",
+		CurrentWindowMetrics: []string{
+			detailMetricLine("top failure", fmt.Sprintf("%s %s", fallbackText(panel.TopFailure), rate(panel.TopFailureRate))),
+			detailMetricLine("top terminal", fmt.Sprintf("%s %s", fallbackText(panel.TopTerminal), rate(panel.TopTerminalRate))),
+			detailMetricLine("dominant path", fallbackText(panel.PathSummary)),
+		},
+		CurrentSections: []detailSection{
+			detailRateBreakdownSection("Failure reasons:", panel.Failures),
+			detailTextSection("Failure context:", buildStateMachineFailureContextLines(panel.FailureContexts, panel.DominantPath)),
+		},
+		SinceStartMetrics: []string{},
+	}
+	if d.CurrentSnapshot != nil {
+		if total, ok := d.CurrentSnapshot.sum("rec53_state_machine_failures_total"); ok {
+			model.SinceStartMetrics = append(model.SinceStartMetrics, detailMetricLine("failures total", count(total)))
+		}
+	}
+	model.SinceStartSections = []detailSection{
+		detailTotalBreakdownSection("Failure totals:", buildStateMachineFailureTotals(d.CurrentSnapshot)),
+	}
+	if standout, nextChecks, handled := detailStateOverride(panel.Status, d.LastError, "", "Required state-machine failure or transition metrics are missing from the target scrape."); handled {
+		model.Standout = standout
+		model.NextChecks = nextChecks
+		return model
+	}
+	model.NextChecks = []string{
+		"Compare the mapped terminal exit with Summary if failures are rising faster than the high-level counters suggest.",
+		"Return to Summary when you want the higher-level verdict before checking logs.",
+	}
 	return model
 }
 
@@ -1007,16 +1141,16 @@ func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailable
 	}
 }
 
-func stateMachineNextChecks(topFailure string) []string {
+func stateMachineNextChecks(topStage, topTerminal, topFailure string) []string {
 	checks := []string{
-		"Use rec53 logs for exact per-request state transitions once a failure reason stands out.",
+		"Use `rec53 --config ./config.yaml --trace-domain example.com --trace-type A` for one real request path.",
 	}
 	switch {
-	case strings.Contains(topFailure, "upstream"):
+	case strings.Contains(topFailure, "upstream"), topStage == "query_upstream", topTerminal == "servfail_exit":
 		checks = append([]string{
 			"See 4 Upstream because the dominant state-machine failure is upstream-related.",
 		}, checks...)
-	case strings.Contains(topFailure, "cache"), strings.Contains(topFailure, "glue"):
+	case strings.Contains(topFailure, "cache"), strings.Contains(topFailure, "glue"), strings.Contains(topStage, "cache"), strings.Contains(topStage, "glue"):
 		checks = append([]string{
 			"See 2 Cache because the dominant state-machine failure is cache or referral related.",
 		}, checks...)
@@ -1039,12 +1173,41 @@ func detailMetricLine(label, value string) string {
 	return fmt.Sprintf("  %-16s %s", label, value)
 }
 
+func detailTextSection(title string, lines []string) detailSection {
+	if len(lines) == 0 {
+		lines = []string{"  no recent samples"}
+	}
+	return detailSection{Title: title, Lines: lines}
+}
+
 func detailRateBreakdownSection(title string, items []BreakdownItem) detailSection {
 	lines := []string{"  no recent samples"}
 	if len(items) > 0 {
 		lines = make([]string, 0, len(items))
 		for _, item := range items {
 			lines = append(lines, fmt.Sprintf("  %-16s %8s  %6s", item.Label, rate(item.Rate), percent(item.Ratio)))
+		}
+	}
+	return detailSection{Title: title, Lines: lines}
+}
+
+func detailTransitionRateSection(title string, items []TransitionBreakdownItem) detailSection {
+	lines := []string{"  no recent transition samples"}
+	if len(items) > 0 {
+		lines = make([]string, 0, len(items))
+		for _, item := range items {
+			lines = append(lines, fmt.Sprintf("  %-30s %8s  %6s", transitionEdgeLabel(item.From, item.To), rate(item.Rate), percent(item.Ratio)))
+		}
+	}
+	return detailSection{Title: title, Lines: lines}
+}
+
+func detailTransitionTotalSection(title string, items []TransitionBreakdownItem) detailSection {
+	lines := []string{"  no cumulative transition samples"}
+	if len(items) > 0 {
+		lines = make([]string, 0, len(items))
+		for _, item := range items {
+			lines = append(lines, fmt.Sprintf("  %-30s %8s  %6s", transitionEdgeLabel(item.From, item.To), count(item.Total), percent(item.Ratio)))
 		}
 	}
 	return detailSection{Title: title, Lines: lines}
@@ -1145,6 +1308,120 @@ func buildTotalBreakdown(values map[string]float64, limit int) []BreakdownItem {
 		items = append(items, item)
 	}
 	return items
+}
+
+func buildTransitionBreakdown(delta map[transitionKey]float64, dt float64, limit int) []TransitionBreakdownItem {
+	return buildFilteredTransitionBreakdown(delta, dt, limit, func(transitionKey) bool { return true })
+}
+
+func buildFilteredTransitionBreakdown(delta map[transitionKey]float64, dt float64, limit int, keep func(transitionKey) bool) []TransitionBreakdownItem {
+	if len(delta) == 0 || dt <= 0 || limit <= 0 {
+		return nil
+	}
+	type entry struct {
+		key   transitionKey
+		value float64
+	}
+	entries := make([]entry, 0, len(delta))
+	total := 0.0
+	for key, value := range delta {
+		if value <= 0 || !keep(key) {
+			continue
+		}
+		entries = append(entries, entry{key: key, value: value})
+		total += value
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return transitionEdgeLabel(entries[i].key.From, entries[i].key.To) < transitionEdgeLabel(entries[j].key.From, entries[j].key.To)
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	items := make([]TransitionBreakdownItem, 0, limit)
+	for _, entry := range entries[:limit] {
+		item := TransitionBreakdownItem{
+			From: entry.key.From,
+			To:   entry.key.To,
+			Rate: entry.value / dt,
+		}
+		if total > 0 {
+			item.Ratio = entry.value / total
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func buildTransitionTotalBreakdown(values map[transitionKey]float64, limit int) []TransitionBreakdownItem {
+	if len(values) == 0 || limit <= 0 {
+		return nil
+	}
+	type entry struct {
+		key   transitionKey
+		value float64
+	}
+	entries := make([]entry, 0, len(values))
+	total := 0.0
+	for key, value := range values {
+		if value <= 0 {
+			continue
+		}
+		entries = append(entries, entry{key: key, value: value})
+		total += value
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].value == entries[j].value {
+			return transitionEdgeLabel(entries[i].key.From, entries[i].key.To) < transitionEdgeLabel(entries[j].key.From, entries[j].key.To)
+		}
+		return entries[i].value > entries[j].value
+	})
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	items := make([]TransitionBreakdownItem, 0, limit)
+	for _, entry := range entries[:limit] {
+		item := TransitionBreakdownItem{
+			From:  entry.key.From,
+			To:    entry.key.To,
+			Total: entry.value,
+		}
+		if total > 0 {
+			item.Ratio = entry.value / total
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func buildTerminalBreakdown(delta map[transitionKey]float64, dt float64, limit int) []BreakdownItem {
+	terminals := make(map[string]float64)
+	for key, value := range delta {
+		if value <= 0 || !isStateMachineTerminalNode(key.To) {
+			continue
+		}
+		terminals[key.To] += value
+	}
+	return buildBreakdown(terminals, dt, limit)
+}
+
+func buildTerminalTotalBreakdown(values map[transitionKey]float64, limit int) []BreakdownItem {
+	terminals := make(map[string]float64)
+	for key, value := range values {
+		if value <= 0 || !isStateMachineTerminalNode(key.To) {
+			continue
+		}
+		terminals[key.To] += value
+	}
+	return buildTotalBreakdown(terminals, limit)
 }
 
 func buildTrafficSinceStartMetrics(snapshot *MetricsSnapshot) []string {
@@ -1257,9 +1534,19 @@ func buildStateMachineSinceStartMetrics(snapshot *MetricsSnapshot) []string {
 	if snapshot == nil {
 		return nil
 	}
-	lines := make([]string, 0, 2)
+	lines := make([]string, 0, 3)
 	if total, ok := snapshot.sum("rec53_state_machine_stage_total"); ok {
 		lines = append(lines, detailMetricLine("stages total", count(total)))
+	}
+	if values, ok := snapshot.sumByLabelPair("rec53_state_machine_transition_total", "from", "to"); ok {
+		terminalTotals := buildTerminalTotalBreakdown(values, 4)
+		total := 0.0
+		for _, item := range terminalTotals {
+			total += item.Total
+		}
+		if total > 0 {
+			lines = append(lines, detailMetricLine("terminal total", count(total)))
+		}
 	}
 	if total, ok := snapshot.sum("rec53_state_machine_failures_total"); ok {
 		lines = append(lines, detailMetricLine("failures total", count(total)))
@@ -1271,14 +1558,171 @@ func buildStateMachineSinceStartSections(snapshot *MetricsSnapshot) []detailSect
 	if snapshot == nil {
 		return nil
 	}
-	sections := make([]detailSection, 0, 2)
+	sections := make([]detailSection, 0, 3)
 	if values, ok := snapshot.sumByLabel("rec53_state_machine_stage_total", "stage"); ok {
 		sections = append(sections, detailTotalBreakdownSection("Stage totals:", buildTotalBreakdown(values, 5)))
+	}
+	if values, ok := snapshot.sumByLabelPair("rec53_state_machine_transition_total", "from", "to"); ok {
+		sections = append(sections, detailTotalBreakdownSection("Terminal totals:", buildTerminalTotalBreakdown(values, 4)))
 	}
 	if values, ok := snapshot.sumByLabel("rec53_state_machine_failures_total", "reason"); ok {
 		sections = append(sections, detailTotalBreakdownSection("Failure totals:", buildTotalBreakdown(values, 5)))
 	}
 	return sections
+}
+
+func buildStateMachineFailureTotals(snapshot *MetricsSnapshot) []BreakdownItem {
+	if snapshot == nil {
+		return nil
+	}
+	values, ok := snapshot.sumByLabel("rec53_state_machine_failures_total", "reason")
+	if !ok {
+		return nil
+	}
+	return buildTotalBreakdown(values, 5)
+}
+
+func transitionEdgeLabel(from, to string) string {
+	return from + " -> " + to
+}
+
+func isStateMachineTerminalNode(name string) bool {
+	return strings.HasSuffix(name, "_exit")
+}
+
+func buildStateMachinePath(delta map[transitionKey]float64, dt float64) StateMachinePath {
+	path := StateMachinePath{}
+	current := "state_init"
+	visited := map[string]bool{current: true}
+	for steps := 0; steps < 12; steps++ {
+		outgoing := buildFilteredTransitionBreakdown(delta, dt, 4, func(key transitionKey) bool {
+			return key.From == current
+		})
+		if len(outgoing) == 0 {
+			break
+		}
+		best := outgoing[0]
+		path.MainEdges = append(path.MainEdges, best)
+		if len(outgoing) > 1 && !dominantStateMachineEdge(best.Rate, outgoing[1].Rate) {
+			path.MainEdges = path.MainEdges[:len(path.MainEdges)-1]
+			path.BranchPoint = current
+			path.BranchOptions = outgoing
+			path.Ambiguous = true
+			break
+		}
+		if isStateMachineTerminalNode(best.To) {
+			break
+		}
+		if visited[best.To] {
+			break
+		}
+		visited[best.To] = true
+		current = best.To
+	}
+	path.Summary = summarizeStateMachinePath(path)
+	return path
+}
+
+func dominantStateMachineEdge(best, second float64) bool {
+	if second <= 0 {
+		return best > 0
+	}
+	return best >= second*1.2 && (best-second) >= 0.5
+}
+
+func summarizeStateMachinePath(path StateMachinePath) string {
+	if len(path.MainEdges) == 0 && path.BranchPoint == "" {
+		return ""
+	}
+	parts := make([]string, 0, len(path.MainEdges)+2)
+	if len(path.MainEdges) > 0 {
+		parts = append(parts, path.MainEdges[0].From)
+		for _, edge := range path.MainEdges {
+			parts = append(parts, edge.To)
+		}
+	}
+	if path.Ambiguous {
+		if len(parts) == 0 {
+			return "branching live path"
+		}
+		return strings.Join(parts, " -> ") + " (branching at " + path.BranchPoint + ")"
+	}
+	return strings.Join(parts, " -> ")
+}
+
+func stateMachinePathSummaryLines(path StateMachinePath) []string {
+	if path.Summary == "" {
+		return []string{"  no dominant live path yet"}
+	}
+	lines := []string{"  " + path.Summary}
+	if path.Ambiguous && len(path.BranchOptions) > 0 {
+		lines = append(lines, fmt.Sprintf("  branch point: %s", path.BranchPoint))
+	}
+	return lines
+}
+
+func stateMachinePathGraphLines(path StateMachinePath) []string {
+	if len(path.MainEdges) == 0 && path.BranchPoint == "" {
+		return []string{"  no recent live transition samples"}
+	}
+	lines := make([]string, 0, len(path.MainEdges)+2)
+	for i, edge := range path.MainEdges {
+		prefix := "  "
+		if i > 0 {
+			prefix = "    "
+		}
+		lines = append(lines, prefix+edge.From)
+		lines = append(lines, prefix+"  -> "+edge.To+fmt.Sprintf("  (%s)", rate(edge.Rate)))
+	}
+	if len(path.MainEdges) == 0 && path.BranchPoint != "" {
+		lines = append(lines, "  "+path.BranchPoint)
+	}
+	if path.Ambiguous {
+		lines = append(lines, fmt.Sprintf("  branch at %s", path.BranchPoint))
+	}
+	return lines
+}
+
+func buildStateMachineFailureContexts(failures []BreakdownItem) []StateMachineFailureContext {
+	contexts := make([]StateMachineFailureContext, 0, len(failures))
+	for _, item := range failures {
+		contexts = append(contexts, StateMachineFailureContext{
+			Reason: item.Label,
+			Exit:   stateMachineFailureExit(item.Label),
+			Rate:   item.Rate,
+		})
+	}
+	return contexts
+}
+
+func stateMachineFailureExit(reason string) string {
+	switch {
+	case strings.Contains(reason, "formerr"):
+		return "formerr_exit"
+	case strings.Contains(reason, "servfail"):
+		return "servfail_exit"
+	case strings.Contains(reason, "max_iterations"):
+		return "max_iterations_exit"
+	case strings.Contains(reason, "query_upstream_error"):
+		return "servfail_exit"
+	default:
+		return "error_exit"
+	}
+}
+
+func buildStateMachineFailureContextLines(contexts []StateMachineFailureContext, path StateMachinePath) []string {
+	if len(contexts) == 0 {
+		return []string{"  no current failure reason is standing out"}
+	}
+	lines := make([]string, 0, len(contexts))
+	pathText := fallbackText(path.Summary)
+	for _, context := range contexts {
+		lines = append(lines, fmt.Sprintf("  %-18s -> %-20s %s", context.Reason, context.Exit, rate(context.Rate)))
+		if pathText != "--" && strings.Contains(pathText, context.Exit) {
+			lines = append(lines, fmt.Sprintf("  path context: %s", pathText))
+		}
+	}
+	return lines
 }
 
 func percent(value float64) string {

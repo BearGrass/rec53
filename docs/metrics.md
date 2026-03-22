@@ -106,6 +106,9 @@ sum by (path) (rate(rec53_upstream_winner_total[5m]))
 # State-machine stages most frequently entered
 topk(10, increase(rec53_state_machine_stage_total[10m]))
 
+# State-machine transitions by real path edge
+sum by (from, to) (increase(rec53_state_machine_transition_total[10m]))
+
 # Terminal state-machine failures by reason
 sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 ```
@@ -167,7 +170,36 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 | Metric | Type | Labels | Audience | Description |
 |--------|------|--------|----------|-------------|
 | `rec53_state_machine_stage_total` | Counter | `stage` | Developer | State-machine stage transitions by bounded stage name |
+| `rec53_state_machine_transition_total` | Counter | `from`, `to` | Developer | Real state-machine edges by bounded source and destination, including terminal exits such as `success_exit`, `servfail_exit`, `formerr_exit`, `error_exit`, and `max_iterations_exit` |
 | `rec53_state_machine_failures_total` | Counter | `reason` | Developer | Terminal state-machine failure categories such as `query_upstream_error`, `cname_cycle`, or `max_iterations` |
+
+`rec53_state_machine_transition_total` is the path-oriented companion to `rec53_state_machine_stage_total`:
+
+- `stage_total` answers which states were entered most often
+- `transition_total` answers which real `from -> to` edges requests actually took
+- terminal exits are modeled as bounded synthetic `to` nodes so paths do not appear truncated
+
+These metrics are still aggregate-scoped. For one real request-scoped path, use `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
+
+Canonical state labels currently include:
+
+- `state_init`
+- `hosts_lookup`
+- `forward_lookup`
+- `cache_lookup`
+- `classify_resp`
+- `extract_glue`
+- `lookup_ns_cache`
+- `query_upstream`
+- `return_resp`
+
+Canonical terminal exits currently include:
+
+- `success_exit`
+- `formerr_exit`
+- `servfail_exit`
+- `error_exit`
+- `max_iterations_exit`
 
 ## Label Stability And Compatibility Notes
 

@@ -71,10 +71,18 @@ rec53_xdp_cleanup_deleted_total 5
 # TYPE rec53_xdp_entries gauge
 rec53_xdp_entries 12
 # TYPE rec53_state_machine_stage_total counter
-rec53_state_machine_stage_total{stage="IN_CACHE"} 80
-rec53_state_machine_stage_total{stage="ITER"} 20
+rec53_state_machine_stage_total{stage="cache_lookup"} 80
+rec53_state_machine_stage_total{stage="query_upstream"} 20
 # TYPE rec53_state_machine_failures_total counter
 rec53_state_machine_failures_total{reason="query_upstream_error"} 1
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 100
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 100
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 90
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 80
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 70
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 69
+rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 1
 `
 
 	currText := strings.ReplaceAll(prevText,
@@ -178,16 +186,44 @@ rec53_state_machine_failures_total{reason="query_upstream_error"} 1
 		`rec53_xdp_cleanup_deleted_total 9`,
 	)
 	currText = strings.ReplaceAll(currText,
-		`rec53_state_machine_stage_total{stage="IN_CACHE"} 80`,
-		`rec53_state_machine_stage_total{stage="IN_CACHE"} 110`,
+		`rec53_state_machine_stage_total{stage="cache_lookup"} 80`,
+		`rec53_state_machine_stage_total{stage="cache_lookup"} 110`,
 	)
 	currText = strings.ReplaceAll(currText,
-		`rec53_state_machine_stage_total{stage="ITER"} 20`,
-		`rec53_state_machine_stage_total{stage="ITER"} 30`,
+		`rec53_state_machine_stage_total{stage="query_upstream"} 20`,
+		`rec53_state_machine_stage_total{stage="query_upstream"} 30`,
 	)
 	currText = strings.ReplaceAll(currText,
 		`rec53_state_machine_failures_total{reason="query_upstream_error"} 1`,
 		`rec53_state_machine_failures_total{reason="query_upstream_error"} 4`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 100`,
+		`rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 130`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 100`,
+		`rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 130`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 90`,
+		`rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 100`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 80`,
+		`rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 95`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 70`,
+		`rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 92`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 69`,
+		`rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 90`,
+	)
+	currText = strings.ReplaceAll(currText,
+		`rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 1`,
+		`rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 4`,
 	)
 
 	prev, err := parseMetrics(strings.NewReader(prevText))
@@ -240,11 +276,17 @@ rec53_state_machine_failures_total{reason="query_upstream_error"} 1
 	if got := dashboard.Upstream.Winners; len(got) != 1 || got[0].Label != "primary" {
 		t.Fatalf("upstream winners = %+v, want primary breakdown", got)
 	}
-	if got := dashboard.StateMachine.Stages; len(got) != 2 || got[0].Label != "IN_CACHE" {
-		t.Fatalf("state stages = %+v, want IN_CACHE-first breakdown", got)
+	if got := dashboard.StateMachine.Stages; len(got) != 2 || got[0].Label != "cache_lookup" {
+		t.Fatalf("state stages = %+v, want cache_lookup-first breakdown", got)
 	}
 	if got := dashboard.StateMachine.Failures; len(got) != 1 || got[0].Label != "query_upstream_error" {
 		t.Fatalf("state failures = %+v, want query_upstream_error breakdown", got)
+	}
+	if got := dashboard.StateMachine.Terminals; len(got) != 2 || got[0].Label != "success_exit" {
+		t.Fatalf("state terminals = %+v, want success_exit-first breakdown", got)
+	}
+	if dashboard.StateMachine.TopTerminal != "success_exit" {
+		t.Fatalf("top terminal = %q, want success_exit", dashboard.StateMachine.TopTerminal)
 	}
 }
 
@@ -261,6 +303,98 @@ rec53_xdp_status 0
 	dashboard := deriveDashboard(DefaultTarget, nil, snapshot, 10*time.Millisecond)
 	if dashboard.XDP.Status != statusDisabled {
 		t.Fatalf("xdp status = %s, want %s", dashboard.XDP.Status, statusDisabled)
+	}
+}
+
+func TestDeriveDashboardAggregatesStateMachineTerminalsAcrossMixedTraffic(t *testing.T) {
+	prev := mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="classify_resp"} 10
+rec53_state_machine_stage_total{stage="query_upstream"} 4
+# TYPE rec53_state_machine_failures_total counter
+rec53_state_machine_failures_total{reason="query_upstream_error"} 1
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 10
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 10
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 10
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 10
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 10
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 8
+rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 1
+`)
+	curr := mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="classify_resp"} 30
+rec53_state_machine_stage_total{stage="query_upstream"} 10
+# TYPE rec53_state_machine_failures_total counter
+rec53_state_machine_failures_total{reason="query_upstream_error"} 2
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 30
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 30
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 30
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 30
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 28
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 20
+rec53_state_machine_transition_total{from="query_upstream",to="servfail_exit"} 4
+`)
+	prev.At = time.Unix(100, 0)
+	curr.At = time.Unix(102, 0)
+
+	dashboard := deriveDashboard(DefaultTarget, prev, curr, 20*time.Millisecond)
+	if got := dashboard.StateMachine.Terminals; len(got) != 2 {
+		t.Fatalf("state terminals = %+v, want success+servfail exit mix", got)
+	}
+	if dashboard.StateMachine.TopTerminal != "success_exit" {
+		t.Fatalf("top terminal = %q, want success_exit", dashboard.StateMachine.TopTerminal)
+	}
+	if dashboard.StateMachine.Terminals[1].Label != "servfail_exit" {
+		t.Fatalf("second terminal = %+v, want servfail_exit", dashboard.StateMachine.Terminals)
+	}
+	if dashboard.StateMachine.Status != statusDegraded {
+		t.Fatalf("state-machine status = %s, want %s", dashboard.StateMachine.Status, statusDegraded)
+	}
+}
+
+func TestDeriveDashboardKeepsStateMachineAvailableWithoutFailuresFamily(t *testing.T) {
+	prev := mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="state_init"} 10
+rec53_state_machine_stage_total{stage="hosts_lookup"} 10
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 10
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 10
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 10
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 10
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 10
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 10
+`)
+	curr := mustParseMetricsForDetailTest(t, `
+# TYPE rec53_state_machine_stage_total counter
+rec53_state_machine_stage_total{stage="state_init"} 30
+rec53_state_machine_stage_total{stage="hosts_lookup"} 30
+# TYPE rec53_state_machine_transition_total counter
+rec53_state_machine_transition_total{from="state_init",to="hosts_lookup"} 30
+rec53_state_machine_transition_total{from="hosts_lookup",to="forward_lookup"} 30
+rec53_state_machine_transition_total{from="forward_lookup",to="cache_lookup"} 30
+rec53_state_machine_transition_total{from="cache_lookup",to="classify_resp"} 30
+rec53_state_machine_transition_total{from="classify_resp",to="return_resp"} 30
+rec53_state_machine_transition_total{from="return_resp",to="success_exit"} 30
+`)
+	prev.At = time.Unix(100, 0)
+	curr.At = time.Unix(102, 0)
+
+	dashboard := deriveDashboard(DefaultTarget, prev, curr, 20*time.Millisecond)
+	if dashboard.StateMachine.Status != statusOK {
+		t.Fatalf("state-machine status = %s, want %s", dashboard.StateMachine.Status, statusOK)
+	}
+	if dashboard.StateMachine.TopFailure != "" {
+		t.Fatalf("top failure = %q, want empty", dashboard.StateMachine.TopFailure)
+	}
+	if dashboard.StateMachine.TopTerminal != "success_exit" {
+		t.Fatalf("top terminal = %q, want success_exit", dashboard.StateMachine.TopTerminal)
+	}
+	if got := dashboard.StateMachine.Terminals; len(got) != 1 || got[0].Label != "success_exit" {
+		t.Fatalf("state terminals = %+v, want success_exit only", got)
 	}
 }
 

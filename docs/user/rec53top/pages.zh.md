@@ -1,6 +1,15 @@
 # rec53top 页面与字段
 
-这页是 `rec53top` 的产品级参考，说明每个屏幕和字段具体表示什么。
+这页不仅说明字段含义，也告诉你新版页面应该怎么读，避免一上来就掉进细节里。
+
+## 先记住这条阅读顺序
+
+`rec53top` 不适合“从左到右逐项读完”。更实用的顺序是：
+
+1. 先看概览页里哪个面板状态最可疑。
+2. 进入该面板详情，先看 `Summary` 里的结论句。
+3. 只有当你已经知道“问题大概在哪一块”时，才继续看子视图。
+4. `State Machine` 不要当作完整调用栈来读，它现在只负责展示聚合计数和终态信号。
 
 ## 概览页
 
@@ -45,17 +54,49 @@
 ### State Machine
 
 - `top stage`：最常进入的阶段。
-- `failure reasons`：主要终态失败分类。
+- `top terminal`：当前增长最快的终态出口。
+- `failure reasons`：主要有界失败分类。
+- `top stage` 适合回答“哪里最热”，不适合单独回答“请求到底怎么走完的”。
+- 如果你要看某个请求的真实路径，直接用 `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`。
 
 ## 详情页
 
 ### Summary
 
-Summary 先给当前结论，再给支撑结论的数字。
+`Summary` 是每个详情页的入口页。正确用法是：
+
+- 先读 `What stands out now`
+- 再看 `Key metrics`
+- 最后看 `Next checks`
+
+如果只读数字不读结论，很容易把“旧累计”误当成“当前问题”。
 
 ### 拆分视图
 
-`Cache`、`Upstream` 和 `XDP` 会有子视图，比如 mix、failures、winners、paths、cleanup。它们的作用是把问题从“哪里坏了”缩小到“哪个有界分类在驱动它”。
+`Cache`、`Upstream` 和 `XDP` 会有子视图，比如 mix、failures、winners、cleanup。它们的作用是把问题从“哪里坏了”缩小到“哪个有界分类在驱动它”。
+
+经验上，只有在下面两种情况下才需要切子视图：
+
+- `Summary` 已经指出了问题方向，但你还想知道“是哪个细分桶在主导”
+- 概览页和 `Summary` 看起来不矛盾，但你想确认更细的分类分布
+
+### State Machine 详情
+
+`State Machine` 现在故意只保留 summary：
+
+- `Stage mix`：聚合工作主要集中在哪些状态
+- `Terminal exits`：最近这些请求主要结束在哪些终态
+- `Failure reasons`：是否已有一个有界失败桶在集中
+
+建议按这个顺序读：
+
+1. 先看 `top stage`
+2. 再看 `top terminal` 是否还是 `success_exit`
+3. 如果你需要单个请求的真实路径，不要在 TUI 里猜，直接跑：
+
+```bash
+./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+```
 
 ### 状态标签
 
@@ -69,4 +110,4 @@ Summary 先给当前结论，再给支撑结论的数字。
 
 ## 阅读规则
 
-先看当前结论，再看支撑计数，再看下一步建议。不要把概览卡片当成完整诊断。
+先看当前结论，再看支撑计数，再看下一步建议。不要把概览卡片当成完整诊断，也不要把 `State Machine` 的单个 stage 名称当成完整路径解释。

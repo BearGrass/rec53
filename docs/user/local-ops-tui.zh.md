@@ -6,6 +6,18 @@
 
 关于定位、使用场景、边界和稳定的概览入口，请先看 [rec53top 概览](rec53top.zh.md)。
 
+## 第一次上手先看什么
+
+如果你是第一次用新版页面，建议不要一上来就在子视图里来回切。更省力的顺序是：
+
+1. 先留在概览页，找状态不是 `OK` 的面板。
+2. 如果每个面板都是 `OK`，优先看数值明显在动的面板，比如 `Traffic`、`Cache` 或 `State Machine`。
+3. 进入详情后先停在 `Summary`，只读三块：
+   `What stands out now`、`Key metrics`、`Next checks`
+4. 只有当 `Summary` 还不够回答你的问题时，再切去子视图。
+
+这样可以避免把累计 totals 或趋势提示误当成第一页就必须读完的内容。
+
 ## 运行
 
 推荐方式：
@@ -93,7 +105,7 @@ TUI 使用一组固定状态：
 - `Snapshot`：load/save 成功总量、导入条目、跳过条目、耗时
 - `Upstream`：timeout 率、bad-rcode 率、fallback 活动、胜出路径
 - `XDP`：启用/禁用状态、命中率、同步错误、清理活动、条目数
-- `State Machine`：最活跃阶段和主要失败原因
+- `State Machine`：最近最热的阶段、主要终态出口，以及有界失败原因
 
 ## 详情页
 
@@ -119,6 +131,24 @@ TUI 使用一组固定状态：
 - `Cache`：`Summary`、`Lookup Mix`、`Lifecycle`
 - `Upstream`：`Summary`、`Failures`、`Winners`
 - `XDP`：`Summary`、`Packet Paths`、`Sync/Cleanup`
+- `State Machine`：只有 summary
+
+## 现在的 State Machine 怎么读
+
+这个面板现在只回答聚合问题，不再试图在 TUI 里重建一条“主路径图”。
+
+- `top stage`：最近哪个 resolver stage 最热
+- `top terminal`：最近这些请求主要结束在什么终态
+- `top failure`：是否已经有一个失败桶在聚集
+- `Stage mix` / `Terminal exits` / `Failure reasons`：用来支撑上面的结论
+
+如果你要看“某个域名这一次到底怎么走完的”，不要在 TUI 里猜，直接用：
+
+```bash
+./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+```
+
+这个命令会跑一次真实解析，并打印有序状态、最终终态和 rcode。
 
 推荐用法：
 
@@ -127,6 +157,7 @@ TUI 使用一组固定状态：
 - 当某个面板最可疑、你想看当前结论和最相关的 breakdown 时，按 `Enter`
 - 如果面板支持钻取，用 `Tab` / `Shift-Tab`、`Left` / `Right` 或 `[` / `]` 切换子视图
 - `Summary` 先看结论页，再用专题子视图缩小范围
+- `State Machine` 里先看 summary 计数器；如果要追单个请求路径，直接切到 trace mode
 - `1` 到 `6` 适合已经知道目标面板时快速直达
 - 用 `0` 或 `Esc` 回到概览页
 
@@ -170,6 +201,8 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - 详情页（`1` 到 `6`）会显示 `What stands out now`，而不是只重复概览数字
 - 退化或不可用面板会显示 `Next checks`，指向下一块最可能的面板或排障方向
 - `State Machine` 会显示类似 `cache_lookup`、`forward_lookup`、`return_resp` 的活跃阶段
+- `State Machine` 详情会直接给出 `Stage mix`、`Terminal exits`、`Failure reasons`
+- 类似 `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` 的 trace 命令会在 TUI 之外打印单次真实路径
 - `Upstream` 在迭代查询真的触达上游时会显示胜出路径活动
 - `Upstream` 有问题时会显示 fallback 或 timeout 活动
 - 正常非 XDP 部署里，`XDP` 应显示 `DISABLED`，而不是假装健康

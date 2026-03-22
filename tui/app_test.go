@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -118,6 +119,40 @@ func TestDashboardUIHelpKeyCompatibility(t *testing.T) {
 	}
 }
 
+func TestDashboardUIOverviewFooterGroupsHelpWhenExpanded(t *testing.T) {
+	ui := newDashboardUI()
+	ui.helpShown = true
+	ui.focusPanel = detailState
+
+	text := ui.footerText(deriveDashboard(DefaultTarget, nil, nil, 0))
+	for _, want := range []string{"Keys", "Move", "Focus", "State Machine", "Status"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("overview footer missing %q\n%s", want, text)
+		}
+	}
+	if !strings.Contains(text, "\n") {
+		t.Fatalf("overview help footer should use grouped multi-line layout\n%s", text)
+	}
+}
+
+func TestDashboardUIDetailFooterGroupsHelpWhenExpanded(t *testing.T) {
+	ui := newDashboardUI()
+	ui.helpShown = true
+	ui.openDetail(detailCache)
+
+	text := ui.detailFooterText(Dashboard{
+		Cache: CachePanel{Status: statusOK},
+	})
+	for _, want := range []string{"Keys", "Detail", "Cache", "Summary", "Subview"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("detail footer missing %q\n%s", want, text)
+		}
+	}
+	if !strings.Contains(text, "\n") {
+		t.Fatalf("detail help footer should use grouped multi-line layout\n%s", text)
+	}
+}
+
 func TestDashboardUIDetailSubviewNavigation(t *testing.T) {
 	ui := newDashboardUI()
 	latest := Dashboard{
@@ -150,6 +185,18 @@ func TestDashboardUIDetailSubviewNavigation(t *testing.T) {
 	}
 }
 
+func TestDashboardUIDetailTitleDropsRedundantDetailWord(t *testing.T) {
+	ui := newDashboardUI()
+	ui.openDetail(detailCache)
+
+	title := ui.detailTitle(Dashboard{
+		Cache: CachePanel{Status: statusOK},
+	})
+	if title != "Cache [Summary]" {
+		t.Fatalf("detail title = %q, want %q", title, "Cache [Summary]")
+	}
+}
+
 func TestDashboardUIDetailSubviewNavigationDisabledForUnsupportedPanels(t *testing.T) {
 	ui := newDashboardUI()
 	latest := Dashboard{
@@ -159,6 +206,21 @@ func TestDashboardUIDetailSubviewNavigationDisabledForUnsupportedPanels(t *testi
 
 	if ui.handleKey(tcell.NewEventKey(tcell.KeyRight, 0, 0), latest, nil, nil) {
 		t.Fatal("right should not be consumed for unsupported detail drilldown")
+	}
+}
+
+func TestDashboardUIStateDetailDoesNotExposeSubviewNavigation(t *testing.T) {
+	ui := newDashboardUI()
+	latest := Dashboard{
+		StateMachine: StateMachinePanel{Status: statusOK},
+	}
+	ui.openDetail(detailState)
+
+	if ui.handleKey(tcell.NewEventKey(tcell.KeyRight, 0, 0), latest, nil, nil) {
+		t.Fatal("right should not be consumed for state detail drilldown")
+	}
+	if ui.handleKey(tcell.NewEventKey(tcell.KeyTab, 0, 0), latest, nil, nil) {
+		t.Fatal("tab should not be consumed for state detail drilldown")
 	}
 }
 

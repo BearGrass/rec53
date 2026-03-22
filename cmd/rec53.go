@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -16,16 +17,20 @@ import (
 	"rec53/monitor"
 	"rec53/server"
 
+	"github.com/miekg/dns"
 	"gopkg.in/yaml.v2"
 )
 
 var (
-	configPath  = flag.String("config", "", "Path to YAML config file (required)")
-	noWarmup    = flag.Bool("no-warmup", false, "Disable NS warmup on startup")
-	listenAddr  = flag.String("listen", "127.0.0.1:5353", "DNS server listen address (host:port)")
-	metricAddr  = flag.String("metric", ":9999", "Prometheus metrics listen address (host:port)")
-	logLevel    = flag.String("log-level", "info", "Log level: debug, info, warn, error")
-	showVersion = flag.Bool("version", false, "Show version information")
+	configPath   = flag.String("config", "", "Path to YAML config file (required)")
+	noWarmup     = flag.Bool("no-warmup", false, "Disable NS warmup on startup")
+	listenAddr   = flag.String("listen", "127.0.0.1:5353", "DNS server listen address (host:port)")
+	metricAddr   = flag.String("metric", ":9999", "Prometheus metrics listen address (host:port)")
+	logLevel     = flag.String("log-level", "info", "Log level: debug, info, warn, error")
+	showVersion  = flag.Bool("version", false, "Show version information")
+	traceDomain  = flag.String("trace-domain", "", "Run one traced resolution for the specified domain and exit")
+	traceType    = flag.String("trace-type", "A", "DNS query type for --trace-domain (for example: A, AAAA, NS)")
+	traceTimeout = flag.Duration("trace-timeout", 5*time.Second, "Overall timeout for --trace-domain")
 )
 
 // Config represents the overall application configuration
@@ -359,6 +364,19 @@ func main() {
 		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
 
+	if *traceDomain != "" {
+		qtype, err := parseTraceQType(*traceType)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "trace configuration error: %s\n", err.Error())
+			os.Exit(1)
+		}
+		if err := runTraceMode(os.Stdout, cfg, *traceDomain, qtype, *traceTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "trace failed: %s\n", err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Initialize logger. All subsequent log output uses monitor.Rec53Log.
 	monitor.InitLogger()
 	defer monitor.Rec53Log.Sync()
@@ -439,4 +457,50 @@ func main() {
 	gracefulShutdown(ctx, rec53.Shutdown, monitor.ShutdownMetric)
 
 	monitor.Rec53Log.Info("rec53 stopped")
+}
+
+func parseTraceQType(value string) (uint16, error) {
+	qtype := strings.ToUpper(strings.TrimSpace(value))
+	if qtype == "" {
+		qtype = "A"
+	}
+	parsed, ok := dns.StringToType[qtype]
+	if !ok {
+		return 0, fmt.Errorf("unsupported trace type %q", value)
+	}
+	return parsed, nil
+}
+
+func runTraceMode(out io.Writer, cfg *Config, domain string, qtype uint16, timeout time.Duration) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration is nil")
+	}
+	if monitor.Rec53Log == nil {
+		monitor.InitLogger()
+	}
+	monitor.SetLogLevel(parseLogLevel(cfg.DNS.LogLevel).Level())
+
+	// Prime hosts/forwarding globals for the trace path using the configured resolver view.
+	server.NewServerWithFullConfig(cfg.DNS.Listen, 1, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, "")
+	if cfg.Snapshot.File != "" {
+		if _, err := server.LoadSnapshot(cfg.Snapshot); err != nil {
+			monitor.Rec53Log.Debugf("[TRACE] snapshot load skipped: %v", err)
+		}
+	}
+
+	traceCtx := context.Background()
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		traceCtx, cancel = context.WithTimeout(traceCtx, timeout)
+		defer cancel()
+	}
+
+	_, trace, err := server.TraceDomain(traceCtx, domain, qtype)
+	if trace == nil {
+		return err
+	}
+	if _, writeErr := io.WriteString(out, trace.Format()+"\n"); writeErr != nil {
+		return writeErr
+	}
+	return err
 }

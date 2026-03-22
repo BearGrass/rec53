@@ -52,6 +52,8 @@ const (
 	subviewUpstreamWinners  detailSubview = "upstream-winners"
 	subviewXDPPacketPaths   detailSubview = "xdp-packet-paths"
 	subviewXDPSyncCleanup   detailSubview = "xdp-sync-cleanup"
+	subviewStatePathGraph   detailSubview = "state-path-graph"
+	subviewStateFailures    detailSubview = "state-failures"
 )
 
 type detailSubviewDef struct {
@@ -412,8 +414,8 @@ func (ui *dashboardUI) render(d Dashboard) {
 	ui.state.SetText(strings.Join([]string{
 		statusLine(d.StateMachine.Status),
 		fmt.Sprintf("top stage      %s %s", fallbackText(d.StateMachine.TopStage), rate(d.StateMachine.TopStageRate)),
-		fmt.Sprintf("fail top 1     %s %s", fallbackText(d.StateMachine.TopFailure), rate(d.StateMachine.TopFailureRate)),
-		fmt.Sprintf("fail top 2     %s %s", fallbackText(d.StateMachine.SecondFailure), rate(d.StateMachine.SecondFailureRate)),
+		fmt.Sprintf("top terminal   %s %s", fallbackText(d.StateMachine.TopTerminal), rate(d.StateMachine.TopTerminalRate)),
+		fmt.Sprintf("top failure    %s %s", fallbackText(d.StateMachine.TopFailure), rate(d.StateMachine.TopFailureRate)),
 	}, "\n"))
 
 	ui.updateOverviewTitles()
@@ -453,9 +455,9 @@ func (ui *dashboardUI) detailTitle(d Dashboard) string {
 		return "Detail"
 	}
 	if def, ok := ui.currentDetailSubviewDef(ui.detailPanel, d); ok {
-		return fmt.Sprintf("%s Detail [%s]", panelTitle(ui.detailPanel), def.label)
+		return fmt.Sprintf("%s [%s]", panelTitle(ui.detailPanel), def.label)
 	}
-	return panelTitle(ui.detailPanel) + " Detail"
+	return panelTitle(ui.detailPanel)
 }
 
 func (ui *dashboardUI) renderDetail(d Dashboard) string {
@@ -518,6 +520,8 @@ func (ui *dashboardUI) renderDetailSubview(d Dashboard, subview detailSubview) s
 		default:
 			return renderDetailModel(buildXDPDetailModel(d))
 		}
+	case detailState:
+		return renderDetailModel(buildStateMachineDetailModel(d))
 	default:
 		return ui.renderDetail(d)
 	}
@@ -661,22 +665,31 @@ func (ui *dashboardUI) footerText(d Dashboard) string {
 		return ui.detailFooterText(d)
 	}
 	if ui.helpShown {
-		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s   statuses: OK / DEGRADED / DISABLED / UNAVAILABLE / STALE / DISCONNECTED / WARMING", ui.focusLabel())
+		return strings.Join([]string{
+			"[yellow]Keys[-] [yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] hide  [yellow]enter[-] detail  [yellow]1-6[-] jump  [yellow]0/esc[-] overview",
+			fmt.Sprintf("[yellow]Move[-] arrows/jkl/tab  [yellow]Focus[-] %s  [yellow]Status[-] OK DEGRADED DISABLED UNAVAILABLE STALE DISCONNECTED WARMING", ui.focusLabel()),
+		}, "\n")
 	}
-	return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]arrows/jkl/tab[-] move   [yellow]enter[-] detail   [yellow]1-6[-] jump   [yellow]0/esc[-] overview   focus %s", ui.focusLabel())
+	return fmt.Sprintf("[yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] help  [yellow]enter[-] detail  [yellow]1-6[-] jump  [yellow]0/esc[-] overview  [yellow]move[-] arrows/jkl/tab  [yellow]focus[-] %s", ui.focusLabel())
 }
 
 func (ui *dashboardUI) detailFooterText(d Dashboard) string {
 	if def, ok := ui.currentDetailSubviewDef(ui.detailPanel, d); ok {
 		if ui.helpShown {
-			return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]tab/shift-tab[-] subview   [yellow][ / ][-] prev/next   [yellow]left/right[-] subview   [yellow]0/esc[-] overview   detail %s / %s", panelTitle(ui.detailPanel), def.label)
+			return strings.Join([]string{
+				"[yellow]Keys[-] [yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] hide  [yellow]0/esc[-] overview",
+				fmt.Sprintf("[yellow]Detail[-] %s / %s  [yellow]Subview[-] tab shift-tab [ ] left right", panelTitle(ui.detailPanel), def.label),
+			}, "\n")
 		}
-		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]tab/shift-tab[-] subview   [yellow][ / ][-] prev/next   [yellow]left/right[-] subview   [yellow]0/esc[-] overview   detail %s / %s", panelTitle(ui.detailPanel), def.label)
+		return fmt.Sprintf("[yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] help  [yellow]0/esc[-] overview  [yellow]detail[-] %s / %s  [yellow]subview[-] tab shift-tab [ ] left right", panelTitle(ui.detailPanel), def.label)
 	}
 	if ui.helpShown {
-		return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] hide help   [yellow]0/esc[-] overview   detail %s", panelTitle(ui.detailPanel))
+		return strings.Join([]string{
+			"[yellow]Keys[-] [yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] hide  [yellow]0/esc[-] overview",
+			fmt.Sprintf("[yellow]Detail[-] %s", panelTitle(ui.detailPanel)),
+		}, "\n")
 	}
-	return fmt.Sprintf("[yellow]q[-] quit   [yellow]r[-] refresh   [yellow]h/?[-] help   [yellow]0/esc[-] overview   detail %s", panelTitle(ui.detailPanel))
+	return fmt.Sprintf("[yellow]q[-] quit  [yellow]r[-] refresh  [yellow]h/?[-] help  [yellow]0/esc[-] overview  [yellow]detail[-] %s", panelTitle(ui.detailPanel))
 }
 
 func (ui *dashboardUI) pushHistory(d Dashboard) {

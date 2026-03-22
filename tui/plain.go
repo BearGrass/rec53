@@ -108,8 +108,8 @@ func renderPlainDashboard(d Dashboard, refresh time.Duration) string {
 		renderPlainPanel("State Machine", []string{
 			fmt.Sprintf("status=%s", d.StateMachine.Status),
 			fmt.Sprintf("top_stage=%s %s", fallbackText(d.StateMachine.TopStage), rate(d.StateMachine.TopStageRate)),
-			fmt.Sprintf("fail_top_1=%s %s", fallbackText(d.StateMachine.TopFailure), rate(d.StateMachine.TopFailureRate)),
-			fmt.Sprintf("fail_top_2=%s %s", fallbackText(d.StateMachine.SecondFailure), rate(d.StateMachine.SecondFailureRate)),
+			fmt.Sprintf("top_terminal=%s %s", fallbackText(d.StateMachine.TopTerminal), rate(d.StateMachine.TopTerminalRate)),
+			fmt.Sprintf("top_failure=%s %s", fallbackText(d.StateMachine.TopFailure), rate(d.StateMachine.TopFailureRate)),
 		}),
 	}
 	if d.LastError != "" {

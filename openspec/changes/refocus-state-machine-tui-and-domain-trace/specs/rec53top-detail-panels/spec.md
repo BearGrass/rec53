@@ -1,0 +1,35 @@
+## MODIFIED Requirements
+
+### Requirement: rec53top detail panels SHALL add diagnostic value beyond overview
+
+When an operator opens a detail panel in `rec53top`, the detail view SHALL surface information that is materially more diagnostic than the overview card for that domain. It MUST NOT be limited to repeating the same summary metrics with only longer static help text. For the `State Machine` panel, that additional value SHALL come from clearer aggregate interpretation of state and terminal counters, not from forcing one reconstructed global path for mixed concurrent traffic.
+
+#### Scenario: Detail view highlights the current standout condition
+- **WHEN** an operator opens a detail panel for a domain that has recent samples
+- **THEN** the detail view SHALL identify the current standout condition, dominant signal, or most relevant breakdown for that domain
+- **AND** SHALL present that information before or alongside the detailed metric list
+
+#### Scenario: Detail view remains useful when overview is already familiar
+- **WHEN** an operator already understands the overview card and opens the corresponding detail panel
+- **THEN** the detail view SHALL provide additional diagnostic interpretation or prioritization rather than only a reformatted copy of overview values
+
+#### Scenario: State Machine detail stays readable under mixed traffic
+- **WHEN** the operator opens the `State Machine` detail page during concurrent or looping resolver activity
+- **THEN** the detail experience SHALL remain centered on aggregate state or terminal signals that can still be interpreted reliably
+- **AND** SHALL avoid making one reconstructed global path the primary explanation when that path would mix multiple request flows
+
+### Requirement: rec53top detail panels SHALL guide next investigation steps
+
+Each detail panel SHALL help the operator decide what to inspect next based on the current state of that domain, such as a related panel, logs, or the meaning of the dominant failure category.
+
+#### Scenario: Degraded panel points to the next likely investigation area
+- **WHEN** a detail panel is in a degraded or stale state
+- **THEN** the detail view SHALL include at least one concrete next-check hint tied to the current dominant signal or failure category
+
+#### Scenario: Healthy panel still explains what to watch
+- **WHEN** a detail panel is healthy
+- **THEN** the detail view SHALL still summarize what is currently leading the domain and what change would be worth watching next
+
+#### Scenario: State Machine detail hands off request-level diagnosis
+- **WHEN** an operator needs to understand one domain's exact resolver path rather than aggregate counter movement
+- **THEN** the `State Machine` detail guidance SHALL direct that operator toward domain-scoped trace/debugging rather than implying the aggregate TUI panel is the authoritative request-level explanation

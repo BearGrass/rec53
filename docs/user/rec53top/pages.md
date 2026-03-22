@@ -1,6 +1,18 @@
 # rec53top Pages And Fields
 
-This page is the product reference for each screen and field in `rec53top`.
+This page is both the field reference and the reading guide for the newer `rec53top` pages.
+
+## Read This First
+
+Do not try to read every field in order.
+
+The practical reading order is:
+
+1. Find the suspicious panel in overview.
+2. Open that panel and read `Summary` first.
+3. Read the conclusion sentence before the raw numbers.
+4. Open subviews only when you need a narrower answer.
+5. Treat `State Machine` as an aggregate counters view, not a full resolver call graph.
 
 ## Overview Page
 
@@ -45,17 +57,40 @@ The overview page is the first screen. It answers one question: which area looks
 ### State Machine
 
 - `top stage`: the most frequently entered stage.
-- `failure reasons`: the dominant terminal failure categories.
+- `top terminal`: the terminal exit currently growing fastest.
+- `failure reasons`: the dominant bounded failure categories.
+- `top stage` answers "what is hottest right now", not "what full path did requests take".
+- if you need one real request path, use `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
 
 ## Detail Pages
 
 ### Summary
 
-The summary area gives the current verdict first. It should say what is most important now before showing supporting numbers.
+The summary area gives the current verdict first. It should say what matters now before showing supporting numbers.
 
 ### Breakdown Views
 
-`Cache`, `Upstream`, and `XDP` may show subviews such as mix, failures, winners, paths, or cleanup details. These subviews narrow the question from “what is wrong” to “which bounded category is driving it”.
+`Cache`, `Upstream`, and `XDP` may show subviews such as mix, failures, winners, or cleanup details. These subviews narrow the question from “what is wrong” to “which bounded category is driving it”.
+
+### State Machine Detail
+
+`State Machine` stays summary-only on purpose:
+
+- `Stage mix` shows where aggregate resolver work is concentrating.
+- `Terminal exits` shows how sampled flows are ending.
+- `Failure reasons` shows whether one bounded failure bucket is clustering.
+
+Read `State Machine` in this order:
+
+- start with `top stage`
+- check whether `top terminal` is still `success_exit`
+- only leave the TUI when you need one real request path
+
+For exact request-scoped flow, run:
+
+```bash
+./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+```
 
 ### State Labels
 
