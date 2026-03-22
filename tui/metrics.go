@@ -27,6 +27,11 @@ type histogramSample struct {
 	Buckets map[float64]float64
 }
 
+type transitionKey struct {
+	From string
+	To   string
+}
+
 type MetricsSnapshot struct {
 	At         time.Time
 	Gauges     map[string][]metricSample
@@ -183,6 +188,28 @@ func (s *MetricsSnapshot) sumByLabel(name, label string) (map[string]float64, bo
 	return values, true
 }
 
+func (s *MetricsSnapshot) sumByLabelPair(name, left, right string) (map[transitionKey]float64, bool) {
+	samples, ok := s.aggregateSamples(name)
+	if !ok {
+		return nil, false
+	}
+	values := make(map[transitionKey]float64)
+	for _, sample := range samples {
+		key := transitionKey{
+			From: sample.Labels[left],
+			To:   sample.Labels[right],
+		}
+		if key.From == "" {
+			key.From = "unknown"
+		}
+		if key.To == "" {
+			key.To = "unknown"
+		}
+		values[key] += sample.Value
+	}
+	return values, true
+}
+
 func (s *MetricsSnapshot) histogramBuckets(name string) (map[float64]float64, bool) {
 	histograms, ok := s.Histograms[name]
 	if !ok {
@@ -222,6 +249,14 @@ func deltaFloat(curr, prev float64) float64 {
 
 func deltaMap(curr, prev map[string]float64) map[string]float64 {
 	result := make(map[string]float64, len(curr))
+	for key, value := range curr {
+		result[key] = deltaFloat(value, prev[key])
+	}
+	return result
+}
+
+func deltaTransitionMap(curr, prev map[transitionKey]float64) map[transitionKey]float64 {
+	result := make(map[transitionKey]float64, len(curr))
 	for key, value := range curr {
 		result[key] = deltaFloat(value, prev[key])
 	}

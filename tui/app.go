@@ -488,7 +488,7 @@ func (ui *dashboardUI) renderDetailWithTrendCues(d Dashboard, body string) strin
 	if trends == "" {
 		return body
 	}
-	return body + "\n\nRecent trend cues:\n" + trends
+	return body + "\n\nTrend:\n" + trends
 }
 
 func (ui *dashboardUI) renderDetailSubview(d Dashboard, subview detailSubview) string {
@@ -900,12 +900,12 @@ func renderDetailModel(model detailModel) string {
 	lines := []string{
 		statusLine(model.Status),
 		"",
-		"What stands out now:",
+		"Now:",
 		"  " + fallbackText(model.Standout),
 	}
 
 	if len(model.CurrentWindowMetrics) > 0 || len(model.CurrentSections) > 0 {
-		lines = append(lines, "", "Current window:")
+		lines = append(lines, "", "Window:")
 		lines = append(lines, model.CurrentWindowMetrics...)
 		for _, section := range model.CurrentSections {
 			lines = append(lines, "")
@@ -914,7 +914,7 @@ func renderDetailModel(model detailModel) string {
 	}
 
 	if len(model.SinceStartMetrics) > 0 || len(model.SinceStartSections) > 0 {
-		lines = append(lines, "", "Since start counters:")
+		lines = append(lines, "", "Totals:")
 		lines = append(lines, model.SinceStartMetrics...)
 		for _, section := range model.SinceStartSections {
 			lines = append(lines, "")
@@ -923,7 +923,7 @@ func renderDetailModel(model detailModel) string {
 	}
 
 	if len(model.NextChecks) > 0 {
-		lines = append(lines, "", "Next checks:")
+		lines = append(lines, "", "Next:")
 		for _, check := range model.NextChecks {
 			lines = append(lines, "- "+check)
 		}

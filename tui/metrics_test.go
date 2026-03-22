@@ -499,7 +499,7 @@ func TestRenderDetailIncludesBreakdowns(t *testing.T) {
 		"Summary",
 		"Failures",
 		"Winners",
-		"timeout is the dominant recent upstream failure reason",
+		"timeout leads recent upstream failures",
 		"winner           primary 3.0/s",
 	} {
 		if !strings.Contains(text, want) {

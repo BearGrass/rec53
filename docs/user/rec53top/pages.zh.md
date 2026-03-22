@@ -65,9 +65,9 @@
 
 `Summary` 是每个详情页的入口页。正确用法是：
 
-- 先读 `What stands out now`
-- 再看 `Key metrics`
-- 最后看 `Next checks`
+- 先读 `Now`
+- 再看 `Window`
+- 最后看 `Next`
 
 如果只读数字不读结论，很容易把“旧累计”误当成“当前问题”。
 

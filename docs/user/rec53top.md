@@ -17,12 +17,12 @@ Typical use cases:
 
 The overview page answers the first question: which area looks suspicious right now.
 
-The detail page answers the next question: what stands out in the current short window, which cumulative counters have been growing since process start, and where you should check next.
+The detail page answers the next question: what matters now, which counters are moving in the short window, which totals keep accumulating, and where you should check next.
 
 The TUI intentionally keeps those two views separate:
 
-- `Current window` is for recent rates, ratios, and the current standout condition
-- `Since start counters` is for bounded cumulative totals and top-N hot paths
+- `Window` is for recent rates, ratios, and the current standout condition
+- `Totals` is for bounded cumulative counts that keep building since start
 
 This makes it easier to tell whether a problem is still active now or whether you are mostly looking at historical accumulation.
 
@@ -48,7 +48,7 @@ Use `rec53top` in this order:
 1. Open the overview and identify the first suspicious panel.
 2. Enter detail with `Enter` or `1` to `6`.
 3. Start at `Summary`, then switch to a drill-down subview if the current panel offers one.
-4. Compare `What stands out now` with the relevant bounded totals or breakdown page.
+4. Compare `Now` with the relevant totals or breakdown page.
 5. If both point at the same path, go to logs or raw metrics with a much smaller search area.
 6. If they diverge, treat the issue as either warming noise, old accumulation, or a regression that may already be fading.
 

@@ -12,7 +12,7 @@ If the newer pages feel hard to read, use this order instead of jumping straight
 
 1. stay in overview and find the first suspicious panel
 2. open detail and stop at `Summary`
-3. read `What stands out now`, then `Key metrics`, then `Next checks`
+3. read `Now`, then `Window`, then `Next`
 4. only switch subviews when `Summary` is already pointing in the right area but you still need a narrower explanation
 
 This keeps totals and short trend cues from becoming noise too early.
@@ -110,7 +110,7 @@ The TUI uses a small fixed set of states:
 
 The full-screen TUI can expand one panel at a time into a detail page. This is still intentionally lightweight: it does not add historical charts or a multi-level page tree, but `Cache`, `Upstream`, and `XDP` support drill-down subviews inside the same detail page.
 
-Recent trend cues are also intentionally lightweight:
+`Trend` is also intentionally lightweight:
 
 - they use only recent in-process samples from the current `rec53top` session
 - they help answer whether a suspicious signal is still rising or already cooling
@@ -119,11 +119,11 @@ Recent trend cues are also intentionally lightweight:
 Each detail page now follows the same reading order:
 
 - `status`: current panel state
-- `What stands out now`: the current dominant signal, abnormal condition, or the reason the panel is not yet interpretable
-- `Key metrics`: the main raw values behind that conclusion
+- `Now`: the current dominant signal or why the panel is not yet interpretable
+- `Window`: the main short-window numbers behind that conclusion
 - breakdown sections such as response mix, lookup mix, winner mix, or failure reasons when that panel has them
-- optional `Recent trend cues`: a very short in-process trend hint for selected metrics
-- `Next checks`: where to look next in rec53top or logs
+- optional `Trend`: a very short in-process trend hint for selected metrics
+- `Next`: where to look next in rec53top or logs
 
 Supported drill-down panels:
 
@@ -195,8 +195,8 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - the first successful scrape may show `WARMING`; after the next refresh, rate-based fields should become meaningful
 - `Traffic` shows non-zero QPS
 - `Cache` moves from warming into visible hit or miss rates
-- detail view (`1` to `6`) shows a `What stands out now` summary instead of only repeating the overview numbers
-- degraded or unavailable panels show `Next checks` that point to the next likely panel or troubleshooting direction
+- detail view (`1` to `6`) shows a short `Now` summary instead of only repeating the overview numbers
+- degraded or unavailable panels show `Next` hints that point to the next likely panel or troubleshooting direction
 - `State Machine` shows active stages such as `cache_lookup`, `forward_lookup`, or `return_resp`
 - `State Machine` detail shows `Stage mix`, `Terminal exits`, and `Failure reasons` without pushing you into a path graph first
 - a domain trace such as `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` prints one real request path outside the aggregate TUI

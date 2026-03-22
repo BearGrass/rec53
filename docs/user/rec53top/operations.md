@@ -58,7 +58,7 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 
 1. Look at the overview first.
 2. Open the suspicious panel.
-3. Read `What stands out now`.
+3. Read `Now`.
 4. Use the breakdown only if the summary points to a bounded cause.
 5. Hand off to logs or broader observability docs when needed.
 

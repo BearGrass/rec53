@@ -588,28 +588,28 @@ func buildTrafficDetailModel(d Dashboard) detailModel {
 	case statusDegraded:
 		switch {
 		case panel.ServfailRatio >= 0.05:
-			model.Standout = fmt.Sprintf("SERVFAIL is elevated at %s, so recent request quality is currently defined by failed answers more than by throughput.", percent(panel.ServfailRatio))
+			model.Standout = fmt.Sprintf("SERVFAIL %s; answer quality is degraded.", percent(panel.ServfailRatio))
 		case panel.P99MS >= 1000:
-			model.Standout = fmt.Sprintf("Tail latency is high at %s while traffic is still flowing, so users are likely feeling slow recursive paths before they see hard failures.", latency(panel.P99MS))
+			model.Standout = fmt.Sprintf("p99 %s; tail latency is elevated.", latency(panel.P99MS))
 		case topLabel != "":
-			model.Standout = fmt.Sprintf("%s currently leads the response mix, and the traffic panel needs a closer look for answer quality rather than raw volume.", topLabel)
+			model.Standout = fmt.Sprintf("%s leads the response mix; traffic needs a quality check.", topLabel)
 		default:
-			model.Standout = "Traffic is degraded even though the top response bucket is not yet dominant enough to explain the whole picture."
+			model.Standout = "Traffic is degraded, but the bucket mix is still split."
 		}
 		model.NextChecks = []string{
-			"See 4 Upstream for timeout or bad-rcode growth.",
-			"See 6 State Machine for concentrated failure reasons.",
-			"Use rec53 logs if SERVFAIL keeps rising and the breakdown stays mixed.",
+			"4 Upstream: check timeout/bad-rcode.",
+			"6 State: check failure clustering.",
+			"Logs: inspect SERVFAIL if mix stays split.",
 		}
 	default:
 		if topLabel != "" {
-			model.Standout = fmt.Sprintf("%s is the dominant recent response bucket, so the current traffic shape still looks readable from a response-quality perspective.", topLabel)
+			model.Standout = fmt.Sprintf("%s leads the response mix.", topLabel)
 		} else {
-			model.Standout = "Traffic is currently healthy, but there is not enough recent response mix to elevate one code as the clear leader."
+			model.Standout = "Traffic looks healthy, but the window is quiet."
 		}
 		model.NextChecks = []string{
-			"Watch for SERVFAIL or P99 growth before treating traffic as degraded.",
-			"See 2 Cache if latency rises while traffic volume stays steady.",
+			"Watch SERVFAIL/p99 before flagging traffic.",
+			"2 Cache: compare if latency rises.",
 		}
 	}
 
@@ -642,24 +642,24 @@ func buildCacheDetailModel(d Dashboard) detailModel {
 	switch panel.Status {
 	case statusDegraded:
 		if panel.MissRate > totalHitRate {
-			model.Standout = fmt.Sprintf("Cache misses are currently outrunning cache-served answers at %s, and the overall hit ratio has fallen to %s.", rate(panel.MissRate), percent(panel.HitRatio))
+			model.Standout = fmt.Sprintf("Miss %s is ahead of cache-served traffic; hit ratio %s.", rate(panel.MissRate), percent(panel.HitRatio))
 		} else {
-			model.Standout = fmt.Sprintf("Cache effectiveness is slipping: hit ratio is %s and miss pressure is visible even though hits still exist.", percent(panel.HitRatio))
+			model.Standout = fmt.Sprintf("Hit ratio %s; miss pressure is visible.", percent(panel.HitRatio))
 		}
 		model.NextChecks = []string{
-			"See 1 Traffic if latency or response quality dropped with miss growth.",
-			"See 4 Upstream when misses are forcing more iterative work.",
-			"See 6 State Machine if one failure reason is clustering around misses.",
+			"1 Traffic: compare latency/quality.",
+			"4 Upstream: misses may force iter.",
+			"6 State: check miss-linked failures.",
 		}
 	default:
 		if topLabel != "" {
-			model.Standout = fmt.Sprintf("%s is the leading recent cache outcome, and lifecycle activity currently looks %s.", topLabel, panel.Lifecycle)
+			model.Standout = fmt.Sprintf("%s leads the cache mix; lifecycle %s.", topLabel, panel.Lifecycle)
 		} else {
-			model.Standout = "Cache is currently healthy, but there are not enough recent lookups to promote one result class as the standout signal."
+			model.Standout = "Cache looks healthy, but the window is quiet."
 		}
 		model.NextChecks = []string{
-			"Watch miss rate during traffic shifts or cold-name bursts.",
-			"Compare with 1 Traffic if latency rises without obvious cache regression.",
+			"Watch miss bursts during traffic shifts.",
+			"1 Traffic: compare if latency rises.",
 		}
 	}
 
@@ -692,8 +692,8 @@ func buildCacheLookupSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Return to Summary when you want the overall cache verdict and next checks.",
-		"Switch to Lifecycle if lookup pressure looks normal but cache contents are still churning.",
+		"Summary: return to cache verdict.",
+		"Lifecycle: open if churn stays high.",
 	}
 	return model
 }
@@ -714,8 +714,8 @@ func buildCacheLifecycleSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Compare with Lookup Mix if misses are climbing but lifecycle writes are not.",
-		"Use Summary to return to the higher-level cache diagnosis before pivoting to another panel.",
+		"Lookup Mix: compare if misses rise without writes.",
+		"Summary: return to cache verdict.",
 	}
 	return model
 }
@@ -741,22 +741,22 @@ func buildSnapshotDetailModel(d Dashboard) detailModel {
 	}
 
 	if panel.Status == statusDegraded || panel.LoadFailure > 0 {
-		model.Standout = fmt.Sprintf("Snapshot activity has seen failures, so restart and shutdown paths need attention before treating snapshot restore as trustworthy.")
+		model.Standout = "Snapshot failures seen; do not trust restore yet."
 		model.NextChecks = []string{
-			"Check snapshot file integrity and related log lines around restart or shutdown.",
-			"Compare imported, skipped-expired, and skipped-corrupt counts before relying on restore quality.",
+			"Logs: check load/save failures.",
+			"Compare imported vs skipped counts.",
 		}
 		return model
 	}
 
 	if panel.Imported > 0 {
-		model.Standout = fmt.Sprintf("Recent snapshot history looks calm: imported entries are visible and duration remains at %s p99.", latency(panel.DurationP99MS))
+		model.Standout = fmt.Sprintf("Snapshot calm; p99 %s.", latency(panel.DurationP99MS))
 	} else {
-		model.Standout = "Snapshot metrics are available, but there is little recent restore or save activity to diagnose beyond current health."
+		model.Standout = "Snapshot metrics are available, but recent activity is light."
 	}
 	model.NextChecks = []string{
-		"Revisit this panel around restart and shutdown events rather than steady-state traffic.",
-		"Use logs if imported counts look unexpectedly small for a known snapshot file.",
+		"Check around restart/shutdown events.",
+		"Logs: inspect small import counts.",
 	}
 	return model
 }
@@ -784,26 +784,26 @@ func buildUpstreamDetailModel(d Dashboard) detailModel {
 	case statusDegraded:
 		switch {
 		case panel.DominantReason != "":
-			model.Standout = fmt.Sprintf("%s is the dominant recent upstream failure reason, so transport or answer-quality instability is currently upstream-led.", panel.DominantReason)
+			model.Standout = fmt.Sprintf("%s leads recent upstream failures.", panel.DominantReason)
 		case panel.FallbackRate > 0:
-			model.Standout = fmt.Sprintf("Fallbacks are active at %s, so the first upstream path is not consistently winning on its own.", rate(panel.FallbackRate))
+			model.Standout = fmt.Sprintf("Fallback %s; the first upstream path is not stable.", rate(panel.FallbackRate))
 		default:
-			model.Standout = "Upstream is degraded even though no single failure reason cleanly dominates yet."
+			model.Standout = "Upstream is degraded, but no single failure dominates yet."
 		}
 		model.NextChecks = []string{
-			"Check network reachability and upstream responsiveness first.",
-			"Compare with 1 Traffic for SERVFAIL or latency growth.",
-			"See 6 State Machine if query-upstream failures are clustering.",
+			"Network: check reachability and RTT.",
+			"1 Traffic: compare SERVFAIL/p99.",
+			"6 State: check query_upstream failures.",
 		}
 	default:
 		if panel.Winner != "" {
-			model.Standout = fmt.Sprintf("%s is currently winning the upstream race most often, and no failure path is standing out as a dominant risk.", panel.Winner)
+			model.Standout = fmt.Sprintf("%s wins the upstream race most often.", panel.Winner)
 		} else {
-			model.Standout = "Upstream looks healthy, but there are not enough recent winner or failure samples to elevate one path as the clear leader."
+			model.Standout = "Upstream looks healthy, but the window is quiet."
 		}
 		model.NextChecks = []string{
-			"Watch timeout and fallback growth before treating upstream as the root cause.",
-			"Use winner mix to judge whether primary or secondary paths are shifting over time.",
+			"Watch timeout/fallback growth.",
+			"Winner mix: track path shifts.",
 		}
 	}
 
@@ -838,8 +838,8 @@ func buildUpstreamFailuresSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Switch to Winners if path selection changed without a single dominant failure reason.",
-		"Return to Summary before deciding whether upstream is the root cause or only a symptom.",
+		"Winners: open if no failure dominates.",
+		"Summary: confirm upstream is root cause.",
 	}
 	return model
 }
@@ -866,8 +866,8 @@ func buildUpstreamWinnersSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Switch to Failures if path churn seems to be driven by timeout or bad-rcode pressure.",
-		"Use Summary to compare the winner picture with the overall upstream verdict.",
+		"Failures: open if churn follows errors.",
+		"Summary: compare winner mix with verdict.",
 	}
 	return model
 }
@@ -894,18 +894,18 @@ func buildXDPDetailModel(d Dashboard) detailModel {
 	}
 
 	if panel.Status == statusDegraded {
-		model.Standout = fmt.Sprintf("The XDP fast path is active, but sync or packet-path errors are non-zero, so correctness pressure matters more than raw hit ratio right now.")
+		model.Standout = "XDP is active, but sync or packet-path errors are non-zero."
 		model.NextChecks = []string{
-			"Compare XDP hit ratio with 2 Cache to see whether fast-path behavior matches the Go-path cache.",
-			"Check sync-error and error counters before trusting fast-path wins.",
+			"2 Cache: compare fast-path hit ratio.",
+			"Check sync-error/error counters.",
 		}
 		return model
 	}
 
-	model.Standout = fmt.Sprintf("The XDP fast path is active and currently stable, with hit ratio %s and pass rate %s.", percent(panel.HitRatio), rate(panel.PassRate))
+	model.Standout = fmt.Sprintf("XDP stable; hit %s, pass %s.", percent(panel.HitRatio), rate(panel.PassRate))
 	model.NextChecks = []string{
-		"Watch sync-error growth before treating XDP as clean under load.",
-		"Compare with 2 Cache if fast-path hit ratio looks unexpectedly low.",
+		"Watch sync-error growth.",
+		"2 Cache: compare if hit ratio looks low.",
 	}
 	return model
 }
@@ -954,8 +954,8 @@ func buildStateMachineDetailModel(d Dashboard) detailModel {
 			model.Standout = "State-machine metrics are healthy, but the current sample window is too quiet to elevate one stage or terminal exit as the standout signal."
 		}
 		model.NextChecks = []string{
-			"Watch whether a non-success terminal exit starts climbing before treating this panel as degraded.",
-			"Use `rec53 --config ./config.yaml --trace-domain example.com --trace-type A` when you need one real request path.",
+			"Watch non-success exits before degrading.",
+			"Trace: `rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.",
 		}
 	}
 
@@ -992,8 +992,8 @@ func buildStateMachinePathGraphSubviewModel(d Dashboard) detailModel {
 		return model
 	}
 	model.NextChecks = []string{
-		"Switch to Failures if the dominant live path ends in a non-success terminal exit.",
-		"Return to Summary when you want the concise verdict before pivoting to another panel.",
+		"Failures: open if path ends badly.",
+		"Summary: return to state verdict.",
 	}
 	return model
 }
@@ -1028,8 +1028,8 @@ func buildStateMachineFailuresSubviewModel(d Dashboard) detailModel {
 		return model
 	}
 	model.NextChecks = []string{
-		"Compare the mapped terminal exit with Summary if failures are rising faster than the high-level counters suggest.",
-		"Return to Summary when you want the higher-level verdict before checking logs.",
+		"Summary: compare failures with top-line exits.",
+		"Logs: pivot if failures keep rising.",
 	}
 	return model
 }
@@ -1061,8 +1061,8 @@ func buildXDPPacketPathsSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Switch to Sync/Cleanup if packet-path ratios look fine but correctness counters are still growing.",
-		"Return to Summary before comparing XDP behavior with the Go-path cache.",
+		"Sync/Cleanup: open if correctness drifts.",
+		"Summary: compare with cache verdict.",
 	}
 	return model
 }
@@ -1089,8 +1089,8 @@ func buildXDPSyncCleanupSubviewModel(d Dashboard) detailModel {
 		}
 	}
 	model.NextChecks = []string{
-		"Switch to Packet Paths if maintenance looks calm but fast-path hit ratio is still lower than expected.",
-		"Use Summary when you want the top-line XDP verdict before pivoting away.",
+		"Packet Paths: open if hit ratio stays low.",
+		"Summary: return to XDP verdict.",
 	}
 	return model
 }
@@ -1099,24 +1099,24 @@ func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailable
 	switch status {
 	case statusWarming:
 		return "Only one successful scrape is available, so short-window rates and ratios are not stable yet.", []string{
-			"Wait for the next refresh or press r to collect another successful sample.",
-			"Use the header timestamps to confirm when live short-window interpretation becomes meaningful.",
+			"Wait one more refresh or press r.",
+			"Header time: confirm the live window.",
 		}, true
 	case statusUnavailable:
 		if unavailableMsg == "" {
 			unavailableMsg = "Required metric families for this panel are missing from the current scrape."
 		}
 		return unavailableMsg, []string{
-			"Verify that the target rec53 build exposes the expected metric families.",
-			"Inspect the raw /metric output if this capability should exist on this node.",
+			"Verify this target exposes the metric family.",
+			"Check raw /metric or -plain output.",
 		}, true
 	case statusDisabled:
 		if disabledMsg == "" {
 			disabledMsg = "This panel is intentionally disabled for the current deployment, so there is no live signal to interpret here."
 		}
 		return disabledMsg, []string{
-			"No action is required unless this feature is expected to be enabled.",
-			"Compare with the current configuration before treating this state as a fault.",
+			"No action unless this feature should be on.",
+			"Check config before treating it as a fault.",
 		}, true
 	case statusDisconnected:
 		standout := "The target has not produced a successful scrape yet, so this panel is not showing live rec53 behavior."
@@ -1124,8 +1124,8 @@ func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailable
 			standout = "The target is disconnected from rec53top, so there is no fresh live-state interpretation. Last error: " + lastError
 		}
 		return standout, []string{
-			"Verify the metrics endpoint is reachable and the target address is correct.",
-			"Retry with r after connectivity returns or use -plain/curl to confirm scrape health.",
+			"Verify target address and metrics reachability.",
+			"Press r or use -plain/curl after recovery.",
 		}, true
 	case statusStale:
 		standout := "This panel is showing stale data because the latest scrape failed, so live interpretation is temporarily frozen."
@@ -1133,8 +1133,8 @@ func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailable
 			standout += " Last error: " + lastError
 		}
 		return standout, []string{
-			"Treat current numbers as old until the next successful scrape lands.",
-			"Check scrape connectivity first before following normal panel guidance.",
+			"Treat numbers as old until next scrape.",
+			"Check scrape connectivity first.",
 		}, true
 	default:
 		return "", nil, false
@@ -1143,20 +1143,20 @@ func detailStateOverride(status panelStatus, lastError, disabledMsg, unavailable
 
 func stateMachineNextChecks(topStage, topTerminal, topFailure string) []string {
 	checks := []string{
-		"Use `rec53 --config ./config.yaml --trace-domain example.com --trace-type A` for one real request path.",
+		"Trace: `rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.",
 	}
 	switch {
 	case strings.Contains(topFailure, "upstream"), topStage == "query_upstream", topTerminal == "servfail_exit":
 		checks = append([]string{
-			"See 4 Upstream because the dominant state-machine failure is upstream-related.",
+			"4 Upstream: dominant failure is upstream.",
 		}, checks...)
 	case strings.Contains(topFailure, "cache"), strings.Contains(topFailure, "glue"), strings.Contains(topStage, "cache"), strings.Contains(topStage, "glue"):
 		checks = append([]string{
-			"See 2 Cache because the dominant state-machine failure is cache or referral related.",
+			"2 Cache: dominant failure is cache/referral.",
 		}, checks...)
 	default:
 		checks = append([]string{
-			"Correlate this failure mix with 1 Traffic and 4 Upstream before assuming a single root cause.",
+			"1 Traffic + 4 Upstream: correlate first.",
 		}, checks...)
 	}
 	return checks

@@ -43,7 +43,7 @@ func TestBuildTrafficDetailModelDegraded(t *testing.T) {
 		},
 	})
 
-	if !strings.Contains(model.Standout, "SERVFAIL is elevated") {
+	if !strings.Contains(model.Standout, "SERVFAIL") {
 		t.Fatalf("standout = %q, want SERVFAIL explanation", model.Standout)
 	}
 	if len(model.NextChecks) == 0 {
@@ -108,11 +108,11 @@ rec53_upstream_winner_total{path="secondary"} 4
 
 	for _, want := range []string{
 		"Subview:",
-		"What stands out now:",
-		"Current window:",
-		"Since start counters:",
+		"Now:",
+		"Window:",
+		"Totals:",
 		"Failure reasons:",
-		"Next checks:",
+		"Next:",
 		"Upstream failures isolates the recent error mix",
 	} {
 		if !strings.Contains(text, want) {
@@ -139,9 +139,9 @@ func TestRenderDetailExplainsStaleState(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"What stands out now:",
+		"Now:",
 		"stale data because the latest scrape failed",
-		"Next checks:",
+		"Next:",
 		"Check scrape connectivity first",
 	} {
 		if !strings.Contains(text, want) {
@@ -190,8 +190,8 @@ rec53_state_machine_failures_total{reason="query_upstream_error"} 3
 	})
 
 	for _, want := range []string{
-		"What stands out now:",
-		"Current window:",
+		"Now:",
+		"Window:",
 		"Stage mix:",
 		"Terminal exits:",
 		"Failure reasons:",
@@ -399,7 +399,7 @@ func TestRenderDetailAddsLightweightTrendCues(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Recent trend cues:",
+		"Trend:",
 		"recent in-process samples only; use Prometheus/Grafana for long-range history",
 		"hit ratio",
 		"miss rate",
@@ -446,7 +446,7 @@ rec53_cache_lifecycle_total{event="write"} 52
 					ResponseCodes: []BreakdownItem{{Label: "NOERROR", Rate: 40, Ratio: 0.94}},
 				},
 			},
-			wantSubstr: "dominant recent response bucket",
+			wantSubstr: "leads the response mix",
 		},
 		{
 			name:  "cache",
@@ -465,7 +465,7 @@ rec53_cache_lifecycle_total{event="write"} 52
 					},
 				},
 			},
-			wantSubstr: "misses are currently outrunning",
+			wantSubstr: "ahead of cache-served traffic",
 		},
 	}
 
@@ -474,7 +474,7 @@ rec53_cache_lifecycle_total{event="write"} 52
 			ui := newDashboardUI()
 			ui.detailPanel = tc.panel
 			text := ui.renderDetail(tc.dashboard)
-			for _, want := range []string{"Current window:", "Since start counters:"} {
+			for _, want := range []string{"Window:", "Totals:"} {
 				if !strings.Contains(text, want) {
 					t.Fatalf("detail view missing %q\n%s", want, text)
 				}
@@ -516,8 +516,8 @@ rec53_response_counter{stage="all",type="A",code="FORMERR"} 1
 	})
 
 	for _, want := range []string{
-		"Current window:",
-		"Since start counters:",
+		"Window:",
+		"Totals:",
 		"queries total",
 		"responses total",
 		"Response codes:",
@@ -531,7 +531,7 @@ rec53_response_counter{stage="all",type="A",code="FORMERR"} 1
 	if strings.Contains(text, "FORMERR") {
 		t.Fatalf("detail view should keep cumulative response codes bounded\n%s", text)
 	}
-	if !strings.Contains(text, "SERVFAIL is elevated") {
+	if !strings.Contains(text, "SERVFAIL") {
 		t.Fatalf("detail view lost current-window standout\n%s", text)
 	}
 }

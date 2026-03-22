@@ -58,7 +58,7 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 
 1. 先看概览。
 2. 打开可疑面板。
-3. 读 `What stands out now`。
+3. 读 `Now`。
 4. 只有当结论指向有界原因时，再看 breakdown。
 5. 需要更广的排查时，再去看日志或更大范围的可观测性文档。
 

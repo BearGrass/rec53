@@ -13,7 +13,7 @@
 1. 先留在概览页，找状态不是 `OK` 的面板。
 2. 如果每个面板都是 `OK`，优先看数值明显在动的面板，比如 `Traffic`、`Cache` 或 `State Machine`。
 3. 进入详情后先停在 `Summary`，只读三块：
-   `What stands out now`、`Key metrics`、`Next checks`
+   `Now`、`Window`、`Next`
 4. 只有当 `Summary` 还不够回答你的问题时，再切去子视图。
 
 这样可以避免把累计 totals 或趋势提示误当成第一页就必须读完的内容。
@@ -120,11 +120,11 @@ TUI 使用一组固定状态：
 每个详情页都按同样顺序阅读：
 
 - `status`：当前面板状态
-- `What stands out now`：当前最主要的信号、异常，或为什么这个面板暂时还不能解释
-- `Key metrics`：支撑这个结论的主要原始值
+- `Now`：当前最主要的信号、异常，或为什么这个面板暂时还不能解释
+- `Window`：支撑这个结论的主要短窗口数值
 - 该面板特有的 breakdown 区块，比如响应分布、lookup 分布、winner 分布或失败原因
-- 可选的 `Recent trend cues`：给选定指标的一条很短的会话内趋势提示
-- `Next checks`：下一步该去 rec53top 的哪里看，或者去日志哪里看
+- 可选的 `Trend`：给选定指标的一条很短的会话内趋势提示
+- `Next`：下一步该去 rec53top 的哪里看，或者去日志哪里看
 
 支持钻取的面板：
 
@@ -198,8 +198,8 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - 第一次成功抓取可能会显示 `WARMING`；下一次刷新后，基于速率的字段应该有意义
 - `Traffic` 会出现非零 QPS
 - `Cache` 会从 warming 进入可见的命中或 miss 速率
-- 详情页（`1` 到 `6`）会显示 `What stands out now`，而不是只重复概览数字
-- 退化或不可用面板会显示 `Next checks`，指向下一块最可能的面板或排障方向
+- 详情页（`1` 到 `6`）会显示简短的 `Now` 结论，而不是只重复概览数字
+- 退化或不可用面板会显示 `Next`，指向下一块最可能的面板或排障方向
 - `State Machine` 会显示类似 `cache_lookup`、`forward_lookup`、`return_resp` 的活跃阶段
 - `State Machine` 详情会直接给出 `Stage mix`、`Terminal exits`、`Failure reasons`
 - 类似 `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` 的 trace 命令会在 TUI 之外打印单次真实路径
