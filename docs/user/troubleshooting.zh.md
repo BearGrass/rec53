@@ -85,6 +85,30 @@ dig @127.0.0.1 -p 5353 example.com
 dig @127.0.0.1 -p 5353 example.com NS
 ```
 
+## 查询返回 `REFUSED`
+
+先确认这是不是策略拒绝，而不是服务端内部失败。
+
+在这个功能里，`REFUSED` 表示某个客户端 IP 在 rec53 开始更多昂贵工作之前，就已经触达了配置的昂贵请求并发上限。这一判断基于 RFC 1035 第 4.1.1 节和 RFC 8499 第 3 节对策略型拒绝语义的推断。
+
+推荐这样区分：
+
+- `REFUSED`：面向 requester 的策略决策
+- `SERVFAIL`：rec53 已尝试处理，但服务端自身处理失败
+
+重点检查：
+
+- `dns.expensive_request_limit_mode`
+- `dns.expensive_request_limit`
+- `rec53_expensive_request_limit_total`
+- 带 `[LIMIT]` 和 `suppressed=` 的 warning 日志
+
+如果你需要减少策略拒绝：
+
+- 先确认是否有单个客户端同时打了过多 forwarding miss 或 iterative miss
+- 只在看过基线延迟和 upstream 压力后，再考虑提高 `dns.expensive_request_limit`
+- 注意 cache hit、hosts hit、廉价 forwarding hit 都不计入这个 limiter
+
 ## 启动太慢
 
 可能原因：

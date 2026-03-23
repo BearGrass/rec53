@@ -534,6 +534,7 @@ func TestNewServerWithFullConfig_XDPDisabled(t *testing.T) {
 		WarmupConfig{Enabled: false}, SnapshotConfig{},
 		nil, nil,
 		"", // xdpInterface="" → XDP disabled
+		ExpensiveRequestLimitConfig{},
 	)
 	if s == nil {
 		t.Fatal("expected non-nil server")
@@ -567,6 +568,7 @@ func TestNewServerWithFullConfig_XDPInterface(t *testing.T) {
 		WarmupConfig{Enabled: false}, SnapshotConfig{},
 		nil, nil,
 		"eth0", // xdpInterface="eth0" → loader created
+		ExpensiveRequestLimitConfig{},
 	)
 	if s == nil {
 		t.Fatal("expected non-nil server")
@@ -589,6 +591,7 @@ func TestServer_ShutdownCleansXDP(t *testing.T) {
 		WarmupConfig{Enabled: false}, SnapshotConfig{},
 		nil, nil,
 		"", // XDP disabled
+		ExpensiveRequestLimitConfig{},
 	)
 	errChan := s.Run()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

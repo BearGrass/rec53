@@ -93,6 +93,10 @@ func (m *Metric) StateMachineTransitionAdd(from, to string) {
 	StateMachineTransitionTotal.WithLabelValues(from, to).Inc()
 }
 
+func (m *Metric) ExpensiveRequestLimitAdd(action, path string) {
+	ExpensiveRequestLimitTotal.WithLabelValues(action, path).Inc()
+}
+
 // register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
@@ -121,6 +125,7 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(StateMachineStageTotal)
 	m.reg.MustRegister(StateMachineFailuresTotal)
 	m.reg.MustRegister(StateMachineTransitionTotal)
+	m.reg.MustRegister(ExpensiveRequestLimitTotal)
 }
 
 // MetricServer holds the HTTP server for metrics

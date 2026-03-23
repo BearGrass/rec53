@@ -24,6 +24,7 @@ type server struct {
 	forwardZones []ForwardZone       // zones sorted by zone length desc (longest match first)
 	xdpLoader    *XDPLoader          // eBPF lifecycle manager; nil when XDP disabled
 	xdpCancel    context.CancelFunc  // cancels XDP metrics + cleanup goroutines; nil if XDP inactive
+	expLimiter   *expensiveRequestLimiter
 	udpSrvs      []*dns.Server
 	tcpSrvs      []*dns.Server
 	wg           sync.WaitGroup
@@ -63,7 +64,7 @@ func NewServerWithConfig(listen string, warmupCfg WarmupConfig) *server {
 // pair without SO_REUSEPORT; values >1 enable SO_REUSEPORT with N parallel pairs.
 // xdpInterface controls the XDP/eBPF cache fast path; when non-empty,
 // cache hits are served directly from the kernel via XDP_TX (requires root/CAP_BPF).
-func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfig, snapshotCfg SnapshotConfig, hosts []HostEntry, forwarding []ForwardZone, xdpInterface string) *server {
+func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfig, snapshotCfg SnapshotConfig, hosts []HostEntry, forwarding []ForwardZone, xdpInterface string, limitCfg ExpensiveRequestLimitConfig) *server {
 	hostsMap, hostsNames := compileHostsEntries(hosts)
 	fwdZones := sortForwardZones(forwarding)
 	if listeners < 1 {
@@ -77,6 +78,7 @@ func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfi
 		hostsMap:     hostsMap,
 		hostsNames:   hostsNames,
 		forwardZones: fwdZones,
+		expLimiter:   newExpensiveRequestLimiter(limitCfg),
 	}
 	// Create XDP loader if interface is specified.
 	if xdpInterface != "" {
@@ -89,6 +91,8 @@ func NewServerWithFullConfig(listen string, listeners int, warmupCfg WarmupConfi
 func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	startTime := time.Now()
 	reply := &dns.Msg{}
+	requestCtx := withExpensiveRequestHolder(withExpensiveRequestLimiter(context.Background(), s.expLimiter), newExpensiveRequestHolder(extractClientIP(w.RemoteAddr())))
+	defer expensiveRequestHolderFromContext(requestCtx).ReleaseIfHeld(expensiveRequestLimiterFromContext(requestCtx))
 	queryName := ""
 	queryType := "UNKNOWN"
 	if r != nil && len(r.Question) > 0 {
@@ -119,8 +123,9 @@ func (s *server) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	monitor.Rec53Metric.InCounterAdd("request", dns.TypeToString[r.Question[0].Qtype])
-	stm := newStateInitState(r, reply, context.Background())
+	stm := newStateInitState(r, reply, requestCtx)
 	result, err := Change(stm)
+	expensiveRequestHolderFromContext(requestCtx).ReleaseIfHeld(expensiveRequestLimiterFromContext(requestCtx))
 	if err != nil {
 		monitor.Rec53Log.Errorf("Change state error: %s", err.Error())
 		// Return SERVFAIL on error

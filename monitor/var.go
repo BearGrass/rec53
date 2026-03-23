@@ -196,6 +196,13 @@ var (
 		},
 		[]string{"from", "to"},
 	)
+	ExpensiveRequestLimitTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_expensive_request_limit_total",
+			Help: "Per-client expensive request limit events by bounded action and path",
+		},
+		[]string{"action", "path"},
+	)
 
 	Rec53Metric *Metric
 )

@@ -60,10 +60,12 @@ type DebugConfig struct {
 
 // DNSConfig represents DNS server configuration
 type DNSConfig struct {
-	Listen          string        `yaml:"listen"`
-	Metric          string        `yaml:"metric"`
-	LogLevel        string        `yaml:"log_level"`
-	UpstreamTimeout time.Duration `yaml:"upstream_timeout"`
+	Listen                    string        `yaml:"listen"`
+	Metric                    string        `yaml:"metric"`
+	LogLevel                  string        `yaml:"log_level"`
+	UpstreamTimeout           time.Duration `yaml:"upstream_timeout"`
+	ExpensiveRequestLimitMode string        `yaml:"expensive_request_limit_mode"`
+	ExpensiveRequestLimit     int           `yaml:"expensive_request_limit"`
 	// Listeners controls the number of UDP+TCP listener pairs bound to the same
 	// address via SO_REUSEPORT.  0 or 1 means a single listener pair (classic
 	// behaviour, no SO_REUSEPORT).  Values >1 enable SO_REUSEPORT with N
@@ -193,6 +195,15 @@ func validateConfig(cfg *Config) error {
 	// Validate upstream timeout: if set, must be at least 100ms
 	if cfg.DNS.UpstreamTimeout > 0 && cfg.DNS.UpstreamTimeout < 100*time.Millisecond {
 		return fmt.Errorf("dns.upstream_timeout must be at least 100ms, got %v", cfg.DNS.UpstreamTimeout)
+	}
+
+	if cfg.DNS.ExpensiveRequestLimitMode != "" &&
+		cfg.DNS.ExpensiveRequestLimitMode != server.ExpensiveRequestLimitModeDisabled &&
+		cfg.DNS.ExpensiveRequestLimitMode != server.ExpensiveRequestLimitModeEnabled {
+		return fmt.Errorf("dns.expensive_request_limit_mode must be one of: disabled, enabled")
+	}
+	if cfg.DNS.ExpensiveRequestLimit < 0 {
+		return fmt.Errorf("dns.expensive_request_limit must be >= 0, got %d", cfg.DNS.ExpensiveRequestLimit)
 	}
 
 	// Validate listeners count
@@ -363,6 +374,10 @@ func main() {
 	if cfg.DNS.UpstreamTimeout > 0 {
 		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
+	limitCfg := server.ExpensiveRequestLimitConfig{
+		Mode:  cfg.DNS.ExpensiveRequestLimitMode,
+		Limit: cfg.DNS.ExpensiveRequestLimit,
+	}
 
 	if *traceDomain != "" {
 		qtype, err := parseTraceQType(*traceType)
@@ -414,7 +429,7 @@ func main() {
 	if cfg.XDP.Enabled {
 		xdpIface = cfg.XDP.Interface
 	}
-	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.DNS.Listeners, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, xdpIface)
+	rec53 := server.NewServerWithFullConfig(cfg.DNS.Listen, cfg.DNS.Listeners, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, xdpIface, limitCfg)
 	// Restore cache from snapshot before starting listeners so the cache is
 	// warm before the first DNS query arrives.  This is synchronous and completes
 	// in < 5 ms on typical snapshot files.  Missing file → silent no-op; any
@@ -482,7 +497,10 @@ func runTraceMode(out io.Writer, cfg *Config, domain string, qtype uint16, timeo
 	monitor.SetLogLevel(parseLogLevel(cfg.DNS.LogLevel).Level())
 
 	// Prime hosts/forwarding globals for the trace path using the configured resolver view.
-	server.NewServerWithFullConfig(cfg.DNS.Listen, 1, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, "")
+	server.NewServerWithFullConfig(cfg.DNS.Listen, 1, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, "", server.ExpensiveRequestLimitConfig{
+		Mode:  cfg.DNS.ExpensiveRequestLimitMode,
+		Limit: cfg.DNS.ExpensiveRequestLimit,
+	})
 	if cfg.Snapshot.File != "" {
 		if _, err := server.LoadSnapshot(cfg.Snapshot); err != nil {
 			monitor.Rec53Log.Debugf("[TRACE] snapshot load skipped: %v", err)

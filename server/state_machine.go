@@ -269,6 +269,9 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				msg := new(dns.Msg)
 				msg.SetRcode(stm.getRequest(), dns.RcodeServerFailure)
 				return msg, nil
+			case FORWARD_LOOKUP_REFUSED:
+				recordTerminalExit(stm.getContext(), st, monitor.StateMachineRefusedExit)
+				return buildRefusedResponse(stm.getRequest()), nil
 			default:
 				if monitor.Rec53Metric != nil {
 					monitor.Rec53Metric.StateMachineFailureAdd("forward_lookup_wrong_state")
@@ -292,6 +295,10 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				recordStateTransition(st, CLASSIFY_RESP)
 				stm = newClassifyRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CACHE_LOOKUP_MISS:
+				if !tryAcquireExpensiveRequest(stm.getContext(), expensivePathIterative) {
+					recordTerminalExit(stm.getContext(), st, monitor.StateMachineRefusedExit)
+					return buildRefusedResponse(stm.getRequest()), nil
+				}
 				recordStateTransition(st, EXTRACT_GLUE)
 				stm = newExtractGlueState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			default:

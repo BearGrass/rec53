@@ -93,10 +93,43 @@ Use metrics to watch:
 - response codes
 - end-to-end latency
 - cache lookup quality
+- per-client expensive-path refusals
 - snapshot restore/save behavior
 - upstream failure reasons and fallback activity
 - nameserver quality
 - XDP counters when XDP is enabled
+
+## Per-Client Expensive Request Protection
+
+rec53 can protect expensive resolution work on a per-client-IP basis.
+
+The first version only applies when a request leaves the local cheap path:
+
+- forwarding miss that must send an external forwarding query
+- cache miss that must continue into iterative resolution
+
+It does not count these cheap paths:
+
+- `hosts` hits
+- forwarding hits that finish locally
+- cache hits
+
+Configuration:
+
+```yaml
+dns:
+  expensive_request_limit_mode: "enabled"
+  expensive_request_limit: 0
+```
+
+Operational meaning:
+
+- only `disabled` and `enabled` are product modes
+- `0` uses the built-in default limit: `runtime.NumCPU()`
+- one front-end request consumes at most one slot even if it fans out internally
+- over-limit requests return `REFUSED`
+- logs are rate-limited per client IP and include a suppressed-event count
+- the first version is metric/log driven only and does not add a per-IP TUI view
 
 ### Prometheus Scrape Setup
 
@@ -162,6 +195,7 @@ For first deployments, focus on:
 - SERVFAIL ratio
 - p99 query latency
 - cache lookup outcome mix from `rec53_cache_lookup_total`
+- policy pressure from `rec53_expensive_request_limit_total`
 - snapshot load/save outcomes from `rec53_snapshot_operations_total`
 - upstream timeout and bad-rcode trends from `rec53_upstream_failures_total`
 - degraded upstream IPs from `rec53_ipv2_p50_latency_ms`

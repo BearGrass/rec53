@@ -713,7 +713,7 @@ func setupResolverWithHostsForward(
 	warmupCfg := server.DefaultWarmupConfig
 	warmupCfg.Enabled = false
 
-	srv := server.NewServerWithFullConfig("127.0.0.1:0", 1, warmupCfg, server.SnapshotConfig{}, hosts, forwarding, "")
+	srv := server.NewServerWithFullConfig("127.0.0.1:0", 1, warmupCfg, server.SnapshotConfig{}, hosts, forwarding, "", server.ExpensiveRequestLimitConfig{})
 	errChan := srv.Run()
 
 	addr := srv.UDPAddr()

@@ -30,6 +30,7 @@ scrape_configs:
 
 - 只允许使用有限枚举标签，例如 `stage`、`type`、`code`、`result`、`reason`、`path`
 - 不允许把原始域名、请求 ID、完整 upstream 列表、自由文本错误消息作为标签
+- 不允许为 per-client 保护观测引入原始 client IP 标签
 - 单个 IP 标签只保留在像 `rec53_ipv2_*` 这类上游集合受控的指标上
 
 这对两类读者都重要：
@@ -46,6 +47,7 @@ scrape_configs:
 - `rec53_cache_lookup_total` 是否仍有稳定 hit，而不是几乎全 miss
 - `rec53_snapshot_operations_total` 是否频繁出现 load/save 失败
 - `rec53_upstream_failures_total` 是否被 `timeout` 或 `bad_rcode` 主导
+- `rec53_expensive_request_limit_total{action="refused"}` 是否异常升高
 - 只有在开启 XDP 时，才解读 `rec53_xdp_status` 和 `rec53_xdp_*`
 
 推荐面板布局见 [Observability Dashboard](./user/observability-dashboard.md)，事故优先排查顺序见 [Operator Checklist](./user/operator-checklist.md)。
@@ -59,6 +61,7 @@ scrape_configs:
 - snapshot load/save 结果，解释重启后首批查询质量变化
 - upstream failure 和 winner path，解释 timeout 与尾延迟变化
 - state machine stage/failure 计数，判断变化发生在哪个解析阶段
+- 昂贵请求保护计数，判断 forwarding / iterative 是否被策略拒绝
 - XDP sync/cleanup 指标，解释 fast path 和 Go path 的差异
 
 ## PromQL 示例
@@ -84,6 +87,9 @@ increase(rec53_snapshot_operations_total{result="failure"}[15m])
 # upstream timeout 速率
 rate(rec53_upstream_failures_total{reason="timeout"}[5m])
 
+# 按昂贵路径区分的策略拒绝速率
+sum by (path) (rate(rec53_expensive_request_limit_total{action="refused"}[5m]))
+
 # 开启 XDP 时的 cache hit 比例
 rec53_xdp_cache_hits_total / (rec53_xdp_cache_hits_total + rec53_xdp_cache_misses_total)
 ```
@@ -108,6 +114,9 @@ topk(10, increase(rec53_state_machine_stage_total[10m]))
 
 # 终态失败原因分布
 sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
+
+# 如果开发期保留 would_refuse 计数，可用它做对比验证
+sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse"}[10m]))
 ```
 
 ## 指标目录
@@ -147,6 +156,12 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 | `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | 开发 | 上游 RTT P95 |
 | `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | 开发 | 上游 RTT P99 |
 
+### 单客户端昂贵请求保护指标
+
+| 指标 | 类型 | Labels | 主要受众 | 说明 |
+|------|------|--------|----------|------|
+| `rec53_expensive_request_limit_total` | Counter | `action`, `path` | 两者 | 单客户端昂贵请求保护的聚合策略事件。`action` 为有界值，如 `refused`，以及可选的开发期 `would_refuse`；`path` 为 `forward` 或 `iterative`。不会使用原始 client IP 作为标签。 |
+
 ### XDP 指标
 
 | 指标 | 类型 | Labels | 主要受众 | 说明 |
@@ -161,12 +176,12 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 | `rec53_xdp_entries` | Gauge | — | 运维 | cleanup 对账后当前活跃 XDP cache 条目数 |
 
 > `rec53_xdp_cache_hits_total`、`rec53_xdp_cache_misses_total`、`rec53_xdp_pass_total`、`rec53_xdp_errors_total` 是 Gauge，而不是 Counter，因为 Go 会定期从 BPF per-CPU 数组读取绝对值并直接设置。
-
 ### State Machine 指标
 
 | 指标 | 类型 | Labels | 主要受众 | 说明 |
 |------|------|--------|----------|------|
 | `rec53_state_machine_stage_total` | Counter | `stage` | 开发 | 状态机阶段进入次数 |
+| `rec53_state_machine_transition_total` | Counter | `from`, `to` | 开发 | 状态机真实边，包括 `success_exit`、`servfail_exit`、`refused_exit`、`formerr_exit`、`error_exit`、`max_iterations_exit` 等终态 |
 | `rec53_state_machine_failures_total` | Counter | `reason` | 开发 | 状态机终态失败原因，如 `query_upstream_error`、`cname_cycle`、`max_iterations` |
 
 ## 标签稳定性与兼容性说明
@@ -183,3 +198,13 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 - 趋势类信号优先用 counter / histogram，当前状态类信号再用 gauge
 - 同时更新本文件和 `docs/metrics.md`
 - 同步检查 dashboard、PromQL 示例和运维文档是否也需要更新
+## 这个功能的日志约束
+
+单客户端昂贵请求保护除了指标，还会输出有界日志：
+
+- warning 使用稳定的 `[LIMIT]` 前缀
+- 日志在进程内按客户端 IP 限频
+- 每条实际输出的 warning 都包含当前 `inflight`、配置的 `limit`、有界 `path` 和 `suppressed` 计数
+- 原始 client IP 只出现在日志里用于排障，不会出现在 Prometheus 标签中
+
+如果开发期保留 `would_refuse` 计数，请把它视为验证期遥测，而不是长期公开契约。

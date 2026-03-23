@@ -69,6 +69,18 @@ func TestValidateConfig(t *testing.T) {
 			errMsg:  "dns.log_level must be one of",
 		},
 		{
+			name:    "invalid expensive request limit mode",
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", ExpensiveRequestLimitMode: "shadow"}, Warmup: server.WarmupConfig{}},
+			wantErr: true,
+			errMsg:  "dns.expensive_request_limit_mode must be one of",
+		},
+		{
+			name:    "negative expensive request limit",
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", ExpensiveRequestLimit: -1}, Warmup: server.WarmupConfig{}},
+			wantErr: true,
+			errMsg:  "dns.expensive_request_limit must be >= 0",
+		},
+		{
 			name: "pprof enabled with invalid listen address",
 			cfg: &Config{
 				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"},

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,7 +153,7 @@ func TraceDomain(ctx context.Context, domain string, qtype uint16) (*dns.Msg, *R
 	recorder := newResolutionTraceRecorder(fqdn, qtype)
 	traceCtx := withResolutionTrace(ctx, recorder)
 
-	result, err := Change(newStateInitState(req, resp, traceCtx))
+	result, err := Change(newStateInitState(req, resp, withExpensiveRequestHolder(traceCtx, newExpensiveRequestHolder(netip.Addr{}))))
 	trace := recorder.snapshot(result, err)
 	return result, trace, err
 }

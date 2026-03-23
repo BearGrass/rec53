@@ -30,6 +30,7 @@ All new observability metrics in `v1.1.1` follow these rules:
 
 - use only bounded labels such as `stage`, `type`, `code`, `result`, `reason`, or `path`
 - do not add raw domain names, request IDs, full upstream lists, or free-form error strings as labels
+- do not add raw client IPs as labels for per-client protection observability
 - treat per-IP labels as exceptional and limited to bounded upstream sets such as `rec53_ipv2_*`
 
 This matters for both audiences:
@@ -46,6 +47,7 @@ For first deployment and day-2 operations, start here:
 - `rec53_cache_lookup_total` still shows healthy hit categories instead of only misses
 - `rec53_snapshot_operations_total` does not show repeated load or save failures
 - `rec53_upstream_failures_total` is not dominated by `timeout` or `bad_rcode`
+- `rec53_expensive_request_limit_total{action="refused"}` is not rising unexpectedly for one deployment slice
 - `rec53_xdp_status` and `rec53_xdp_*` are only interpreted when XDP is enabled
 
 Use [Observability Dashboard](./user/observability-dashboard.md) for the recommended panel layout and [Operator Checklist](./user/operator-checklist.md) for incident-first lookup order.
@@ -59,6 +61,7 @@ Use these views when a code change, performance result, or behavior regression n
 - snapshot load and save outcomes to explain restart quality differences
 - upstream failure reasons and winner paths to explain timeout or tail-latency changes
 - state-machine stage and failure counters to see which resolution phase changed
+- expensive-request policy pressure counters to see whether forwarding or iterative work is being refused
 - XDP sync and cleanup metrics to explain Go path vs fast-path divergence
 
 ## PromQL Examples
@@ -83,6 +86,9 @@ increase(rec53_snapshot_operations_total{result="failure"}[15m])
 
 # Upstream timeout rate
 rate(rec53_upstream_failures_total{reason="timeout"}[5m])
+
+# Per-client expensive-request refusals by expensive path
+sum by (path) (rate(rec53_expensive_request_limit_total{action="refused"}[5m]))
 
 # XDP cache hit ratio when XDP is enabled
 rec53_xdp_cache_hits_total / (rec53_xdp_cache_hits_total + rec53_xdp_cache_misses_total)
@@ -111,6 +117,9 @@ sum by (from, to) (increase(rec53_state_machine_transition_total[10m]))
 
 # Terminal state-machine failures by reason
 sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
+
+# Validation-only would-refuse events if a development build enables observation
+sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse"}[10m]))
 ```
 
 ## Metric Reference
@@ -150,6 +159,12 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 | `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | Developer | 95th-percentile nameserver RTT |
 | `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | Developer | 99th-percentile nameserver RTT |
 
+### Per-Client Expensive Request Protection Metrics
+
+| Metric | Type | Labels | Audience | Description |
+|--------|------|--------|----------|-------------|
+| `rec53_expensive_request_limit_total` | Counter | `action`, `path` | Both | Aggregate policy events for per-client expensive-request protection. `action` is bounded to values such as `refused` and optional development-only `would_refuse`; `path` is bounded to `forward` or `iterative`. No raw client IP label is used. |
+
 ### XDP Metrics
 
 | Metric | Type | Labels | Audience | Description |
@@ -170,7 +185,7 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 | Metric | Type | Labels | Audience | Description |
 |--------|------|--------|----------|-------------|
 | `rec53_state_machine_stage_total` | Counter | `stage` | Developer | State-machine stage transitions by bounded stage name |
-| `rec53_state_machine_transition_total` | Counter | `from`, `to` | Developer | Real state-machine edges by bounded source and destination, including terminal exits such as `success_exit`, `servfail_exit`, `formerr_exit`, `error_exit`, and `max_iterations_exit` |
+| `rec53_state_machine_transition_total` | Counter | `from`, `to` | Developer | Real state-machine edges by bounded source and destination, including terminal exits such as `success_exit`, `servfail_exit`, `refused_exit`, `formerr_exit`, `error_exit`, and `max_iterations_exit` |
 | `rec53_state_machine_failures_total` | Counter | `reason` | Developer | Terminal state-machine failure categories such as `query_upstream_error`, `cname_cycle`, or `max_iterations` |
 
 `rec53_state_machine_transition_total` is the path-oriented companion to `rec53_state_machine_stage_total`:
@@ -198,8 +213,20 @@ Canonical terminal exits currently include:
 - `success_exit`
 - `formerr_exit`
 - `servfail_exit`
+- `refused_exit`
 - `error_exit`
 - `max_iterations_exit`
+
+## Logs For This Feature
+
+Per-client expensive-request protection uses logs as a bounded companion to metrics:
+
+- warnings use the stable `[LIMIT]` prefix
+- logs are rate-limited per client IP inside the server process
+- each emitted warning includes the current `inflight`, configured `limit`, bounded `path`, and `suppressed` count
+- raw client IPs appear in logs for diagnosis, but never as Prometheus labels
+
+If a development build keeps `would_refuse` counting enabled for benchmark or rollout validation, treat it as validation-only telemetry rather than a long-term public contract.
 
 ## Label Stability And Compatibility Notes
 

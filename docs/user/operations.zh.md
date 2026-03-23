@@ -79,8 +79,41 @@ snapshot restore 也仍在同一个模型内：
 - 查询量
 - 返回码
 - 端到端延迟
+- 按客户端昂贵路径拒绝
 - nameserver 质量
 - 启用 XDP 时的相关计数器
+
+## 单客户端昂贵请求并发保护
+
+rec53 现在可以按客户端 IP 保护昂贵解析工作。
+
+第一版只在请求离开本地快路径时生效：
+
+- forwarding miss，必须真正发出外部 forwarding 查询
+- cache miss，必须继续进入 iterative 解析
+
+以下廉价路径不计入限制：
+
+- `hosts` 命中
+- 本地即可完成的 forwarding hit
+- cache hit
+
+配置方式：
+
+```yaml
+dns:
+  expensive_request_limit_mode: "enabled"
+  expensive_request_limit: 0
+```
+
+运维上建议这样理解：
+
+- 正式产品模式只有 `disabled` 和 `enabled`
+- `0` 表示使用内置默认阈值：`runtime.NumCPU()`
+- 一个前台请求最多只占 1 个槽位，即使内部有 fanout 或子查询
+- 超限请求返回 `REFUSED`
+- 日志按客户端 IP 限频，并带 suppressed-event count
+- 第一版只提供指标和日志观测，不进入 TUI 的 per-IP 展示
 
 ### Prometheus 抓取示例
 
@@ -139,6 +172,7 @@ readinessProbe:
 - 查询速率
 - SERVFAIL 比例
 - p99 延迟
+- `rec53_expensive_request_limit_total` 的策略压力
 - `rec53_ipv2_p50_latency_ms` 中退化的上游 IP
 - 仅在明确启用 XDP 时关注 XDP 指标
 

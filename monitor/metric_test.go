@@ -41,6 +41,7 @@ func unregisterMetrics() {
 	prometheus.Unregister(StateMachineStageTotal)
 	prometheus.Unregister(StateMachineFailuresTotal)
 	prometheus.Unregister(StateMachineTransitionTotal)
+	prometheus.Unregister(ExpensiveRequestLimitTotal)
 }
 
 // TestMetric_InCounterAdd tests the InCounterAdd method
@@ -205,6 +206,7 @@ func TestMetric_RuntimeObservabilityHelpers(t *testing.T) {
 	m.XDPEntriesSet(11)
 	m.StateMachineStageAdd("cache_lookup")
 	m.StateMachineFailureAdd("query_upstream_error")
+	m.ExpensiveRequestLimitAdd("refused", "iterative")
 
 	if got := testutil.ToFloat64(CacheLookupTotal.WithLabelValues("positive_hit")); got != 1 {
 		t.Fatalf("CacheLookupTotal = %f, want 1", got)
@@ -244,6 +246,9 @@ func TestMetric_RuntimeObservabilityHelpers(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(StateMachineFailuresTotal.WithLabelValues("query_upstream_error")); got != 1 {
 		t.Fatalf("StateMachineFailuresTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(ExpensiveRequestLimitTotal.WithLabelValues("refused", "iterative")); got != 1 {
+		t.Fatalf("ExpensiveRequestLimitTotal = %f, want 1", got)
 	}
 }
 

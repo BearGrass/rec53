@@ -105,6 +105,30 @@ dig @127.0.0.1 -p 5353 example.com
 dig @127.0.0.1 -p 5353 example.com NS
 ```
 
+## Queries Return `REFUSED`
+
+Check whether rec53 refused the request as policy, not as an internal failure.
+
+For this feature, `REFUSED` means the client IP hit the configured expensive-request concurrency limit before rec53 started more expensive work. This follows the policy-oriented reading of RFC 1035 section 4.1.1 and RFC 8499 section 3.
+
+Read it this way:
+
+- `REFUSED`: requester-oriented policy decision
+- `SERVFAIL`: rec53 tried to process the query but failed on the server side
+
+What to check:
+
+- `dns.expensive_request_limit_mode`
+- `dns.expensive_request_limit`
+- `rec53_expensive_request_limit_total`
+- warning logs with `[LIMIT]` and `suppressed=` fields
+
+If you need to reduce policy refusals:
+
+- verify one client is not issuing too many concurrent forwarding or iterative misses
+- raise `dns.expensive_request_limit` only after checking baseline latency and upstream pressure
+- keep in mind that cache hits, hosts hits, and cheap forwarding hits are not counted by this limiter
+
 ## Startup Is Slow
 
 Possible causes:

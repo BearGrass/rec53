@@ -14,6 +14,7 @@ const (
 	StateMachineSuccessExit   = "success_exit"
 	StateMachineFormerrExit   = "formerr_exit"
 	StateMachineServfailExit  = "servfail_exit"
+	StateMachineRefusedExit   = "refused_exit"
 	StateMachineErrorExit     = "error_exit"
 	StateMachineMaxItersExit  = "max_iterations_exit"
 )
@@ -35,6 +36,7 @@ var StateMachineCanonicalTerminals = []string{
 	StateMachineSuccessExit,
 	StateMachineFormerrExit,
 	StateMachineServfailExit,
+	StateMachineRefusedExit,
 	StateMachineErrorExit,
 	StateMachineMaxItersExit,
 }

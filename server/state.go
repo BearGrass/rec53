@@ -30,6 +30,7 @@ const (
 	FORWARD_LOOKUP_HIT          = 0
 	FORWARD_LOOKUP_MISS         = 1
 	FORWARD_LOOKUP_SERVFAIL     = 2
+	FORWARD_LOOKUP_REFUSED      = 3
 )
 
 const (

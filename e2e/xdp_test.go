@@ -40,6 +40,7 @@ func TestXDPCacheFastPath(t *testing.T) {
 		server.SnapshotConfig{},
 		nil, nil,
 		"lo", // XDP on loopback (generic mode)
+		server.ExpensiveRequestLimitConfig{},
 	)
 
 	errChan := s.Run()
@@ -155,6 +156,7 @@ func TestXDPShutdownCleanup(t *testing.T) {
 		server.SnapshotConfig{},
 		nil, nil,
 		"lo",
+		server.ExpensiveRequestLimitConfig{},
 	)
 
 	errChan := s.Run()
