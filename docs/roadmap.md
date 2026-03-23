@@ -20,9 +20,8 @@
 | v1.1.4 | 2026-03 | done | TUI 导航焦点、Enter 进入 detail 与键位可发现性 |
 | v1.1.5 | 2026-03 | done | TUI UX polish、State Machine 收敛、单域名 trace 落地 |
 | v1.1.6 | 2026-03 | done | TUI 信息密度与价值提升 |
-| v1.2.0 | planned | target | readiness probe 与启动阶段语义 |
-| v1.2.1 | planned | queued | 资源保护与限流 |
-| v1.2.2 | planned | queued | DNSSEC 设计与预研 |
+| v1.2.0 | 2026-03 | done | readiness 契约、探针语义、文档与测试收口 |
+| v1.3.0 | planned | target | 资源保护版本规划（v1.3.1-v1.3.9） |
 
 ## Current Version: dev
 
@@ -54,27 +53,26 @@
 
 ## Next Up
 
-### 当前推进主线 — v1.2.0 readiness probe 与启动阶段语义
+### 当前推进主线 — v1.3.0 资源保护版本规划
 
-**目标**：在 `v1.1.x` 完成可观测性与本地运维收口之后，先补最小但高价值的运行契约：明确 `readiness` 和启动阶段 `phase` 的定义，让 rec53 在冷启动、预热和优雅关闭期间更容易被 probe、脚本和 operator 正确判断。
+**目标**：在 `v1.2.0` 已把最小运行契约收口之后，先把 `v1.3` 明确规划成 `v1.3.1` 到 `v1.3.9` 的子版本序列。`v1.3.0` 本身只负责路线图拆分、边界澄清和优先级排序，不直接承诺具体保护机制实现。
 
 **当前判断**
 
 - `v1.1.x` 已完成 observability/local-ops 收敛：指标体系、TUI、detail、导航、State Machine summary 和 trace mode 已闭环
-- `rec53top` 已完成一轮信息密度压缩：detail 标签固定为 `Now / Window / Totals / Next / Trend`，`Next` 更接近“面板编号 + 动作”
-- 当前主矛盾不再是 TUI 信息呈现，而是节点在异常、重启和冷启动时的行为是否足够稳、足够可判断
-- repo 内部已经具备第一版 `ready / phase` 基线：`/healthz/ready`、`cold-start / warming / steady / shutting-down` 和 shutdown 前先掉 readiness 的顺序已经落地
-- 当前最值得补的是把这套最小 readiness contract 进一步收口到测试、文档和 roadmap，而不是扩成完整 health taxonomy
+- `v1.2.0` readiness contract 已收口：`/healthz/ready`、`ready / phase` 语义、测试、运维文档和 OpenSpec 已对齐
+- 当前主矛盾从“节点是否可判断”转为“节点在压力下如何受控退化”，但这个问题已经明显超出一个小补丁版本的颗粒度
+- 资源保护不是单个开关，而是由入口边界、全局保险丝、上游保护、公平性、热点保护、后台任务资源边界、超限语义、观测与测试等多个子问题组成
+- `v1.3.0` 的职责不是先选一个点开做，而是先把 `v1.3.1-v1.3.9` 的主题、依赖和范围拆出来，再决定实现顺序
 
 **下一步焦点**
 
-- [x] 收口 `v1.1.6`：detail 文案继续压短，信息密度和排版稳定性提升
-- [x] 保持 aggregate TUI 与 request-scoped trace 的边界，不再把单请求路径塞回 `rec53top`
-- [x] 落地最小 readiness surface：`/healthz/ready`
-- [x] 落地 bounded `phase`：`cold-start / warming / steady / shutting-down`
-- [ ] 把 warmup 完成、snapshot restore 降级与启动失败的边界语义继续补齐到测试与文档
-- [ ] 继续压实 systemd / 容器 probe 的接入说明与 operator 口径
-- [ ] 将 `rate limit / 资源保护` 明确顺延到 `v1.2.1`
+- [x] 收口 `v1.2.0`：完成 readiness probe、bounded `phase`、生命周期测试与 operator 文档对齐
+- [x] 产出 `v1.3.x` 的首版拆分框架
+- [ ] 先讨论 `v1.3.1`：单 IP / per-client 限制与公平性
+- [ ] 再讨论 `v1.3.2`：上游查询并发保护
+- [ ] 明确跨版本公共问题：超限语义、warmup 交互、forwarding/iterative 边界、readiness 不扩张
+- [ ] 持续细化 `v1.3.x` 的边界、依赖和实现顺序
 
 ## v1.1 版本线
 
@@ -279,6 +277,8 @@
 
 ### v1.2.0 — readiness probe 与启动阶段语义
 
+**状态**：已完成。
+
 **目标**：把 rec53 从“内部生命周期顺序正确、可观测”推进到“外部可以直接判断是否 ready，以及当前处于哪个启动/退出阶段”，并把现有基线收口成稳定的 operator 契约。
 
 **已具备基线**
@@ -293,9 +293,9 @@
 
 - [x] 定义 `readiness / phase` 的核心语义与状态转换
 - [x] 明确最小 health 暴露方式：`/healthz/ready`
-- [ ] 继续补齐 warmup、snapshot、cold-start、steady-state、shutting-down 的边界口径
-- [ ] 补齐启动失败、warming->steady、restore 降级、优雅关闭等测试
-- [ ] 补齐 systemd / 容器友好的探针、退出、重启和权限说明
+- [x] 补齐 warmup、snapshot、cold-start、steady-state、shutting-down 的边界口径
+- [x] 补齐启动失败、warming->steady、restore 降级、优雅关闭等测试
+- [x] 补齐 systemd / 容器友好的探针、退出、重启和权限说明
 
 **不做**
 
@@ -304,40 +304,77 @@
 - [ ] 不在这一版同时引入 liveness、degraded、restoring 等更大的 health taxonomy，也不混入 rate limit、并发上限和其他资源保护策略
 - [ ] 不把多 listener 性能复测混成当前主线交付
 
-### v1.2.1 — 资源保护与限流
+### v1.3.0 — 资源保护版本规划（v1.3.1-v1.3.9）
 
-**目标**：在运行状态契约稳定之后，再独立处理资源保护问题，避免把限流策略、并发边界和异常返回语义塞进 `v1.2.0` 导致版本颗粒失控。
+**目标**：在运行状态契约稳定之后，把资源保护作为一个需要拆解的大颗粒主题来规划。`v1.3.0` 只负责把后续工作拆成 `v1.3.1-v1.3.9` 的版本序列，明确每一项主要回答什么问题、依赖什么前提、哪些内容暂不纳入。
 
 **任务**
 
-- [ ] 明确保护目标：全局 inflight、单 client、上游 fanout、CPU/内存还是组合
-- [ ] 比较限流手段：QPS、并发、排队、快速失败
-- [ ] 明确超限语义：drop、`SERVFAIL`、`REFUSED` 或其他更合适的返回方式
-- [ ] 评估与 warmup、forwarding、迭代解析和 trace mode 的交互
-- [ ] 输出最小可实现方案、测试矩阵和回滚策略
+- [ ] 产出 `v1.3.1-v1.3.9` 的主题列表和初步命名
+- [ ] 为每个子版本定义要回答的核心问题与不做项
+- [ ] 标出实现类版本与设计/观测/测试类版本的区别
+- [ ] 梳理子版本之间的前置依赖与推荐顺序
+- [ ] 明确跨版本共享议题：超限语义、warmup 交互、forwarding/iterative 边界、operator 口径
+- [ ] 更新 roadmap，使 `v1.3` 从单条目变成可展开讨论的版本序列
 
 **不做**
 
+- [ ] 不在 `v1.3.0` 直接承诺某一种保护机制已经定案
 - [ ] 不把它做成一个“大而全”的流量治理系统
 - [ ] 不和分布式控制面或集群级配额绑定
 - [ ] 不在没有明确语义前直接堆配置项
 
-### v1.2.2 — DNSSEC 设计与预研
+### v1.3.1-v1.3.8 — 待拆分的资源保护子版本
 
-**目标**：先把 DNSSEC 的收益、边界、复杂度和上线风险说明白，再决定是否进入实现。
+`v1.3.0` 的交付目标是把 `v1.3` 主线拆成一组可单独讨论、单独实现、单独验证的子版本。当前先冻结一个粗粒度框架，后续再逐项细化：
 
-**任务**
+- `v1.3.1` 单 IP / per-client 限制与公平性
+- `v1.3.2` 上游查询并发保护
+- `v1.3.3` 全局请求并发保险丝
+- `v1.3.4` zone / 热点域名保护
+- `v1.3.5` 后台任务资源边界
+- `v1.3.6` 超限返回语义
+- `v1.3.7` 观测指标与 operator 策略
+- `v1.3.8` 测试矩阵、压测方法与回滚策略
 
-- [ ] 梳理 `DO` / `AD` / `CD` 标志位语义
-- [ ] 设计 trust anchor、验证失败语义、bogus/insecure 等状态处理
-- [ ] 明确缓存语义与负缓存交互
-- [ ] 评估是否同步引入 EDE
-- [ ] 输出实现边界、依赖选择、测试矩阵和最终排期建议
+这组子版本目前只是讨论框架，不代表实现顺序已经最终冻结；后续应根据依赖关系和讨论结果继续调整。
+
+### v1.3.1 — 单 IP / per-client 限制与公平性
+
+**目标**：优先保护 rec53 免受单来源高成本请求拖垮，同时尽量不影响高 QPS 的本地命中流量。当前部署前提是企业 IDC / 内网场景，`client IP` 可作为第一版公平性维度；如后续需要更细区分，可再引入 `VPCID`。
+
+**当前结论**
+
+- 第一版优先限制的是单 IP 的昂贵请求并发，而不是单 IP QPS
+- 这样可以保留高 QPS cache hit 的吞吐，同时更有效抑制泛域名、随机子域名、cache miss 风暴等高成本流量
+- 昂贵路径应同时包含 `forwarding` 外部查询路径和 `CACHE_LOOKUP_MISS` 后进入的递归/上游路径
+- 不限制 `hosts` 命中、`cache` 命中以及 `forwarding` 命中后的快速返回路径
+- 同一个前台请求进入昂贵路径后只占一个槽位，不按内部每次 upstream query 单独计数
+- 超限语义按 RFC 更接近 `REFUSED`，因为这是基于 requester/policy 的主动拒绝，而不是服务器处理失败
+
+**设计边界**
+
+- `forwarding`：在真正准备发外部 forwarding upstream 查询前占用单 IP 槽位
+- `iterative`：在 `CACHE_LOOKUP_MISS` 之后、进入递归昂贵路径前占用单 IP 槽位
+- 每个请求最多加一次；如果已在前序昂贵路径占槽，后续状态不重复占用
+- 槽位只覆盖昂贵解析阶段，不覆盖整个请求生命周期到响应写回完成
+- 第一版阈值先使用单一固定默认值，不按 `A/AAAA/TXT/DNSKEY` 等类型拆分
+- 默认值应参考现有压测结果，以昂贵路径稳定工作点而不是总 QPS 峰值来定
+
+**观测要求**
+
+- 第一版必须有聚合指标和受控日志，帮助 operator 判断是否有单来源高成本流量正在触发保护
+- Prometheus 指标不直接使用 `client IP` 作为 label，避免高基数问题
+- 限速命中日志需要做抑制，建议按 `client IP` 做时间窗口聚合，而不是每次命中都打日志
+- 聚合日志至少包含 `client_ip`、当前并发值、阈值、路径、抑制计数，以及可选的 `sample_qname` / `sample_qtype`
+- TUI 不纳入第一版设计；首版先依赖聚合指标与日志，后续再评估是否需要总览态势展示
 
 **不做**
 
-- [ ] 不在本迭代承诺完整 DNSSEC 上线
-- [ ] 不把 `DoT/DoH` 与 DNSSEC 绑成同一交付包
+- 不把单 IP 保护直接扩成公网/NAT 通用公平性系统
+- 不在第一版引入 `VPCID`、子网聚合、多维组合配额等更细粒度维度
+- 不把 per-IP 明细直接做进 TUI 主面板
+- 不把单 IP 限制与 `v1.3.2` 的上游查询并发保护混成同一套计数语义
 
 ## Open Backlog
 
