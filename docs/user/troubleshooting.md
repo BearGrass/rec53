@@ -59,7 +59,7 @@ Check which run mode you used:
 
 - `./rec53ctl run` writes to stderr
 - installed services write to `/var/log/rec53/rec53.log` by default
-- direct `./rec53 --config ...` runs still use the `-rec53.log` flag or the binary default `./log/rec53.log`
+- direct `./dist/rec53 --config ...` runs still use the `-rec53.log` flag or the binary default `./log/rec53.log`
 
 Useful commands:
 
@@ -81,8 +81,8 @@ Check:
 Try:
 
 ```bash
-TERM=xterm-256color ./rec53top
-./rec53top -plain
+TERM=xterm-256color ./dist/rec53top
+./dist/rec53top -plain
 curl -s http://127.0.0.1:9999/metric | head
 ```
 

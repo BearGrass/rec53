@@ -84,8 +84,8 @@ dig @127.0.0.1 -p 5353 example.com AAAA
 手动运行：
 
 ```bash
-go build -o rec53 ./cmd
-./rec53 --config ./config.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.yaml
 ```
 
 ## 最小配置

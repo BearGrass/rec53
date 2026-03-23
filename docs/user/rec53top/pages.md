@@ -60,7 +60,7 @@ The overview page is the first screen. It answers one question: which area looks
 - `top terminal`: the terminal exit currently growing fastest.
 - `failure reasons`: the dominant bounded failure categories.
 - `top stage` answers "what is hottest right now", not "what full path did requests take".
-- if you need one real request path, use `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
+- if you need one real request path, use `./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
 
 ## Detail Pages
 
@@ -89,7 +89,7 @@ Read `State Machine` in this order:
 For exact request-scoped flow, run:
 
 ```bash
-./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A
 ```
 
 ### State Labels

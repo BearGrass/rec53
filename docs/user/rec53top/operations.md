@@ -13,19 +13,19 @@ Recommended:
 Manual build:
 
 ```bash
-go build -o rec53top ./cmd/rec53top
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 ```
 
 Default run:
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 Custom target:
 
 ```bash
-./rec53top -target http://127.0.0.1:9999/metric
+./dist/rec53top -target http://127.0.0.1:9999/metric
 ```
 
 ## Keys

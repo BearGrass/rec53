@@ -179,7 +179,7 @@ sum by (reason) (increase(rec53_state_machine_failures_total[10m]))
 - `transition_total` answers which real `from -> to` edges requests actually took
 - terminal exits are modeled as bounded synthetic `to` nodes so paths do not appear truncated
 
-These metrics are still aggregate-scoped. For one real request-scoped path, use `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
+These metrics are still aggregate-scoped. For one real request-scoped path, use `./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A`.
 
 Canonical state labels currently include:
 

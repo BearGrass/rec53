@@ -42,8 +42,8 @@ Recommended operator-style commands:
 Direct Go build commands:
 
 ```bash
-go build -o rec53 ./cmd
-go build -o rec53top ./cmd/rec53top
+mkdir -p dist && go build -o dist/rec53 ./cmd
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 go build ./...
 ```
 

@@ -293,7 +293,8 @@ CPU 热点仍集中在正常服务路径：
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
 # 启动 rec53
-./rec53 --config ./config.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.yaml
 
 # 预热缓存
 tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
@@ -496,7 +497,7 @@ v0.6.0 那段（现已移除）测的是 `listen: 127.0.0.1:5353` 的 loopback�
 
 ```bash
 # 编译
-go build -o rec53 ./cmd
+mkdir -p dist && go build -o dist/rec53 ./cmd
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
 # 创建隔离网络命名空间
@@ -509,14 +510,14 @@ sudo ip netns exec ns-client ip addr add 192.168.53.2/24 dev veth-peer
 sudo ip netns exec ns-client ip link set veth-peer up
 
 # 无 XDP 基线（绑定到 veth IP，XDP 关闭）
-sudo ./rec53 --config config-veth-noxdp.yaml &
+sudo ./dist/rec53 --config config-veth-noxdp.yaml &
 # 等待 warmup 后，在 client namespace 中：
 sudo ip netns exec ns-client \
   tools/dnsperf/dnsperf -server 192.168.53.1:53 \
     -f tools/dnsperf/queries-sample.txt -c 500 -d 20s
 
 # 启用 XDP（需要 root/CAP_BPF；注意 veth 不支持 XDP_TX）
-sudo ./rec53 --config config-veth-xdp.yaml &
+sudo ./dist/rec53 --config config-veth-xdp.yaml &
 # 确认 native attach：
 sudo bpftool link list   # 应看到 veth-rec53 上的 xdp prog
 

@@ -218,8 +218,8 @@ Treat the following as the reusable dual-host baseline workflow:
 Server-side example:
 
 ```bash
-go build -o rec53 ./cmd
-./rec53 --config ./config.perf.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.perf.yaml
 ```
 
 Client-side example:

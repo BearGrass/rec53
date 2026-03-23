@@ -59,7 +59,7 @@ sudo ./rec53ctl uninstall --purge
 
 - `./rec53ctl run` 会写到 stderr
 - 安装后的服务默认写到 `/var/log/rec53/rec53.log`
-- 直接执行 `./rec53 --config ...` 时仍然使用 `-rec53.log` 参数或二进制默认值 `./log/rec53.log`
+- 直接执行 `./dist/rec53 --config ...` 时仍然使用 `-rec53.log` 参数或二进制默认值 `./log/rec53.log`
 
 常用命令：
 

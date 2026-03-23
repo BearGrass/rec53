@@ -9,9 +9,9 @@
 常用命令：
 
 ```bash
-go build -o rec53 ./cmd
+mkdir -p dist && go build -o dist/rec53 ./cmd
 ./generate-config.sh
-./rec53 --config ./config.yaml
+./dist/rec53 --config ./config.yaml
 ```
 
 开发时推荐使用运维式流程：

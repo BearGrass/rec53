@@ -10,14 +10,19 @@
 *.sublime-workspace
 
 # Build and Runtime Artifacts
-rec53
-tools/dnsperf/dnsperf
+/rec53
+/rec53top
+/rec53.exe
+/rec53top.exe
+/tools/dnsperf/dnsperf.exe
+/tools/dnsperf/dnsperf
 *.o
 *.a
 *.so
 *.dylib
 dist/
 build/
+tags
 
 # Logs (project logs, keep doc logs)
 log/*.log
@@ -43,8 +48,12 @@ go.sum.bak
 *.temp
 *~
 .cache/
-.venv/
+.venv*/
 venv/
+
+# Generated docs and slides
+docs/ppt/
+docs/rec53-hero-visual.png
 
 # OS-specific files
 .DS_Store

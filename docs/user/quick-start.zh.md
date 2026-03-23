@@ -16,10 +16,10 @@
 ## 2. 生成配置
 
 ```bash
-./generate-config.sh
+./rec53ctl config
 ```
 
-这会生成 `config.yaml`，首次运行前请先检查内容。
+这会生成 `config.yaml`，首次运行前请先检查内容。它本身不会下载 Go 依赖；依赖会在执行 `./rec53ctl build`、`./rec53ctl top` 或 `go test ./...` 时自动拉取。
 
 ## 3. 构建并运行
 
@@ -33,8 +33,8 @@
 手动方式：
 
 ```bash
-go build -o rec53 ./cmd
-./rec53 --config ./config.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.yaml
 ```
 
 ## 4. 验证基础解析

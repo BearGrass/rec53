@@ -353,7 +353,8 @@ Same hardware and test setup as above (i7-1165G7, UDP, c=64, 10 s, cache-hit pat
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
 # Start rec53
-./rec53 --config ./config.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.yaml
 
 # Warmup cache
 tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
@@ -657,7 +658,7 @@ reported 165K vs 161K QPS difference reflected Go-only overhead, not XDP benefit
 
 ```bash
 # Build
-go build -o rec53 ./cmd
+mkdir -p dist && go build -o dist/rec53 ./cmd
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
 # Create isolated network namespace
@@ -670,14 +671,14 @@ sudo ip netns exec ns-client ip addr add 192.168.53.2/24 dev veth-peer
 sudo ip netns exec ns-client ip link set veth-peer up
 
 # No-XDP baseline (bind to veth IP, XDP disabled)
-sudo ./rec53 --config config-veth-noxdp.yaml &
+sudo ./dist/rec53 --config config-veth-noxdp.yaml &
 # Wait for warmup, then from client namespace:
 sudo ip netns exec ns-client \
   tools/dnsperf/dnsperf -server 192.168.53.1:53 \
     -f tools/dnsperf/queries-sample.txt -c 500 -d 20s
 
 # XDP enabled (requires root/CAP_BPF; note XDP_TX unsupported on veth)
-sudo ./rec53 --config config-veth-xdp.yaml &
+sudo ./dist/rec53 --config config-veth-xdp.yaml &
 # Confirm native attach:
 sudo bpftool link list   # should show xdp prog on veth-rec53
 
@@ -760,8 +761,8 @@ fast path rather than falling back to the normal Go resolver path.
 
 ```bash
 # server
-go build -o rec53 ./cmd
-sudo ./rec53 --config /tmp/rec53-local-xdp.yaml -rec53.log /tmp/rec53-bench.log
+mkdir -p dist && go build -o dist/rec53 ./cmd
+sudo ./dist/rec53 --config /tmp/rec53-local-xdp.yaml -rec53.log /tmp/rec53-bench.log
 
 # client
 cd /home/long/code/rec53

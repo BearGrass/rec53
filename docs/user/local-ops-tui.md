@@ -28,19 +28,19 @@ Recommended:
 Manual build:
 
 ```bash
-go build -o rec53top ./cmd/rec53top
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 ```
 
 Run against the default local endpoint:
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 Override the metrics endpoint:
 
 ```bash
-./rec53top -target http://127.0.0.1:9999/metric
+./dist/rec53top -target http://127.0.0.1:9999/metric
 ```
 
 Useful flags:
@@ -53,13 +53,13 @@ Useful flags:
 If the terminal opens but does not render correctly, first retry with an explicit terminal type:
 
 ```bash
-TERM=xterm-256color ./rec53top
+TERM=xterm-256color ./dist/rec53top
 ```
 
 If the terminal still does not support the full-screen UI, use the plain compatibility mode:
 
 ```bash
-./rec53top -plain
+./dist/rec53top -plain
 ```
 
 `-plain` prints periodic plain-text summaries using the same dashboard model, but avoids the full-screen terminal UI dependency.
@@ -142,7 +142,7 @@ How to read `State Machine` now:
 Exact per-domain trace lives outside the TUI:
 
 ```bash
-./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A
 ```
 
 That command runs one real resolution, prints the ordered states, and shows the final terminal exit and rcode.
@@ -179,7 +179,7 @@ Non-normal states are also explained directly in detail view:
 2. In another terminal, open the TUI.
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 3. Generate traffic.
@@ -199,7 +199,7 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - degraded or unavailable panels show `Next` hints that point to the next likely panel or troubleshooting direction
 - `State Machine` shows active stages such as `cache_lookup`, `forward_lookup`, or `return_resp`
 - `State Machine` detail shows `Stage mix`, `Terminal exits`, and `Failure reasons` without pushing you into a path graph first
-- a domain trace such as `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` prints one real request path outside the aggregate TUI
+- a domain trace such as `./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A` prints one real request path outside the aggregate TUI
 - `Upstream` shows winner-path activity when iterative queries actually touch upstream resolution
 - `Upstream` reflects fallback or timeout activity when upstream issues exist
 - `XDP` shows `DISABLED` on normal non-XDP deployments instead of pretending to be healthy

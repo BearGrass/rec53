@@ -9,9 +9,9 @@ This guide covers the expected development workflow for rec53.
 Typical commands:
 
 ```bash
-go build -o rec53 ./cmd
+mkdir -p dist && go build -o dist/rec53 ./cmd
 ./generate-config.sh
-./rec53 --config ./config.yaml
+./dist/rec53 --config ./config.yaml
 ```
 
 Recommended operator-style workflow during development:

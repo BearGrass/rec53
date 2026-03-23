@@ -13,19 +13,19 @@
 手动构建：
 
 ```bash
-go build -o rec53top ./cmd/rec53top
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 ```
 
 默认运行：
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 自定义目标：
 
 ```bash
-./rec53top -target http://127.0.0.1:9999/metric
+./dist/rec53top -target http://127.0.0.1:9999/metric
 ```
 
 ## 按键

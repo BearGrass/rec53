@@ -57,7 +57,7 @@
 - `top terminal`：当前增长最快的终态出口。
 - `failure reasons`：主要有界失败分类。
 - `top stage` 适合回答“哪里最热”，不适合单独回答“请求到底怎么走完的”。
-- 如果你要看某个请求的真实路径，直接用 `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A`。
+- 如果你要看某个请求的真实路径，直接用 `./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A`。
 
 ## 详情页
 
@@ -95,7 +95,7 @@
 3. 如果你需要单个请求的真实路径，不要在 TUI 里猜，直接跑：
 
 ```bash
-./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A
 ```
 
 ### 状态标签

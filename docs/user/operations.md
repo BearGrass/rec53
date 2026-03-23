@@ -69,14 +69,14 @@ Read it this way:
 For local validation, `rec53top` can read the same endpoint directly and show a fixed six-panel terminal dashboard without requiring Prometheus or Grafana:
 
 ```bash
-go build -o rec53top ./cmd/rec53top
-./rec53top
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
+./dist/rec53top
 ```
 
 If the terminal environment does not support the full-screen UI, use:
 
 ```bash
-./rec53top -plain
+./dist/rec53top -plain
 ```
 
 Use metrics to watch:

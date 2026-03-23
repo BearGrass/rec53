@@ -29,19 +29,19 @@
 手动构建：
 
 ```bash
-go build -o rec53top ./cmd/rec53top
+mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 ```
 
 默认本地端点运行：
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 覆盖指标端点：
 
 ```bash
-./rec53top -target http://127.0.0.1:9999/metric
+./dist/rec53top -target http://127.0.0.1:9999/metric
 ```
 
 常用参数：
@@ -54,13 +54,13 @@ go build -o rec53top ./cmd/rec53top
 如果终端打开了但渲染不正常，先试显式指定终端类型：
 
 ```bash
-TERM=xterm-256color ./rec53top
+TERM=xterm-256color ./dist/rec53top
 ```
 
 如果终端仍然不支持全屏 UI，就用纯文本兼容模式：
 
 ```bash
-./rec53top -plain
+./dist/rec53top -plain
 ```
 
 `-plain` 会用同一套面板模型输出周期性纯文本摘要，但不会依赖全屏终端 UI。
@@ -145,7 +145,7 @@ TUI 使用一组固定状态：
 如果你要看“某个域名这一次到底怎么走完的”，不要在 TUI 里猜，直接用：
 
 ```bash
-./rec53 --config ./config.yaml --trace-domain example.com --trace-type A
+./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A
 ```
 
 这个命令会跑一次真实解析，并打印有序状态、最终终态和 rcode。
@@ -182,7 +182,7 @@ TUI 使用一组固定状态：
 2. 另开一个终端，打开 TUI。
 
 ```bash
-./rec53top
+./dist/rec53top
 ```
 
 3. 产生流量。
@@ -202,7 +202,7 @@ for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; 
 - 退化或不可用面板会显示 `Next`，指向下一块最可能的面板或排障方向
 - `State Machine` 会显示类似 `cache_lookup`、`forward_lookup`、`return_resp` 的活跃阶段
 - `State Machine` 详情会直接给出 `Stage mix`、`Terminal exits`、`Failure reasons`
-- 类似 `./rec53 --config ./config.yaml --trace-domain example.com --trace-type A` 的 trace 命令会在 TUI 之外打印单次真实路径
+- 类似 `./dist/rec53 --config ./config.yaml --trace-domain example.com --trace-type A` 的 trace 命令会在 TUI 之外打印单次真实路径
 - `Upstream` 在迭代查询真的触达上游时会显示胜出路径活动
 - `Upstream` 有问题时会显示 fallback 或 timeout 活动
 - 正常非 XDP 部署里，`XDP` 应显示 `DISABLED`，而不是假装健康

@@ -33,8 +33,8 @@ Recommended:
 Manual:
 
 ```bash
-go build -o rec53 ./cmd
-./rec53 --config ./config.yaml
+mkdir -p dist && go build -o dist/rec53 ./cmd
+./dist/rec53 --config ./config.yaml
 ```
 
 ## 4. Validate Basic Resolution
