@@ -1,32 +1,64 @@
 # AGENTS.md
 
-Minimal working guide for AI coding agents in this repository.
+Execution guide for coding agents working in `rec53`.
 
 ## Scope
 
-- This file is for execution guidance: what to run, what to avoid, and which repo rules matter.
-- Do not treat it as full architecture documentation; use `docs/architecture.md` for deeper system design.
-- There is currently no `.cursorrules`, `.cursor/rules/`, or `.github/copilot-instructions.md` in this repo.
+- This file is the fast path for build, test, style, and workflow expectations.
+- Use `docs/architecture.md` for system design, `docs/dev/testing.md` for deeper test notes, and `docs/dev/conventions.md` for longer-form coding conventions.
+- This repository currently has no `.cursorrules`, no `.cursor/rules/`, and no `.github/copilot-instructions.md`.
 
-## Project Facts
+## Project Snapshot
 
 - Language: Go
 - Module: `rec53`
-- Go version: `go 1.25.0`
+- Go version: `1.25.0`
 - Main binary entry: `./cmd`
-- Main packages: `cmd`, `server`, `monitor`, `utils`, `e2e`
+- Main packages: `cmd`, `server`, `monitor`, `tui`, `utils`, `e2e`
+- Operational helper script: `./rec53ctl`
+- Local ops TUI binary: `rec53top`
 
-## Build And Run
+## Preferred Dev Workflow
+
+1. Read the package you will change and the nearby tests first.
+2. Make the smallest possible change that fits existing patterns.
+3. Run one exact test or one package test while iterating.
+4. Run `gofmt -w` on touched files before finishing.
+5. Run the most relevant `go test` command, then widen to `go test -race ./...` for non-trivial work.
+6. Update docs when user-visible behavior, metrics, flags, or ops flow changes.
+
+## Build Commands
+
+Recommended operator-style commands:
+
+```bash
+./rec53ctl config
+./rec53ctl build
+./rec53ctl build-top
+./rec53ctl run
+./rec53ctl top
+```
+
+Direct Go build commands:
 
 ```bash
 go build -o rec53 ./cmd
-./generate-config.sh
-./rec53 --config ./config.yaml
-./rec53 --config ./config.yaml --no-warmup
-./rec53 --config ./config.yaml -listen 0.0.0.0:53 -metric :9099 -log-level debug
+go build -o rec53top ./cmd/rec53top
+go build ./...
 ```
 
-## Format, Lint, Verify
+Useful install and lifecycle commands:
+
+```bash
+sudo ./rec53ctl install
+sudo ./rec53ctl upgrade
+sudo ./rec53ctl uninstall
+sudo ./rec53ctl uninstall --purge
+```
+
+## Format And Static Checks
+
+Primary formatting and verification commands:
 
 ```bash
 gofmt -w .
@@ -34,99 +66,154 @@ gofmt -l .
 go vet ./...
 ```
 
-- There is no `Makefile` and no repo-local `golangci-lint` config.
-- Standard verification is `gofmt`, `go vet`, and the most relevant `go test` command.
+Notes:
+
+- There is no repo-local `golangci-lint` config and no `Makefile`.
+- `gofmt` is mandatory; do not hand-format Go code.
+- Use `go vet` as the default static check before wider test runs.
 
 ## Test Commands
 
+Full-suite commands:
+
 ```bash
-# Full suite
+go test ./...
 go test -race ./...
 go test -race -timeout 120s ./... -count=1
-
-# Single exact test
-go test -v -run '^TestName$' ./server/...
-
-# Common exact examples
-go test -v -run '^TestValidateConfig$' ./cmd/...
-go test -v -run '^TestResolverIntegration$' ./e2e/...
-go test -v -run '^TestIPPool_GetBestIPsV2_MultipleIPs$' ./server/...
-
-# Package-level runs
-go test -v ./cmd/...
-go test -v ./server/...
-go test -v ./e2e/...
-go test -v ./monitor/...
-
-# Other useful modes
 go test -short ./...
-go test -bench=. ./server/...
 go test -cover ./...
 ```
 
-## Pick The Smallest Relevant Test First
+Package-focused commands:
 
-- CLI/config/logging/startup/signal changes: `./cmd/...`
-- Resolver/cache/warmup/snapshot/XDP/state-machine changes: `./server/...`
-- End-to-end query behavior/forwarding/recursion/lifecycle changes: `./e2e/...`
-- Metrics/logger changes: `./monitor/...`
-- Prefer exact `-run` first, then package tests, then `-race ./...`.
+```bash
+go test -v ./cmd/...
+go test -v ./server/...
+go test -v ./monitor/...
+go test -v ./tui/...
+go test -v ./e2e/...
+go test -v ./utils/...
+```
+
+Run a single exact test by name:
+
+```bash
+go test -v -run '^TestName$' ./server/...
+go test -v -run '^TestName$' ./cmd/...
+go test -v -run '^TestName$' ./e2e/...
+```
+
+Real examples from this repo:
+
+```bash
+go test -v -run '^TestServerRunAndShutdown$' ./server/...
+go test -v -run '^TestReadinessHandlerReportsColdStartAndWarming$' ./monitor/...
+go test -v -run '^TestRunTraceModeWritesOrderedTrace$' ./cmd/...
+go test -v -run '^TestRec53ctlTopBuildsAndExecsTUIBinary$' ./...
+go test -v -run '^TestTraceDomainCapturesCacheHitSuccess$' ./server/...
+go test -v -run '^TestResolverIntegration$' ./e2e/...
+```
+
+Benchmarks:
+
+```bash
+go test -bench=. ./server/...
+go test -bench=. ./monitor/...
+```
+
+Performance helpers:
+
+```bash
+./tools/run-dnsperf.sh hit
+./tools/run-dnsperf.sh miss
+./tools/validate-perf.sh
+```
+
+## Which Tests To Run For Common Changes
+
+- `cmd/`: config validation, CLI flags, startup/shutdown, signal handling, trace mode
+- `server/`: resolver logic, cache, warmup, snapshot, XDP, state machine, lifecycle
+- `monitor/`: metrics registration, readiness, logger behavior
+- `tui/`: metric parsing, rendering, detail pages, keyboard flow
+- `e2e/`: real resolver behavior, forwarding, snapshot, XDP, concurrency
+- `utils/`: helpers like zone and root handling
+
+Prefer this escalation path:
+
+1. exact `-run` test
+2. affected package test
+3. `go test -race ./...`
 
 ## Repo-Specific Testing Rules
 
-- Prefer `-race` for non-trivial changes.
-- `e2e/main_test.go` owns `TestMain`; do not add per-file `init()` setup in e2e tests.
-- Initialize monitor globals once in test bootstrap, not once per file.
-- Do not call `FlushCacheForTest()` or `ResetIPPoolForTest()` unless a test truly requires cold state.
-- Avoid unnecessary cold-cache resets; iterative resolution can be slow.
-- Use `NewMockAuthorityServer(t, zone)` from `e2e/helpers.go` for authoritative fixtures.
-- Use `SetIterPort` / `ResetIterPort` when tests need iterative resolver port control.
+- Prefer `-race` for concurrency-sensitive or cache-related work.
+- `e2e/main_test.go` owns `TestMain`; do not add per-file `init()` setup in `e2e/`.
+- Use helpers from `e2e/helpers.go` for mock authority servers.
+- Avoid unnecessary global cache or IP pool resets; cold state makes tests slower and noisier.
+- Initialize monitor globals in shared test bootstrap when possible, not separately in every file.
+- When changing metrics or labels, verify `docs/metrics.md` stays accurate.
+- For lifecycle changes, test startup success, startup failure, readiness behavior, graceful shutdown, and optional-feature degradation paths.
 
-## Code Style: Keep To Existing Patterns
+## Code Style
 
-- Run `gofmt -w .` before finishing Go changes.
-- Import order: standard library, external deps, internal `rec53/*` packages.
-- Packages are lowercase; exported identifiers use PascalCase; unexported identifiers use camelCase.
-- Keep existing constructor and state naming patterns such as `newXState(...)` and `newXStateWithContext(...)`.
-- Use pointer receivers for mutating/stateful structs.
-- Preserve existing public signatures and flow-control return patterns unless a change is necessary.
+- Follow standard Go formatting and idioms.
+- Imports: standard library first, then third-party dependencies, then internal `rec53/...` packages.
+- Packages stay lowercase and usually single-word.
+- Exported names use PascalCase; unexported names use camelCase.
+- Constants often follow existing `SCREAMING_SNAKE_CASE` patterns in state-machine code; do not rename existing conventions casually.
+- Keep constructor naming aligned with nearby code, e.g. `newXState(...)`, `newXStateWithContext(...)`, `NewServer...`.
+- Prefer table-driven tests where practical.
+- Avoid speculative abstractions; this repo favors direct, explicit code.
 
-## Error Handling And Logging
+## Types, Structs, And APIs
+
+- Preserve existing public signatures unless the change truly requires an API change.
+- Use pointer receivers for mutating or stateful structs.
+- Keep state transitions explicit and easy to test.
+- In state handlers, preserve the existing `(int, error)` return pattern; the integer controls flow.
+- Do not bypass package helpers for cache or IP pool access.
+
+## Error Handling
 
 - Check errors immediately with `if err != nil`.
-- Wrap propagated errors with `fmt.Errorf("...: %w", err)`.
-- State handlers return `(int, error)`; the `int` is flow control.
-- Include enough context to identify the failed state or operation.
-- Use `monitor.Rec53Log` for logging.
-- Include domain, query type, and upstream IP when relevant.
-- Prefix resolver hot-path logs with stable tags like `[IN_CACHE]` or `[ITER]`.
+- Wrap returned errors with context using `fmt.Errorf("...: %w", err)`.
+- Error messages should identify the failed operation, state, or subsystem.
+- In hot resolver paths, do not hide the reason for fallback or degradation.
+- When a path intentionally degrades rather than fails hard, log clearly and keep behavior explicit.
+
+## Logging
+
+- Use `monitor.Rec53Log` for application logging.
+- Include useful context such as domain, query type, upstream IP, or state name when relevant.
+- Keep log tags stable when a path already uses prefixes like `[SNAPSHOT]`, `[TRACE]`, `[XDP]`, or `[ITER]`.
+- Do not add noisy debug logs to hot paths without a clear operational reason.
 
 ## Concurrency And Shared State
 
-- Preserve the existing synchronization strategy around shared maps such as DNS cache and IP pool.
-- Use `sync.RWMutex` for shared maps and `sync/atomic` for hot counters/flags.
-- Use `context.Context` for cancellation.
-- Avoid goroutines that cannot be stopped.
-- Prefer bounded concurrency where the repo already uses semaphore patterns.
+- Respect existing synchronization around cache, IP pool, and runtime globals.
+- Use `sync.RWMutex` and `sync/atomic` consistently with nearby code.
+- Goroutines must have a shutdown path; prefer `context.Context` for cancellation.
+- Preserve bounded-concurrency patterns already used by warmup and IP prefetch flows.
+- Do not read or mutate shared maps directly when helper methods exist.
 
-## Resolver And Cache Safety
+## Cache And Resolver Safety
 
-- Keep state transitions explicit and testable.
-- Typical resolver flow is `STATE_INIT -> IN_CACHE -> CHECK_RESP -> IN_GLUE -> IN_GLUE_CACHE -> ITER -> RET_RESP`.
-- Cache keys follow `domain.:qtype`.
-- Use cache helpers such as `getCacheCopyByType` and `setCacheCopyByType`; do not bypass them.
-- Cache-read DNS messages are not safe for in-place RR field mutation; deep-copy before mutation.
+- Cache keys follow the repo's existing `domain.:qtype` style.
+- Use cache helpers such as `getCacheCopyByType` and `setCacheCopyByType` instead of open-coding cache access.
+- Cache-read DNS messages are shallow copies with shared RR pointers; do not mutate RR fields in place.
+- If a code path must modify an RR from cached data, deep-copy that RR first.
+- Keep resolver/state-machine flow explicit rather than clever.
 
-## Docs To Update When Behavior Changes
+## Documentation Sync
 
-- User-facing behavior, flags, examples, or operations: update `README.md` and `README.zh.md` together.
-- Architecture or package responsibility changes: update `docs/architecture.md`.
-- New standard coding patterns: update `docs/dev/conventions.md`.
-- If benchmark docs change, run relevant benchmarks when feasible; do not invent fresh numbers.
+- User-facing CLI, config, or ops changes: update `README.md` and `README.zh.md` together.
+- Developer-facing behavior or structure changes: update `docs/architecture.md` or `docs/dev/conventions.md` as needed.
+- Metrics, labels, dashboard assumptions, or observability behavior: update `docs/metrics.md` and related operator docs.
+- Do not invent benchmark numbers; only update performance docs after running the relevant tooling.
 
-## Agent Workflow
+## Agent Reminders
 
-- Start narrow: read the package you will touch, run one targeted test, then widen scope.
-- Prefer package-level verification during iteration.
-- Before finishing substantial Go work, run `gofmt -w .`, `go vet ./...`, and the most relevant `go test` command.
-- Use this file for execution rules, `docs/dev/conventions.md` for longer conventions, and `docs/architecture.md` for deeper design context.
+- Start narrow and only widen scope when needed.
+- Do not mix unrelated cleanup into functional changes.
+- Match existing naming and structure before introducing new patterns.
+- Before finishing substantial Go work, run formatting, the smallest relevant tests, and then broader verification.

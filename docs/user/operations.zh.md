@@ -46,6 +46,26 @@ journalctl -u rec53 -f
 
 默认指标地址是 `http://<host>:9999/metric`。
 
+同一个运维 HTTP 面也提供 readiness probe：
+
+```bash
+curl -s -i http://127.0.0.1:9999/healthz/ready
+```
+
+返回体刻意保持很小：
+
+```text
+ready=true
+phase=warming
+```
+
+推荐这样理解：
+
+- `ready=true` 表示 rec53 已经可以接收 DNS 流量
+- `phase=warming` 表示 warmup 还在进行，但已经可以服务
+- `phase=steady` 表示 listener 启动完成，warmup 已不再活跃
+- `phase=shutting-down` 表示 rec53 正在主动退出服务
+
 建议关注：
 
 - 查询量
@@ -72,6 +92,7 @@ scrape_configs:
 
 ```bash
 curl -s http://127.0.0.1:9999/metric | head
+curl -s http://127.0.0.1:9999/healthz/ready
 ```
 
 然后在 Prometheus 里确认：
@@ -80,6 +101,24 @@ curl -s http://127.0.0.1:9999/metric | head
 - `rec53_query_counter` 持续增长
 - `rec53_response_counter` 的返回码符合预期
 - 真实查询后 `rec53_latency` 的桶有数据
+
+### Probe 示例
+
+适合 systemd 周边脚本的本地检查：
+
+```bash
+until curl -fsS http://127.0.0.1:9999/healthz/ready >/tmp/rec53.ready; do sleep 1; done
+cat /tmp/rec53.ready
+```
+
+容器风格的 readiness probe：
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: 9999
+```
 
 ### 首发部署关注点
 

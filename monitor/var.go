@@ -189,6 +189,13 @@ var (
 		},
 		[]string{"reason"},
 	)
+	StateMachineTransitionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_state_machine_transition_total",
+			Help: "State machine transitions by bounded from/to edge",
+		},
+		[]string{"from", "to"},
+	)
 
 	Rec53Metric *Metric
 )

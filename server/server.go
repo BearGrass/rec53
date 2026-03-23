@@ -368,6 +368,7 @@ func (s *server) Run() <-chan error {
 	if reusePort {
 		monitor.Rec53Log.Infof("Started %d UDP + %d TCP listeners with SO_REUSEPORT on %s", n, n, s.listen)
 	}
+	s.setRuntimeStateServing()
 
 	return s.errChan
 }
@@ -390,11 +391,15 @@ func (s *server) warmupNSOnStartup(ctx context.Context) {
 
 	monitor.Rec53Log.Infof("Starting NS warmup with %d TLDs, concurrency: %d (CPU cores: %d)...", len(s.warmupCfg.TLDs), s.warmupCfg.Concurrency, runtime.NumCPU())
 	WarmupNSRecords(ctx, s.warmupCfg)
+	if state, changed := monitor.MarkRuntimeWarmupComplete(); changed {
+		monitor.Rec53Log.Infof("runtime readiness phase=%s ready=%t", state.Phase, state.Readiness)
+	}
 	// Stats are logged inside WarmupNSRecords()
 }
 
 // Shutdown gracefully shuts down the DNS server
 func (s *server) Shutdown(ctx context.Context) error {
+	s.setRuntimeStateShuttingDown()
 	// Cancel warmup goroutine first so it stops issuing DNS queries before
 	// we tear down the IP pool.
 	if s.warmupCancel != nil {
@@ -481,4 +486,14 @@ func (s *server) TCPAddr() string {
 // Returns nil if XDP is not enabled.
 func (s *server) XDPLoaderForTest() *XDPLoader {
 	return s.xdpLoader
+}
+
+func (s *server) setRuntimeStateServing() {
+	state := monitor.SetRuntimeServingPhase(s.warmupCfg.Enabled)
+	monitor.Rec53Log.Infof("runtime readiness phase=%s ready=%t", state.Phase, state.Readiness)
+}
+
+func (s *server) setRuntimeStateShuttingDown() {
+	state := monitor.MarkRuntimeShuttingDown()
+	monitor.Rec53Log.Infof("runtime readiness phase=%s ready=%t", state.Phase, state.Readiness)
 }

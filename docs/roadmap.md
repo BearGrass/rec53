@@ -20,8 +20,9 @@
 | v1.1.4 | 2026-03 | done | TUI 导航焦点、Enter 进入 detail 与键位可发现性 |
 | v1.1.5 | 2026-03 | done | TUI UX polish、State Machine 收敛、单域名 trace 落地 |
 | v1.1.6 | 2026-03 | done | TUI 信息密度与价值提升 |
-| v1.2.0 | planned | queued | 运行韧性与节点级高可用 |
-| v1.2.1 | planned | queued | DNSSEC 设计与预研 |
+| v1.2.0 | planned | target | readiness probe 与启动阶段语义 |
+| v1.2.1 | planned | queued | 资源保护与限流 |
+| v1.2.2 | planned | queued | DNSSEC 设计与预研 |
 
 ## Current Version: dev
 
@@ -53,24 +54,27 @@
 
 ## Next Up
 
-### 当前推进主线 — v1.2.0 运行韧性与节点级高可用
+### 当前推进主线 — v1.2.0 readiness probe 与启动阶段语义
 
-**目标**：在 `v1.1.x` 完成可观测性与本地运维收口之后，把主线切回运行韧性：增强单节点在重启、冷启动、上游抖动、配置变更时的稳定性和可判断性。
+**目标**：在 `v1.1.x` 完成可观测性与本地运维收口之后，先补最小但高价值的运行契约：明确 `readiness` 和启动阶段 `phase` 的定义，让 rec53 在冷启动、预热和优雅关闭期间更容易被 probe、脚本和 operator 正确判断。
 
 **当前判断**
 
 - `v1.1.x` 已完成 observability/local-ops 收敛：指标体系、TUI、detail、导航、State Machine summary 和 trace mode 已闭环
 - `rec53top` 已完成一轮信息密度压缩：detail 标签固定为 `Now / Window / Totals / Next / Trend`，`Next` 更接近“面板编号 + 动作”
 - 当前主矛盾不再是 TUI 信息呈现，而是节点在异常、重启和冷启动时的行为是否足够稳、足够可判断
-- `v1.2.0` 的收益会比继续做 TUI 小修更直接，因为它影响真实运行边界而不是界面易读性
+- repo 内部已经有相对稳的启动/关闭顺序，但还没有把这些内部保证整理成 operator 可直接消费的 `ready / phase` 语义
+- 当前最值得补的不是完整 health taxonomy，而是最小 readiness contract
 
 **下一步焦点**
 
 - [x] 收口 `v1.1.6`：detail 文案继续压短，信息密度和排版稳定性提升
 - [x] 保持 aggregate TUI 与 request-scoped trace 的边界，不再把单请求路径塞回 `rec53top`
-- [ ] 定义 `readiness / liveness / degraded` 的可操作语义
+- [ ] 定义 `readiness` 的可操作语义
+- [ ] 定义 `phase`（如 `cold-start / warming / steady / shutting-down`）与 readiness 的关系
 - [ ] 复核 warmup / snapshot / 冷启动的真实恢复路径和告警口径
-- [ ] 评估多 listener、限流和资源保护是否应进入实现期
+- [ ] 明确 systemd / 容器 probe 应该如何接入
+- [ ] 将 `rate limit / 资源保护` 明确顺延到 `v1.2.1`
 
 ## v1.1 版本线
 
@@ -273,24 +277,44 @@
 - 帮助浮层暂不单独实现；当前键位量仍可控，继续保持 footer 简短化即可
 - 后续若再做 TUI 增强，应优先做低成本价值项，而不是重新扩张信息层
 
-### v1.2.0 — 运行韧性与节点级高可用
+### v1.2.0 — readiness probe 与启动阶段语义
 
-**目标**：增强单节点在重启、冷启动、上游抖动、配置变更时的稳定性。
+**目标**：把 rec53 从“内部生命周期顺序正确、可观测”推进到“外部可以直接判断是否 ready，以及当前处于哪个启动/退出阶段”。
 
 **任务**
 
-- [ ] 定义 `readiness` / `liveness` / `degraded`
-- [ ] 明确 warmup / snapshot / 冷启动行为与告警口径
-- [ ] 复测多 listener 的收益与副作用
-- [ ] 补齐 systemd / 容器友好的退出、重启和权限说明
-- [ ] 评估限流、并发上限、资源保护策略
+- [ ] 定义 `readiness / phase` 的语义与状态转换
+- [ ] 明确 warmup、snapshot、cold-start、steady-state、shutting-down 对 readiness 和 phase 的影响
+- [ ] 设计最小 health 暴露方式：`/healthz/ready`
+- [ ] 补齐启动失败、warming、stale/degraded、优雅关闭等测试
+- [ ] 补齐 systemd / 容器友好的探针、退出、重启和权限说明
 
 **不做**
 
 - [ ] 不实现分布式缓存一致性
 - [ ] 不引入中心化控制面
+- [ ] 不在这一版同时引入 liveness、degraded、rate limit、并发上限和其他资源保护策略
+- [ ] 不把多 listener 性能复测混成当前主线交付
 
-### v1.2.1 — DNSSEC 设计与预研
+### v1.2.1 — 资源保护与限流
+
+**目标**：在运行状态契约稳定之后，再独立处理资源保护问题，避免把限流策略、并发边界和异常返回语义塞进 `v1.2.0` 导致版本颗粒失控。
+
+**任务**
+
+- [ ] 明确保护目标：全局 inflight、单 client、上游 fanout、CPU/内存还是组合
+- [ ] 比较限流手段：QPS、并发、排队、快速失败
+- [ ] 明确超限语义：drop、`SERVFAIL`、`REFUSED` 或其他更合适的返回方式
+- [ ] 评估与 warmup、forwarding、迭代解析和 trace mode 的交互
+- [ ] 输出最小可实现方案、测试矩阵和回滚策略
+
+**不做**
+
+- [ ] 不把它做成一个“大而全”的流量治理系统
+- [ ] 不和分布式控制面或集群级配额绑定
+- [ ] 不在没有明确语义前直接堆配置项
+
+### v1.2.2 — DNSSEC 设计与预研
 
 **目标**：先把 DNSSEC 的收益、边界、复杂度和上线风险说明白，再决定是否进入实现。
 

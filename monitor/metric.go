@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -88,6 +89,10 @@ func (m *Metric) StateMachineFailureAdd(reason string) {
 	StateMachineFailuresTotal.WithLabelValues(reason).Inc()
 }
 
+func (m *Metric) StateMachineTransitionAdd(from, to string) {
+	StateMachineTransitionTotal.WithLabelValues(from, to).Inc()
+}
+
 // register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
@@ -115,6 +120,7 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(XDPEntries)
 	m.reg.MustRegister(StateMachineStageTotal)
 	m.reg.MustRegister(StateMachineFailuresTotal)
+	m.reg.MustRegister(StateMachineTransitionTotal)
 }
 
 // MetricServer holds the HTTP server for metrics
@@ -132,13 +138,33 @@ func InitMetricWithAddr(addr string) {
 	}
 	Rec53Metric.Register()
 
-	http.Handle("/metric", instrumentMetricsHandler(promhttp.Handler()))
-	MetricServer = &http.Server{Addr: addr}
+	MetricServer = &http.Server{
+		Addr:    addr,
+		Handler: newOperationalMux(promhttp.Handler()),
+	}
 	go func() {
 		if err := MetricServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			Rec53Log.Errorf("Metrics server error: %s", err.Error())
 		}
 	}()
+}
+
+func newOperationalMux(metricHandler http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metric", instrumentMetricsHandler(metricHandler))
+	mux.HandleFunc("/healthz/ready", readinessHandler)
+	return mux
+}
+
+func readinessHandler(w http.ResponseWriter, _ *http.Request) {
+	state := RuntimeState()
+	status := http.StatusOK
+	if !state.Readiness {
+		status = http.StatusServiceUnavailable
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, "ready=%t\nphase=%s\n", state.Readiness, state.Phase)
 }
 
 // ShutdownMetric gracefully shuts down the metrics server

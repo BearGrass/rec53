@@ -19,6 +19,7 @@ Useful commands:
 ./rec53ctl run
 ss -lntup | grep 5353
 ss -lntp | grep 9999
+curl -s -i http://127.0.0.1:9999/healthz/ready
 ```
 
 ## `rec53ctl install` Fails
@@ -112,6 +113,18 @@ Possible causes:
 - network path to upstream authoritative servers is slow
 - cache is cold after restart
 - snapshot load restored too few entries
+
+Check the readiness probe before assuming startup is broken:
+
+```bash
+curl -s http://127.0.0.1:9999/healthz/ready
+```
+
+Interpret it like this:
+
+- `ready=false` with `phase=cold-start`: listeners are not ready yet
+- `ready=true` with `phase=warming`: traffic can already be served; startup is still finishing background warmup
+- `ready=false` with `phase=shutting-down`: this is an intentional stop path, not a fresh startup failure
 
 Mitigations:
 

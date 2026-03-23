@@ -40,6 +40,7 @@ func unregisterMetrics() {
 	prometheus.Unregister(XDPEntries)
 	prometheus.Unregister(StateMachineStageTotal)
 	prometheus.Unregister(StateMachineFailuresTotal)
+	prometheus.Unregister(StateMachineTransitionTotal)
 }
 
 // TestMetric_InCounterAdd tests the InCounterAdd method
@@ -383,5 +384,47 @@ func TestMetricsEndpoint(t *testing.T) {
 	// Check for our metric (using the actual metric name from var.go)
 	if !strings.Contains(bodyStr, "rec53_query_counter") {
 		t.Errorf("Expected metrics output to contain rec53_query_counter, got:\n%s", bodyStr)
+	}
+}
+
+func TestReadinessHandlerReportsColdStartAndWarming(t *testing.T) {
+	ResetRuntimeState()
+	t.Cleanup(ResetRuntimeState)
+
+	server := httptest.NewServer(newOperationalMux(promhttp.HandlerFor(
+		prometheus.NewRegistry(),
+		promhttp.HandlerOpts{},
+	)))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/healthz/ready")
+	if err != nil {
+		t.Fatalf("Failed to get readiness endpoint: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	buf := make([]byte, 256)
+	n, _ := resp.Body.Read(buf)
+	_ = resp.Body.Close()
+	body := string(buf[:n])
+	if !strings.Contains(body, "ready=false") || !strings.Contains(body, "phase=cold-start") {
+		t.Fatalf("cold-start body = %q", body)
+	}
+
+	SetRuntimeServingPhase(true)
+
+	resp, err = http.Get(server.URL + "/healthz/ready")
+	if err != nil {
+		t.Fatalf("Failed to get readiness endpoint after update: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	n, _ = resp.Body.Read(buf)
+	_ = resp.Body.Close()
+	body = string(buf[:n])
+	if !strings.Contains(body, "ready=true") || !strings.Contains(body, "phase=warming") {
+		t.Fatalf("warming body = %q", body)
 	}
 }

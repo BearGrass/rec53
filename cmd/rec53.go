@@ -382,6 +382,7 @@ func main() {
 	defer monitor.Rec53Log.Sync()
 	monitor.SetLogLevel(parseLogLevel(cfg.DNS.LogLevel).Level())
 	monitor.Rec53Log.Debugf("logger initialized with level: %s", cfg.DNS.LogLevel)
+	monitor.ResetRuntimeState()
 
 	// Initialize Prometheus metrics server.
 	monitor.InitMetricWithAddr(cfg.DNS.Metric)

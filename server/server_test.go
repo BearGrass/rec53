@@ -59,6 +59,7 @@ func TestNewServer(t *testing.T) {
 func TestServerRunAndShutdown(t *testing.T) {
 	// Use port 0 to get a random available port
 	s := NewServer("127.0.0.1:0")
+	monitor.ResetRuntimeState()
 
 	// Run the server
 	errChan := s.Run()
@@ -75,6 +76,9 @@ func TestServerRunAndShutdown(t *testing.T) {
 	}
 	if tcpAddr == "" {
 		t.Error("expected TCP address to be assigned after Run()")
+	}
+	if state := monitor.RuntimeState(); !state.Readiness || state.Phase != monitor.RuntimePhaseSteady {
+		t.Fatalf("runtime state = %+v, want ready steady", state)
 	}
 
 	// Shutdown
@@ -98,6 +102,7 @@ func TestServerRunAndShutdown(t *testing.T) {
 }
 
 func TestServerRun_StartupErrorDoesNotBlock(t *testing.T) {
+	monitor.ResetRuntimeState()
 	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to reserve tcp port: %v", err)
@@ -147,9 +152,13 @@ func TestServerRun_StartupErrorDoesNotBlock(t *testing.T) {
 	if s.TCPAddr() != "" {
 		t.Errorf("expected empty TCPAddr on startup failure, got %q", s.TCPAddr())
 	}
+	if state := monitor.RuntimeState(); state.Readiness || state.Phase != monitor.RuntimePhaseColdStart {
+		t.Fatalf("runtime state = %+v, want not-ready cold-start", state)
+	}
 }
 
 func TestServerShutdown_CancelsBackgroundWorkBeforeWait(t *testing.T) {
+	monitor.ResetRuntimeState()
 	warmupCtx, warmupCancel := context.WithCancel(context.Background())
 	xdpCtx, xdpCancel := context.WithCancel(context.Background())
 
@@ -181,10 +190,24 @@ func TestServerShutdown_CancelsBackgroundWorkBeforeWait(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Shutdown() returned unexpected error: %v", err)
 		}
+		if state := monitor.RuntimeState(); state.Readiness || state.Phase != monitor.RuntimePhaseShuttingDown {
+			t.Fatalf("runtime state = %+v, want not-ready shutting-down", state)
+		}
 	case <-time.After(500 * time.Millisecond):
 		warmupCancel()
 		xdpCancel()
 		t.Fatal("Shutdown() blocked waiting for background work")
+	}
+}
+
+func TestServerSetRuntimeStateServingWithWarmup(t *testing.T) {
+	monitor.ResetRuntimeState()
+	s := &server{warmupCfg: WarmupConfig{Enabled: true}}
+
+	s.setRuntimeStateServing()
+
+	if state := monitor.RuntimeState(); !state.Readiness || state.Phase != monitor.RuntimePhaseWarming {
+		t.Fatalf("runtime state = %+v, want ready warming", state)
 	}
 }
 

@@ -46,6 +46,26 @@ journalctl -u rec53 -f
 
 Metrics are exposed on `http://<host>:9999/metric` by default.
 
+The same operational HTTP surface also exposes a readiness probe:
+
+```bash
+curl -s -i http://127.0.0.1:9999/healthz/ready
+```
+
+The response body is intentionally small:
+
+```text
+ready=true
+phase=warming
+```
+
+Read it this way:
+
+- `ready=true` means rec53 is ready to accept DNS traffic
+- `phase=warming` means warmup is still running, but traffic can already be served
+- `phase=steady` means listener startup is complete and warmup is no longer active
+- `phase=shutting-down` means rec53 is intentionally leaving service
+
 For local validation, `rec53top` can read the same endpoint directly and show a fixed six-panel terminal dashboard without requiring Prometheus or Grafana:
 
 ```bash
@@ -92,6 +112,7 @@ After startup, verify:
 
 ```bash
 curl -s http://127.0.0.1:9999/metric | head
+curl -s http://127.0.0.1:9999/healthz/ready
 ```
 
 Then check in Prometheus:
@@ -100,6 +121,24 @@ Then check in Prometheus:
 - `rec53_query_counter` is increasing
 - `rec53_response_counter` has expected response codes
 - `rec53_latency` has buckets populated after real queries
+
+### Probe Examples
+
+Systemd-friendly local check:
+
+```bash
+until curl -fsS http://127.0.0.1:9999/healthz/ready >/tmp/rec53.ready; do sleep 1; done
+cat /tmp/rec53.ready
+```
+
+Container-style readiness probe:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: 9999
+```
 
 ### Core Signals
 

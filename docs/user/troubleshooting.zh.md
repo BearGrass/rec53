@@ -19,6 +19,7 @@
 ./rec53ctl run
 ss -lntup | grep 5353
 ss -lntp | grep 9999
+curl -s -i http://127.0.0.1:9999/healthz/ready
 ```
 
 ## `rec53ctl install` 失败
@@ -91,6 +92,18 @@ dig @127.0.0.1 -p 5353 example.com NS
 - warmup 仍在运行
 - 到上游权威服务器的网络路径慢
 - 重启后缓存是冷的
+
+先看 readiness probe，再判断是不是启动故障：
+
+```bash
+curl -s http://127.0.0.1:9999/healthz/ready
+```
+
+建议这样理解：
+
+- `ready=false` 且 `phase=cold-start`：listener 还没准备好
+- `ready=true` 且 `phase=warming`：已经可以服务，只是后台 warmup 还没结束
+- `ready=false` 且 `phase=shutting-down`：这是主动退出，不是新启动失败
 
 缓解方式：
 
