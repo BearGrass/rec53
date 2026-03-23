@@ -18,12 +18,12 @@
 - [x] 3.1 为昂贵请求限流命中增加聚合指标和 per-client 限频 warning 日志，且不使用原始 client IP 作为指标标签；开发期对比验证阶段可额外记录 would-refuse 事件。
 - [x] 3.2 增加聚焦单元测试，覆盖快路径绕过、forwarding 路径 acquire、递归路径 acquire、超限 `REFUSED`，以及成功/错误退出时的槽位释放。
 - [x] 3.3 运行格式化和最小相关测试。
-- [ ] 3.4 对比验证 cache hit、forwarding miss、iterative miss 在未触发真实拒绝时的吞吐与延迟变化。
+- [x] 3.4 对比验证 cache hit、forwarding miss、iterative miss 在未触发真实拒绝时的吞吐与延迟变化。
 
 ## 4. 开发期对比验证与切换条件
 
 - [ ] 4.1 使用现有 benchmark / 压测方法，对比 limiter 关闭与方案 2 开发期验证开启时的 cache hit、forwarding miss、iterative miss 吞吐与延迟。
-- [ ] 4.2 明确“可以切换到真实 `REFUSED` 拒绝”的性能门槛、观察信号与回归验证范围，并记录在设计或开发文档中。
+- [x] 4.2 明确“可以切换到真实 `REFUSED` 拒绝”的性能门槛、观察信号与回归验证范围，并记录在设计或开发文档中。
 
 ## 5. 文档与规格同步
 

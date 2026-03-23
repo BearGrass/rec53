@@ -113,3 +113,47 @@ limiter 表示的是“这个客户端当前有多少个昂贵请求正在进行
 - [operator 看不出请求为何被拒绝] -> 增加聚合计数器和 per-IP 限频告警日志，包含当前 inflight、limit、path 和 suppression count。
 - [未来 upstream 保护工作在语义上重叠] -> 明确这一版只约束前台昂贵请求并发，把出站 query fanout 限制留给后续 upstream 专项版本。
 - [未触发限速时正常吞吐下降过多] -> 先采用方案 2 做开发期对比验证，对 cache hit、forwarding miss 和 iterative miss 做对比压测，只有退化可接受时才开启真实拒绝。
+
+## Development-Time Validation Results
+
+本次实现后，使用 `go test -run '^$' -bench 'BenchmarkExpensiveRequestProtection(CacheHit|ForwardMiss|IterativeMiss)$' -benchmem -count=3 ./server` 做了方案对比。对比方式是：
+
+- `disabled`: limiter 关闭
+- `observe_would_refuse`: 启用 limiter，但使用开发期验证模式，只保留 acquire/release + would-refuse 观测，不触发真实拒绝；阈值设置为 `1024`，确保测试流量本身不会命中拒绝
+
+测试环境：
+
+- CPU: `AMD Ryzen 7 4800H`
+- Go benchmark，包内 mock 场景
+- `cache hit` 走 `ServeDNS -> Change -> cache lookup hit`
+- `forwarding miss` 走真实 forwarding 外部查询 mock
+- `iterative miss` 走 `CACHE_LOOKUP_MISS -> iterative` mock
+
+中位数结果：
+
+| Scenario | disabled ns/op | observe_would_refuse ns/op | Delta |
+|----------|----------------|----------------------------|-------|
+| cache hit | 23261 | 23189 | -0.31% |
+| forwarding miss | 161413 | 148426 | -8.05% |
+| iterative miss | 229950 | 232974 | +1.32% |
+
+解释：
+
+- `cache hit` 没有出现可见回退，说明快路径绕过保持住了
+- `iterative miss` 的额外成本约 +1.3%，属于第一版可接受范围
+- `forwarding miss` 在这组包内 mock benchmark 中反而更快，判断为测试抖动/环境噪声，而不是 limiter 带来的确定性收益
+
+第一版切换到真实 `REFUSED` 的建议门槛：
+
+- `cache hit` 中位 `ns/op` 或等价吞吐回退不超过 3%
+- `forwarding miss` / `iterative miss` 中位 `ns/op` 回退不超过 5%
+- `allocs/op` 增量保持在每请求 +2 以内
+- `go test -race ./...` 与相关功能测试保持通过
+- 宏观 `dnsperf` 验证中，未触发真实拒绝时不应出现新增 timeout/error
+
+上线前建议继续观察的信号：
+
+- `rec53_expensive_request_limit_total{action="would_refuse"}` 是否集中在少量业务峰值阶段
+- `rec53_response_counter{code="REFUSED"}` 是否与 operator 预期一致
+- `rec53_upstream_failures_total`、`rec53_latency`、`rec53_cache_lookup_total` 是否出现伴随回退
+- warning 日志中的 `suppressed` 是否说明存在单一客户端长期施压
