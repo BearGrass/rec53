@@ -1,9 +1,5 @@
-# health-probe-endpoints Specification
+## MODIFIED Requirements
 
-## Purpose
-Define operational HTTP health probe endpoints that expose bounded runtime readiness context for automation and operators.
-
-## Requirements
 ### Requirement: Readiness probe
 
 The system SHALL expose a machine-consumable HTTP readiness probe on the operational HTTP server bound to the configured metrics listen address.

@@ -1,9 +1,5 @@
-# runtime-health-contract Specification
+## MODIFIED Requirements
 
-## Purpose
-Define a minimal runtime health model that distinguishes startup, warming, steady service, and shutdown for operators and automation.
-
-## Requirements
 ### Requirement: Runtime readiness state model
 
 The system SHALL maintain a minimal runtime state model with two explicit dimensions:

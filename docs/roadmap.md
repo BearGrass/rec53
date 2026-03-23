@@ -63,17 +63,17 @@
 - `v1.1.x` 已完成 observability/local-ops 收敛：指标体系、TUI、detail、导航、State Machine summary 和 trace mode 已闭环
 - `rec53top` 已完成一轮信息密度压缩：detail 标签固定为 `Now / Window / Totals / Next / Trend`，`Next` 更接近“面板编号 + 动作”
 - 当前主矛盾不再是 TUI 信息呈现，而是节点在异常、重启和冷启动时的行为是否足够稳、足够可判断
-- repo 内部已经有相对稳的启动/关闭顺序，但还没有把这些内部保证整理成 operator 可直接消费的 `ready / phase` 语义
-- 当前最值得补的不是完整 health taxonomy，而是最小 readiness contract
+- repo 内部已经具备第一版 `ready / phase` 基线：`/healthz/ready`、`cold-start / warming / steady / shutting-down` 和 shutdown 前先掉 readiness 的顺序已经落地
+- 当前最值得补的是把这套最小 readiness contract 进一步收口到测试、文档和 roadmap，而不是扩成完整 health taxonomy
 
 **下一步焦点**
 
 - [x] 收口 `v1.1.6`：detail 文案继续压短，信息密度和排版稳定性提升
 - [x] 保持 aggregate TUI 与 request-scoped trace 的边界，不再把单请求路径塞回 `rec53top`
-- [ ] 定义 `readiness` 的可操作语义
-- [ ] 定义 `phase`（如 `cold-start / warming / steady / shutting-down`）与 readiness 的关系
-- [ ] 复核 warmup / snapshot / 冷启动的真实恢复路径和告警口径
-- [ ] 明确 systemd / 容器 probe 应该如何接入
+- [x] 落地最小 readiness surface：`/healthz/ready`
+- [x] 落地 bounded `phase`：`cold-start / warming / steady / shutting-down`
+- [ ] 把 warmup 完成、snapshot restore 降级与启动失败的边界语义继续补齐到测试与文档
+- [ ] 继续压实 systemd / 容器 probe 的接入说明与 operator 口径
 - [ ] 将 `rate limit / 资源保护` 明确顺延到 `v1.2.1`
 
 ## v1.1 版本线
@@ -279,21 +279,29 @@
 
 ### v1.2.0 — readiness probe 与启动阶段语义
 
-**目标**：把 rec53 从“内部生命周期顺序正确、可观测”推进到“外部可以直接判断是否 ready，以及当前处于哪个启动/退出阶段”。
+**目标**：把 rec53 从“内部生命周期顺序正确、可观测”推进到“外部可以直接判断是否 ready，以及当前处于哪个启动/退出阶段”，并把现有基线收口成稳定的 operator 契约。
+
+**已具备基线**
+
+- [x] `GET /healthz/ready` 已暴露最小 readiness probe
+- [x] 已使用 bounded `phase`：`cold-start / warming / steady / shutting-down`
+- [x] listener bind 成功后即可进入 `ready=true`
+- [x] warmup 保持 non-blocking：服务可在 `phase=warming` 时接流量
+- [x] graceful shutdown 在 listener teardown 前先进入 `ready=false, phase=shutting-down`
 
 **任务**
 
-- [ ] 定义 `readiness / phase` 的语义与状态转换
-- [ ] 明确 warmup、snapshot、cold-start、steady-state、shutting-down 对 readiness 和 phase 的影响
-- [ ] 设计最小 health 暴露方式：`/healthz/ready`
-- [ ] 补齐启动失败、warming、stale/degraded、优雅关闭等测试
+- [x] 定义 `readiness / phase` 的核心语义与状态转换
+- [x] 明确最小 health 暴露方式：`/healthz/ready`
+- [ ] 继续补齐 warmup、snapshot、cold-start、steady-state、shutting-down 的边界口径
+- [ ] 补齐启动失败、warming->steady、restore 降级、优雅关闭等测试
 - [ ] 补齐 systemd / 容器友好的探针、退出、重启和权限说明
 
 **不做**
 
 - [ ] 不实现分布式缓存一致性
 - [ ] 不引入中心化控制面
-- [ ] 不在这一版同时引入 liveness、degraded、rate limit、并发上限和其他资源保护策略
+- [ ] 不在这一版同时引入 liveness、degraded、restoring 等更大的 health taxonomy，也不混入 rate limit、并发上限和其他资源保护策略
 - [ ] 不把多 listener 性能复测混成当前主线交付
 
 ### v1.2.1 — 资源保护与限流

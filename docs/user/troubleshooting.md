@@ -124,7 +124,14 @@ Interpret it like this:
 
 - `ready=false` with `phase=cold-start`: listeners are not ready yet
 - `ready=true` with `phase=warming`: traffic can already be served; startup is still finishing background warmup
+- `ready=true` with `phase=steady`: startup contract is complete; look elsewhere if behavior is still poor
 - `ready=false` with `phase=shutting-down`: this is an intentional stop path, not a fresh startup failure
+
+Snapshot notes:
+
+- missing snapshot file does not create a separate health phase
+- snapshot restore failure means cold-cache startup, not node death
+- if you need to explain why startup quality changed, check snapshot metrics and logs instead of expecting extra probe states
 
 Mitigations:
 

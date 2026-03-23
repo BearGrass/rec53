@@ -61,10 +61,18 @@ phase=warming
 
 Read it this way:
 
+- `phase` is intentionally bounded lifecycle context, not a full health taxonomy
+- `ready=false` with `phase=cold-start` means listener bind has not completed yet
 - `ready=true` means rec53 is ready to accept DNS traffic
 - `phase=warming` means warmup is still running, but traffic can already be served
 - `phase=steady` means listener startup is complete and warmup is no longer active
 - `phase=shutting-down` means rec53 is intentionally leaving service
+
+Snapshot restore stays inside the same model:
+
+- missing snapshot file keeps startup on the normal cold-start path
+- snapshot restore failure degrades to cold-cache startup; it does not create a new probe phase
+- once listeners bind, readiness still follows `warming` or `steady` based on warmup state
 
 For local validation, `rec53top` can read the same endpoint directly and show a fixed six-panel terminal dashboard without requiring Prometheus or Grafana:
 
@@ -139,6 +147,12 @@ readinessProbe:
     path: /healthz/ready
     port: 9999
 ```
+
+Treat the probe as readiness-only:
+
+- use HTTP status for admission decisions
+- use the body only to distinguish bounded lifecycle states
+- do not treat `phase` as a substitute for logs, metrics, or incident diagnosis
 
 ### Core Signals
 

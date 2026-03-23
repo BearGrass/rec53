@@ -213,6 +213,7 @@ Prefer this escalation path:
 
 ## Agent Reminders
 
+- Unless the user explicitly requests another language, communicate with the user in Chinese.
 - Start narrow and only widen scope when needed.
 - Do not mix unrelated cleanup into functional changes.
 - Match existing naming and structure before introducing new patterns.

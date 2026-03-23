@@ -116,6 +116,7 @@ Recommended operator path:
 - UDP and TCP DNS listeners
 - TTL cache with negative caching
 - NS warmup to reduce cold-start latency
+- Readiness probe with bounded `ready` / `phase` lifecycle context
 - Prometheus metrics and optional pprof
 - Graceful shutdown and optional cache snapshot restore
 
@@ -135,6 +136,8 @@ sudo ./rec53ctl uninstall --purge
 ```
 
 Installed services write application logs to `/var/log/rec53/rec53.log` by default. Foreground `rec53ctl run` sends logs to stderr for immediate visibility.
+
+For startup and shutdown checks, use `GET /healthz/ready` on the metrics listener. The response body exposes bounded runtime context through `ready=<bool>` and `phase=<cold-start|warming|steady|shutting-down>`.
 
 Key CLI flags:
 

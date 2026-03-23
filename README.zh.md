@@ -116,6 +116,7 @@ warmup:
 - UDP / TCP 双协议 DNS 服务
 - 基于 TTL 的缓存和否定缓存
 - 用于降低冷启动影响的 NS warmup
+- 带有有界 `ready` / `phase` 生命周期上下文的 readiness probe
 - Prometheus 指标和可选 pprof
 - 优雅关闭和可选缓存快照恢复
 
@@ -135,6 +136,8 @@ sudo ./rec53ctl uninstall --purge
 ```
 
 安装后的服务默认把应用日志写到 `/var/log/rec53/rec53.log`。前台 `rec53ctl run` 会把日志打到 stderr，方便直接看到启动失败信息。
+
+对于启动和关闭期检查，请访问 metrics 监听地址上的 `GET /healthz/ready`。响应体会通过 `ready=<bool>` 与 `phase=<cold-start|warming|steady|shutting-down>` 暴露有界运行时上下文。
 
 主要 CLI 参数：
 

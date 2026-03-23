@@ -427,4 +427,39 @@ func TestReadinessHandlerReportsColdStartAndWarming(t *testing.T) {
 	if !strings.Contains(body, "ready=true") || !strings.Contains(body, "phase=warming") {
 		t.Fatalf("warming body = %q", body)
 	}
+
+	state, changed := MarkRuntimeWarmupComplete()
+	if !changed {
+		t.Fatalf("MarkRuntimeWarmupComplete changed = false, state = %+v", state)
+	}
+
+	resp, err = http.Get(server.URL + "/healthz/ready")
+	if err != nil {
+		t.Fatalf("Failed to get readiness endpoint after warmup completion: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	n, _ = resp.Body.Read(buf)
+	_ = resp.Body.Close()
+	body = string(buf[:n])
+	if !strings.Contains(body, "ready=true") || !strings.Contains(body, "phase=steady") {
+		t.Fatalf("steady body = %q", body)
+	}
+
+	MarkRuntimeShuttingDown()
+
+	resp, err = http.Get(server.URL + "/healthz/ready")
+	if err != nil {
+		t.Fatalf("Failed to get readiness endpoint after shutdown transition: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	n, _ = resp.Body.Read(buf)
+	_ = resp.Body.Close()
+	body = string(buf[:n])
+	if !strings.Contains(body, "ready=false") || !strings.Contains(body, "phase=shutting-down") {
+		t.Fatalf("shutting-down body = %q", body)
+	}
 }

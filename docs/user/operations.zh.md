@@ -61,10 +61,18 @@ phase=warming
 
 推荐这样理解：
 
+- `phase` 只是有界的生命周期上下文，不是完整 health taxonomy
+- `ready=false` 且 `phase=cold-start` 表示 listener bind 还没完成
 - `ready=true` 表示 rec53 已经可以接收 DNS 流量
 - `phase=warming` 表示 warmup 还在进行，但已经可以服务
 - `phase=steady` 表示 listener 启动完成，warmup 已不再活跃
 - `phase=shutting-down` 表示 rec53 正在主动退出服务
+
+snapshot restore 也仍在同一个模型内：
+
+- snapshot 文件缺失时，启动仍然走正常的 cold-start 路径
+- snapshot restore 失败会降级成 cold-cache 启动，但不会引入新的 probe phase
+- listener bind 完成后，readiness 仍只按 warmup 状态进入 `warming` 或 `steady`
 
 建议关注：
 
@@ -119,6 +127,12 @@ readinessProbe:
     path: /healthz/ready
     port: 9999
 ```
+
+建议把这个 probe 只当 readiness 使用：
+
+- 是否接流量，主要看 HTTP status
+- 返回体只用来区分有限几个生命周期状态
+- 不要把 `phase` 当成日志、指标或事故诊断的替代品
 
 ### 首发部署关注点
 

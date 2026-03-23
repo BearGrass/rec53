@@ -103,7 +103,14 @@ curl -s http://127.0.0.1:9999/healthz/ready
 
 - `ready=false` 且 `phase=cold-start`：listener 还没准备好
 - `ready=true` 且 `phase=warming`：已经可以服务，只是后台 warmup 还没结束
+- `ready=true` 且 `phase=steady`：启动契约已经完成，如果仍有问题就去看别处
 - `ready=false` 且 `phase=shutting-down`：这是主动退出，不是新启动失败
+
+关于 snapshot：
+
+- snapshot 文件缺失不会引入单独的 health phase
+- snapshot restore 失败表示 cold-cache 启动，不表示节点已死
+- 如果要解释为什么重启后质量变化了，应看 snapshot 指标和日志，而不是期待 probe 再多一个状态
 
 缓解方式：
 

@@ -211,6 +211,38 @@ func TestServerSetRuntimeStateServingWithWarmup(t *testing.T) {
 	}
 }
 
+func TestServerSetRuntimeStateServingWithWarmupAlreadyComplete(t *testing.T) {
+	monitor.ResetRuntimeState()
+	if state, changed := monitor.MarkRuntimeWarmupComplete(); changed {
+		t.Fatalf("MarkRuntimeWarmupComplete changed = true, state = %+v", state)
+	}
+
+	s := &server{warmupCfg: WarmupConfig{Enabled: true}}
+	s.setRuntimeStateServing()
+
+	if state := monitor.RuntimeState(); !state.Readiness || state.Phase != monitor.RuntimePhaseSteady {
+		t.Fatalf("runtime state = %+v, want ready steady", state)
+	}
+}
+
+func TestServerWarmupCompletionTransitionsToSteady(t *testing.T) {
+	monitor.ResetRuntimeState()
+	s := &server{warmupCfg: WarmupConfig{Enabled: true}}
+	s.setRuntimeStateServing()
+
+	if state := monitor.RuntimeState(); !state.Readiness || state.Phase != monitor.RuntimePhaseWarming {
+		t.Fatalf("runtime state before warmup completion = %+v, want ready warming", state)
+	}
+
+	state, changed := monitor.MarkRuntimeWarmupComplete()
+	if !changed {
+		t.Fatalf("MarkRuntimeWarmupComplete changed = false, state = %+v", state)
+	}
+	if state.Readiness != true || state.Phase != monitor.RuntimePhaseSteady {
+		t.Fatalf("runtime state after warmup completion = %+v, want ready steady", state)
+	}
+}
+
 // TestServerUDPAddr tests UDPAddr method
 func TestServerUDPAddr(t *testing.T) {
 	s := NewServer("127.0.0.1:0")
