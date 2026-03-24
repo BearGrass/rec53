@@ -89,7 +89,7 @@ dig @127.0.0.1 -p 5353 example.com NS
 
 先确认这是不是策略拒绝，而不是服务端内部失败。
 
-在这个功能里，`REFUSED` 表示某个客户端 IP 在 rec53 开始更多昂贵工作之前，就已经触达了配置的昂贵请求并发上限。这一判断基于 RFC 1035 第 4.1.1 节和 RFC 8499 第 3 节对策略型拒绝语义的推断。
+在这些保护功能里，`REFUSED` 表示 rec53 以策略方式拒绝了新的昂贵工作，而不是已经进入昂贵流程后内部失败。这一判断基于 RFC 1035 第 4.1.1 节和 RFC 8499 第 3 节对策略型拒绝语义的推断。
 
 推荐这样区分：
 
@@ -100,12 +100,16 @@ dig @127.0.0.1 -p 5353 example.com NS
 
 - `dns.expensive_request_limit_mode`
 - `dns.expensive_request_limit`
+- `dns.hot_zone_base_suffixes`
 - `rec53_expensive_request_limit_total`
+- `rec53_hot_zone_protection_events_total`
 - 带 `[LIMIT]` 和 `suppressed=` 的 warning 日志
+- 带 `[HOT_ZONE]` 和 `suppressed=` 的 warning 日志
 
 如果你需要减少策略拒绝：
 
 - 先确认是否有单个客户端同时打了过多 forwarding miss 或 iterative miss
+- 再确认是否有某个业务 zone 持续把 forwarding miss 或 iterative miss 推进昂贵路径
 - 只在看过基线延迟和 upstream 压力后，再考虑提高 `dns.expensive_request_limit`
 - 注意 cache hit、hosts hit、廉价 forwarding hit 都不计入这个 limiter
 

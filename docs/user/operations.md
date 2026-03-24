@@ -131,6 +131,31 @@ Operational meaning:
 - logs are rate-limited per client IP and include a suppressed-event count
 - the first version is metric/log driven only and does not add a per-IP TUI view
 
+## Hot-Zone Expensive Path Protection
+
+rec53 now also watches whether many requesters are collectively pushing the same zone into the expensive path.
+
+The first version keeps the scope narrow:
+
+- it only protects one hot zone at a time
+- it only blocks new expensive-path entry for that zone
+- it still allows cheap paths such as `hosts` hits, forwarding hits, and cache hits
+- refused hot-zone requests also return `REFUSED`
+
+Business-root selection uses this order:
+
+- matched forwarding zone
+- built-in base suffixes plus any operator-added `dns.hot_zone_base_suffixes`
+- fallback level-3 domain when neither higher-priority rule matches
+
+Observe mode and protection are intentionally conservative:
+
+- short window: `5s`
+- selection uses the most recent `3` windows by simple occupancy summation
+- observe mode requires `avg_expensive_concurrency >= 0.75 * NumCPU()` and host CPU `>= 70%`
+- the same candidate must persist for `3` consecutive observe windows before protection starts
+- protection exits after global expensive occupancy falls back to within `1.05x` of the pre-trigger baseline
+
 ### Prometheus Scrape Setup
 
 Example scrape config:

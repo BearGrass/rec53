@@ -26,6 +26,7 @@ dns:
   metric: ":9999"
   log_level: "info"
   upstream_timeout: 1500ms
+  hot_zone_base_suffixes: []
   listeners: 0
 ```
 
@@ -35,6 +36,7 @@ Fields:
 - `metric`: Prometheus metrics listen address
 - `log_level`: `debug`, `info`, `warn`, `error`
 - `upstream_timeout`: timeout for one upstream iterative query
+- `hot_zone_base_suffixes`: optional additive suffix list for hot-zone business-root detection; defaults still include the built-in curated suffix set
 - `listeners`: `0` or `1` means classic single listener pair, `>1` enables `SO_REUSEPORT`
 
 Recommendations:
@@ -42,6 +44,7 @@ Recommendations:
 - keep `listen` on loopback during first rollout
 - keep `listeners: 0` or `1` unless you have measured contention
 - increase `upstream_timeout` only for high-latency networks
+- append private suffixes here only when your deployment uses names outside the built-in public-style suffix set
 
 ## `warmup`
 

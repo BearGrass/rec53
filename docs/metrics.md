@@ -165,6 +165,17 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 |--------|------|--------|----------|-------------|
 | `rec53_expensive_request_limit_total` | Counter | `action`, `path` | Both | Aggregate policy events for per-client expensive-request protection. `action` is bounded to values such as `refused` and optional development-only `would_refuse`; `path` is bounded to `forward` or `iterative`. No raw client IP label is used. |
 
+### Hot-Zone Protection Metrics
+
+| Metric | Type | Labels | Audience | Description |
+|--------|------|--------|----------|-------------|
+| `rec53_hot_zone_protection_events_total` | Counter | `event` | Both | Aggregate hot-zone lifecycle events such as `observe_enter`, `observe_exit`, `candidate_change`, `candidate_confirm`, `protect_enter`, `protect_exit`, and `refused`. |
+| `rec53_hot_zone_observe_mode` | Gauge | - | Operator | `1` while hot-zone observe mode is active, else `0`. |
+| `rec53_hot_zone_protected` | Gauge | - | Operator | `1` while one hot zone is actively protected, else `0`. |
+| `rec53_hot_zone_avg_expensive_concurrency` | Gauge | - | Developer | Current short-window average expensive concurrency used for observe-mode entry and exit checks. |
+| `rec53_hot_zone_baseline_concurrency` | Gauge | - | Developer | Recorded pre-trigger expensive-concurrency baseline used for protection exit. |
+| `rec53_hot_zone_candidate_streak` | Gauge | - | Developer | Consecutive observe-window confirmations for the current candidate hot zone. |
+
 ### XDP Metrics
 
 | Metric | Type | Labels | Audience | Description |
@@ -227,6 +238,13 @@ Per-client expensive-request protection uses logs as a bounded companion to metr
 - raw client IPs appear in logs for diagnosis, but never as Prometheus labels
 
 If a development build keeps `would_refuse` counting enabled for benchmark or rollout validation, treat it as validation-only telemetry rather than a long-term public contract.
+
+Hot-zone protection adds a second bounded warning stream:
+
+- warnings use the stable `[HOT_ZONE]` prefix
+- logs are rate-limited in-process and include `suppressed=` counts
+- logs explain observe-mode entry/exit, candidate changes, protection entry/exit, and expensive-path refusals
+- raw domain names can appear in logs for diagnosis, but not as Prometheus labels
 
 ## Label Stability And Compatibility Notes
 

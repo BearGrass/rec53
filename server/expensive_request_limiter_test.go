@@ -22,21 +22,21 @@ func TestExpensiveRequestLimiter_TryAcquireAndRelease(t *testing.T) {
 	holder := newExpensiveRequestHolder(clientIP)
 	ctx := withExpensiveRequestHolder(withExpensiveRequestLimiter(context.Background(), limiter), holder)
 
-	if !tryAcquireExpensiveRequest(ctx, expensivePathForward) {
+	if !tryAcquireExpensiveRequest(ctx, expensivePathForward, "www.example.com.", "") {
 		t.Fatal("first acquire should succeed")
 	}
-	if !tryAcquireExpensiveRequest(ctx, expensivePathIterative) {
+	if !tryAcquireExpensiveRequest(ctx, expensivePathIterative, "www.example.com.", "") {
 		t.Fatal("same request should not reacquire a second slot")
 	}
 
 	otherHolder := newExpensiveRequestHolder(clientIP)
 	otherCtx := withExpensiveRequestHolder(withExpensiveRequestLimiter(context.Background(), limiter), otherHolder)
-	if tryAcquireExpensiveRequest(otherCtx, expensivePathIterative) {
+	if tryAcquireExpensiveRequest(otherCtx, expensivePathIterative, "www.example.com.", "") {
 		t.Fatal("second request should be refused while slot is held")
 	}
 
 	holder.ReleaseIfHeld(limiter)
-	if !tryAcquireExpensiveRequest(otherCtx, expensivePathIterative) {
+	if !tryAcquireExpensiveRequest(otherCtx, expensivePathIterative, "www.example.com.", "") {
 		t.Fatal("acquire should succeed after release")
 	}
 }
@@ -80,7 +80,7 @@ func TestForwardLookupState_RefusedWhenOverLimit(t *testing.T) {
 	clientIP := netip.MustParseAddr("192.0.2.99")
 	blockingHolder := newExpensiveRequestHolder(clientIP)
 	blockingCtx := withExpensiveRequestHolder(withExpensiveRequestLimiter(context.Background(), limiter), blockingHolder)
-	if !tryAcquireExpensiveRequest(blockingCtx, expensivePathForward) {
+	if !tryAcquireExpensiveRequest(blockingCtx, expensivePathForward, "a.corp.test.", "corp.test.") {
 		t.Fatal("pre-acquire should succeed")
 	}
 	defer blockingHolder.ReleaseIfHeld(limiter)
@@ -117,7 +117,7 @@ func TestChange_ReturnsRefusedAfterCacheMissOverLimit(t *testing.T) {
 	clientIP := netip.MustParseAddr("198.51.100.3")
 	holder := newExpensiveRequestHolder(clientIP)
 	ctx := withExpensiveRequestHolder(withExpensiveRequestLimiter(context.Background(), limiter), holder)
-	if !tryAcquireExpensiveRequest(ctx, expensivePathForward) {
+	if !tryAcquireExpensiveRequest(ctx, expensivePathForward, "iter-limit.test.", "") {
 		t.Fatal("pre-acquire should succeed")
 	}
 	defer holder.ReleaseIfHeld(limiter)

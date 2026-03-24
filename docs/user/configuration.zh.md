@@ -26,6 +26,7 @@ dns:
   metric: ":9999"
   log_level: "info"
   upstream_timeout: 1500ms
+  hot_zone_base_suffixes: []
   listeners: 0
 ```
 
@@ -35,6 +36,7 @@ dns:
 - `metric`：Prometheus 指标监听地址
 - `log_level`：`debug`、`info`、`warn`、`error`
 - `upstream_timeout`：单次上游迭代查询超时
+- `hot_zone_base_suffixes`：热点 zone 业务根识别的追加 suffix 列表；默认内置的精选基础后缀仍然始终生效
 - `listeners`：`0` 或 `1` 表示单监听器模式，`>1` 启用 `SO_REUSEPORT`
 
 建议：
@@ -42,6 +44,7 @@ dns:
 - 首次上线时把 `listen` 保持在 loopback
 - 没有测过争用前，`listeners` 保持 `0` 或 `1`
 - 只有在高延迟网络里才考虑增大 `upstream_timeout`
+- 只有当部署环境存在内置列表之外的私有命名后缀时，再追加 `hot_zone_base_suffixes`
 
 ## `warmup`
 

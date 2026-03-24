@@ -67,6 +67,7 @@ type DNSConfig struct {
 	UpstreamTimeout           time.Duration `yaml:"upstream_timeout"`
 	ExpensiveRequestLimitMode string        `yaml:"expensive_request_limit_mode"`
 	ExpensiveRequestLimit     int           `yaml:"expensive_request_limit"`
+	HotZoneBaseSuffixes       []string      `yaml:"hot_zone_base_suffixes"`
 	// Listeners controls the number of UDP+TCP listener pairs bound to the same
 	// address via SO_REUSEPORT.  0 or 1 means a single listener pair (classic
 	// behaviour, no SO_REUSEPORT).  Values >1 enable SO_REUSEPORT with N
@@ -376,9 +377,10 @@ func main() {
 		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
 	limitCfg := server.ExpensiveRequestLimitConfig{
-		Mode:               cfg.DNS.ExpensiveRequestLimitMode,
-		Limit:              cfg.DNS.ExpensiveRequestLimit,
-		ObserveWouldRefuse: cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
+		Mode:                cfg.DNS.ExpensiveRequestLimitMode,
+		Limit:               cfg.DNS.ExpensiveRequestLimit,
+		HotZoneBaseSuffixes: cfg.DNS.HotZoneBaseSuffixes,
+		ObserveWouldRefuse:  cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
 	}
 
 	if *traceDomain != "" {
@@ -500,9 +502,10 @@ func runTraceMode(out io.Writer, cfg *Config, domain string, qtype uint16, timeo
 
 	// Prime hosts/forwarding globals for the trace path using the configured resolver view.
 	server.NewServerWithFullConfig(cfg.DNS.Listen, 1, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, "", server.ExpensiveRequestLimitConfig{
-		Mode:               cfg.DNS.ExpensiveRequestLimitMode,
-		Limit:              cfg.DNS.ExpensiveRequestLimit,
-		ObserveWouldRefuse: cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
+		Mode:                cfg.DNS.ExpensiveRequestLimitMode,
+		Limit:               cfg.DNS.ExpensiveRequestLimit,
+		HotZoneBaseSuffixes: cfg.DNS.HotZoneBaseSuffixes,
+		ObserveWouldRefuse:  cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
 	})
 	if cfg.Snapshot.File != "" {
 		if _, err := server.LoadSnapshot(cfg.Snapshot); err != nil {

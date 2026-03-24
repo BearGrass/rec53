@@ -83,7 +83,7 @@ func (s *forwardLookupState) handle(request *dns.Msg, response *dns.Msg) (int, e
 		Timeout: GetUpstreamTimeout(),
 		UDPSize: 4096,
 	}
-	if !tryAcquireExpensiveRequest(s.ctx, expensivePathForward) {
+	if !tryAcquireExpensiveRequest(s.ctx, expensivePathForward, qname, matched.Zone) {
 		return FORWARD_LOOKUP_REFUSED, nil
 	}
 

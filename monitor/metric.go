@@ -97,6 +97,38 @@ func (m *Metric) ExpensiveRequestLimitAdd(action, path string) {
 	ExpensiveRequestLimitTotal.WithLabelValues(action, path).Inc()
 }
 
+func (m *Metric) HotZoneEventAdd(event string) {
+	HotZoneProtectionEventsTotal.WithLabelValues(event).Inc()
+}
+
+func (m *Metric) HotZoneObserveModeSet(active bool) {
+	if active {
+		HotZoneObserveMode.Set(1)
+		return
+	}
+	HotZoneObserveMode.Set(0)
+}
+
+func (m *Metric) HotZoneProtectedSet(active bool) {
+	if active {
+		HotZoneProtected.Set(1)
+		return
+	}
+	HotZoneProtected.Set(0)
+}
+
+func (m *Metric) HotZoneAvgExpensiveConcurrencySet(value float64) {
+	HotZoneAvgExpensiveConcurrency.Set(value)
+}
+
+func (m *Metric) HotZoneBaselineConcurrencySet(value float64) {
+	HotZoneBaselineConcurrency.Set(value)
+}
+
+func (m *Metric) HotZoneCandidateStreakSet(value int) {
+	HotZoneCandidateStreak.Set(float64(value))
+}
+
 // register metric
 func (m *Metric) Register() {
 	m.reg.MustRegister(InCounter)
@@ -126,6 +158,12 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(StateMachineFailuresTotal)
 	m.reg.MustRegister(StateMachineTransitionTotal)
 	m.reg.MustRegister(ExpensiveRequestLimitTotal)
+	m.reg.MustRegister(HotZoneProtectionEventsTotal)
+	m.reg.MustRegister(HotZoneObserveMode)
+	m.reg.MustRegister(HotZoneProtected)
+	m.reg.MustRegister(HotZoneAvgExpensiveConcurrency)
+	m.reg.MustRegister(HotZoneBaselineConcurrency)
+	m.reg.MustRegister(HotZoneCandidateStreak)
 }
 
 // MetricServer holds the HTTP server for metrics

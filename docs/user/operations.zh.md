@@ -115,6 +115,31 @@ dns:
 - 日志按客户端 IP 限频，并带 suppressed-event count
 - 第一版只提供指标和日志观测，不进入 TUI 的 per-IP 展示
 
+## 热点 Zone 昂贵路径入口保护
+
+rec53 现在还会观察是否有很多 requester 一起把同一个 zone 持续推入昂贵路径。
+
+第一版仍然保持收敛：
+
+- 一次只保护一个热点 zone
+- 只阻止该 zone 的新昂贵路径进入
+- `hosts` 命中、forwarding hit、cache hit 这类 cheap path 仍然继续服务
+- 因热点 zone 保护被拦下的请求同样返回 `REFUSED`
+
+业务根选择顺序：
+
+- 命中的 forwarding zone
+- 内置基础后缀加上 operator 追加的 `dns.hot_zone_base_suffixes`
+- 如果前两者都没命中，则回退到三级域名
+
+observe mode 与保护触发刻意保持保守：
+
+- 短窗口固定为 `5s`
+- 热点选择使用最近 `3` 个窗口的 occupancy 简单求和
+- observe mode 需要同时满足 `avg_expensive_concurrency >= 0.75 * NumCPU()` 和整机 CPU `>= 70%`
+- 同一个候选必须连续命中 `3` 个 observe 窗口才会进入保护
+- 当全局昂贵占用回落到 pre-trigger baseline 的 `1.05x` 以内时退出保护
+
 ### Prometheus 抓取示例
 
 ```yaml

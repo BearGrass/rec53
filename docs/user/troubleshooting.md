@@ -109,7 +109,7 @@ dig @127.0.0.1 -p 5353 example.com NS
 
 Check whether rec53 refused the request as policy, not as an internal failure.
 
-For this feature, `REFUSED` means the client IP hit the configured expensive-request concurrency limit before rec53 started more expensive work. This follows the policy-oriented reading of RFC 1035 section 4.1.1 and RFC 8499 section 3.
+For these protection features, `REFUSED` means rec53 rejected new expensive work as policy before it started more costly resolution steps. This follows the policy-oriented reading of RFC 1035 section 4.1.1 and RFC 8499 section 3.
 
 Read it this way:
 
@@ -120,12 +120,16 @@ What to check:
 
 - `dns.expensive_request_limit_mode`
 - `dns.expensive_request_limit`
+- `dns.hot_zone_base_suffixes`
 - `rec53_expensive_request_limit_total`
+- `rec53_hot_zone_protection_events_total`
 - warning logs with `[LIMIT]` and `suppressed=` fields
+- warning logs with `[HOT_ZONE]` and `suppressed=` fields
 
 If you need to reduce policy refusals:
 
 - verify one client is not issuing too many concurrent forwarding or iterative misses
+- verify one business zone is not repeatedly pushing forwarding misses or cache-miss iterative work into the expensive path
 - raise `dns.expensive_request_limit` only after checking baseline latency and upstream pressure
 - keep in mind that cache hits, hosts hits, and cheap forwarding hits are not counted by this limiter
 

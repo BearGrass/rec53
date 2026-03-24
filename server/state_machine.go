@@ -295,7 +295,11 @@ func Change(stm stateMachine) (*dns.Msg, error) {
 				recordStateTransition(st, CLASSIFY_RESP)
 				stm = newClassifyRespState(stm.getRequest(), stm.getResponse(), stm.getContext())
 			case CACHE_LOOKUP_MISS:
-				if !tryAcquireExpensiveRequest(stm.getContext(), expensivePathIterative) {
+				qname := ""
+				if len(stm.getRequest().Question) > 0 {
+					qname = stm.getRequest().Question[0].Name
+				}
+				if !tryAcquireExpensiveRequest(stm.getContext(), expensivePathIterative, qname, "") {
 					recordTerminalExit(stm.getContext(), st, monitor.StateMachineRefusedExit)
 					return buildRefusedResponse(stm.getRequest()), nil
 				}

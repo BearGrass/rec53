@@ -162,6 +162,17 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 |------|------|--------|----------|------|
 | `rec53_expensive_request_limit_total` | Counter | `action`, `path` | 两者 | 单客户端昂贵请求保护的聚合策略事件。`action` 为有界值，如 `refused`，以及可选的开发期 `would_refuse`；`path` 为 `forward` 或 `iterative`。不会使用原始 client IP 作为标签。 |
 
+### 热点 Zone 保护指标
+
+| 指标 | 类型 | Labels | 主要受众 | 说明 |
+|------|------|--------|----------|------|
+| `rec53_hot_zone_protection_events_total` | Counter | `event` | 两者 | 热点 zone 生命周期与拒绝事件聚合，如 `observe_enter`、`observe_exit`、`candidate_change`、`candidate_confirm`、`protect_enter`、`protect_exit`、`refused`。 |
+| `rec53_hot_zone_observe_mode` | Gauge | — | 运维 | 热点 zone observe mode 当前是否激活，`1` 表示激活。 |
+| `rec53_hot_zone_protected` | Gauge | — | 运维 | 当前是否存在受保护的热点 zone，`1` 表示存在。 |
+| `rec53_hot_zone_avg_expensive_concurrency` | Gauge | — | 开发 | 当前短窗口平均昂贵并发，用于 observe mode 触发与退出判断。 |
+| `rec53_hot_zone_baseline_concurrency` | Gauge | — | 开发 | observe 触发前记录的全局昂贵并发基线，用于退出保护。 |
+| `rec53_hot_zone_candidate_streak` | Gauge | — | 开发 | 当前热点候选连续命中的窗口数。 |
+
 ### XDP 指标
 
 | 指标 | 类型 | Labels | 主要受众 | 说明 |
@@ -208,3 +219,10 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 - 原始 client IP 只出现在日志里用于排障，不会出现在 Prometheus 标签中
 
 如果开发期保留 `would_refuse` 计数，请把它视为验证期遥测，而不是长期公开契约。
+
+热点 zone 保护还增加了第二组有界 warning 日志：
+
+- warning 使用稳定的 `[HOT_ZONE]` 前缀
+- 日志在进程内限频，并带 `suppressed=` 计数
+- 会解释 observe mode 进入/退出、候选切换、保护进入/退出，以及昂贵路径拒绝事件
+- 原始域名可以出现在日志里做排障，但不会进入 Prometheus 标签

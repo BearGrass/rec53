@@ -21,9 +21,10 @@ const (
 const expensiveRequestLogInterval = 30 * time.Second
 
 type ExpensiveRequestLimitConfig struct {
-	Mode               string `yaml:"expensive_request_limit_mode"`
-	Limit              int    `yaml:"expensive_request_limit"`
-	ObserveWouldRefuse bool   `yaml:"-"`
+	Mode                string   `yaml:"expensive_request_limit_mode"`
+	Limit               int      `yaml:"expensive_request_limit"`
+	HotZoneBaseSuffixes []string `yaml:"hot_zone_base_suffixes"`
+	ObserveWouldRefuse  bool     `yaml:"-"`
 }
 
 type expensivePath uint8
@@ -38,6 +39,7 @@ type expensiveRequestLimiter struct {
 	limit              int
 	shards             []expensiveRequestShard
 	observeWouldRefuse bool
+	hotZone            *hotZoneController
 }
 
 type expensiveRequestShard struct {
@@ -62,9 +64,11 @@ type expensiveRequestLimitEvent struct {
 }
 
 type expensiveRequestHolder struct {
-	mu       sync.Mutex
-	clientIP netip.Addr
-	held     bool
+	mu            sync.Mutex
+	clientIP      netip.Addr
+	held          bool
+	hotZoneHeld   bool
+	hotZoneTicket uint64
 }
 
 const contextKeyExpensiveRequestHolder contextKeyType = "expensiveRequestHolder"
@@ -101,6 +105,7 @@ func newExpensiveRequestLimiter(cfg ExpensiveRequestLimitConfig) *expensiveReque
 		limit:              cfg.Limit,
 		shards:             shards,
 		observeWouldRefuse: cfg.ObserveWouldRefuse,
+		hotZone:            newHotZoneController(cfg.HotZoneBaseSuffixes),
 	}
 }
 
@@ -144,39 +149,48 @@ func expensiveRequestHolderFromContext(ctx context.Context) *expensiveRequestHol
 	return holder
 }
 
-func tryAcquireExpensiveRequest(ctx context.Context, path expensivePath) bool {
+func tryAcquireExpensiveRequest(ctx context.Context, path expensivePath, qname, matchedForwardZone string) bool {
 	limiter := expensiveRequestLimiterFromContext(ctx)
 	holder := expensiveRequestHolderFromContext(ctx)
 	if limiter == nil || holder == nil {
 		return true
 	}
-	return holder.TryAcquire(limiter, path)
+	return holder.TryAcquire(limiter, path, qname, matchedForwardZone)
 }
 
-func (h *expensiveRequestHolder) TryAcquire(limiter *expensiveRequestLimiter, path expensivePath) bool {
+func (h *expensiveRequestHolder) TryAcquire(limiter *expensiveRequestLimiter, path expensivePath, qname, matchedForwardZone string) bool {
 	if h == nil || limiter == nil || !h.clientIP.IsValid() {
 		return true
 	}
 
 	h.mu.Lock()
-	if h.held {
+	if h.held || h.hotZoneHeld {
 		h.mu.Unlock()
 		return true
 	}
 	h.mu.Unlock()
 
+	hotZoneAllowed, hotZoneTicket := limiter.TryAcquireHotZone(qname, matchedForwardZone)
+	if !hotZoneAllowed {
+		return false
+	}
+
 	allowed := limiter.TryAcquire(h.clientIP, path)
 	if !allowed {
+		limiter.ReleaseHotZone(hotZoneTicket)
 		return false
 	}
 
 	h.mu.Lock()
-	if h.held {
+	if h.held || h.hotZoneHeld {
 		h.mu.Unlock()
 		limiter.Release(h.clientIP)
+		limiter.ReleaseHotZone(hotZoneTicket)
 		return true
 	}
 	h.held = true
+	h.hotZoneHeld = true
+	h.hotZoneTicket = hotZoneTicket
 	h.mu.Unlock()
 	return true
 }
@@ -187,14 +201,21 @@ func (h *expensiveRequestHolder) ReleaseIfHeld(limiter *expensiveRequestLimiter)
 	}
 
 	h.mu.Lock()
-	if !h.held {
+	if !h.held && !h.hotZoneHeld {
 		h.mu.Unlock()
 		return
 	}
+	hotZoneHeld := h.hotZoneHeld
+	hotZoneTicket := h.hotZoneTicket
 	h.held = false
+	h.hotZoneHeld = false
+	h.hotZoneTicket = 0
 	h.mu.Unlock()
 
 	limiter.Release(h.clientIP)
+	if hotZoneHeld {
+		limiter.ReleaseHotZone(hotZoneTicket)
+	}
 }
 
 func (l *expensiveRequestLimiter) TryAcquire(clientIP netip.Addr, path expensivePath) bool {
@@ -247,6 +268,20 @@ func (l *expensiveRequestLimiter) Release(clientIP netip.Addr) {
 	if state.inflight == 0 {
 		delete(shard.clients, clientIP)
 	}
+}
+
+func (l *expensiveRequestLimiter) TryAcquireHotZone(qname, matchedForwardZone string) (bool, uint64) {
+	if l == nil || l.mode != ExpensiveRequestLimitModeEnabled || l.hotZone == nil {
+		return true, 0
+	}
+	return l.hotZone.TryEnter(qname, matchedForwardZone)
+}
+
+func (l *expensiveRequestLimiter) ReleaseHotZone(ticket uint64) {
+	if l == nil || l.mode != ExpensiveRequestLimitModeEnabled || l.hotZone == nil {
+		return
+	}
+	l.hotZone.Release(ticket)
 }
 
 func (l *expensiveRequestLimiter) shardFor(clientIP netip.Addr) *expensiveRequestShard {

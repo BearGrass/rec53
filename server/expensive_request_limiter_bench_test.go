@@ -145,7 +145,7 @@ func BenchmarkExpensiveRequestProtectionAcquireRelease(b *testing.B) {
 			withExpensiveRequestLimiter(context.Background(), limiter),
 			newExpensiveRequestHolder(extractClientIP(&net.UDPAddr{IP: net.ParseIP("192.0.2.99"), Port: 5300})),
 		)
-		if !tryAcquireExpensiveRequest(ctx, expensivePathForward) {
+		if !tryAcquireExpensiveRequest(ctx, expensivePathForward, "bench.example.", "") {
 			b.Fatal("unexpected acquire refusal")
 		}
 		expensiveRequestHolderFromContext(ctx).ReleaseIfHeld(limiter)

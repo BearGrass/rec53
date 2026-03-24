@@ -203,6 +203,43 @@ var (
 		},
 		[]string{"action", "path"},
 	)
+	HotZoneProtectionEventsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_hot_zone_protection_events_total",
+			Help: "Hot-zone protection lifecycle and refusal events by bounded event",
+		},
+		[]string{"event"},
+	)
+	HotZoneObserveMode = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_hot_zone_observe_mode",
+			Help: "Whether hot-zone observe mode is currently active",
+		},
+	)
+	HotZoneProtected = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_hot_zone_protected",
+			Help: "Whether a hot zone is currently protected",
+		},
+	)
+	HotZoneAvgExpensiveConcurrency = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_hot_zone_avg_expensive_concurrency",
+			Help: "Current short-window average expensive concurrency used for hot-zone observe mode",
+		},
+	)
+	HotZoneBaselineConcurrency = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_hot_zone_baseline_concurrency",
+			Help: "Recorded pre-trigger baseline expensive concurrency for hot-zone protection exit",
+		},
+	)
+	HotZoneCandidateStreak = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_hot_zone_candidate_streak",
+			Help: "Current consecutive confirmation streak for the active hot-zone candidate",
+		},
+	)
 
 	Rec53Metric *Metric
 )
