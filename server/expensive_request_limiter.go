@@ -21,10 +21,9 @@ const (
 const expensiveRequestLogInterval = 30 * time.Second
 
 type ExpensiveRequestLimitConfig struct {
-	Mode  string `yaml:"expensive_request_limit_mode"`
-	Limit int    `yaml:"expensive_request_limit"`
-
-	observeWouldRefuse bool
+	Mode               string `yaml:"expensive_request_limit_mode"`
+	Limit              int    `yaml:"expensive_request_limit"`
+	ObserveWouldRefuse bool   `yaml:"-"`
 }
 
 type expensivePath uint8
@@ -101,7 +100,7 @@ func newExpensiveRequestLimiter(cfg ExpensiveRequestLimitConfig) *expensiveReque
 		mode:               cfg.Mode,
 		limit:              cfg.Limit,
 		shards:             shards,
-		observeWouldRefuse: cfg.observeWouldRefuse,
+		observeWouldRefuse: cfg.ObserveWouldRefuse,
 	}
 }
 

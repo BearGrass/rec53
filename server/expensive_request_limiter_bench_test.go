@@ -126,7 +126,7 @@ func benchExpensiveRequestScenario(b *testing.B, name string, setup func(limitCf
 		bench := setup(ExpensiveRequestLimitConfig{
 			Mode:               ExpensiveRequestLimitModeEnabled,
 			Limit:              1024,
-			observeWouldRefuse: true,
+			ObserveWouldRefuse: true,
 		})
 		bench(b)
 	})
@@ -136,7 +136,7 @@ func BenchmarkExpensiveRequestProtectionAcquireRelease(b *testing.B) {
 	limiter := newExpensiveRequestLimiter(ExpensiveRequestLimitConfig{
 		Mode:               ExpensiveRequestLimitModeEnabled,
 		Limit:              1024,
-		observeWouldRefuse: true,
+		ObserveWouldRefuse: true,
 	})
 	b.ReportAllocs()
 	b.ResetTimer()

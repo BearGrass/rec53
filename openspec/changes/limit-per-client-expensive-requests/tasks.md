@@ -22,7 +22,7 @@
 
 ## 4. 开发期对比验证与切换条件
 
-- [ ] 4.1 使用现有 benchmark / 压测方法，对比 limiter 关闭与方案 2 开发期验证开启时的 cache hit、forwarding miss、iterative miss 吞吐与延迟。
+- [x] 4.1 使用现有 benchmark / 压测方法，对比 limiter 关闭与方案 2 开发期验证开启时的 cache hit、forwarding miss、iterative miss 吞吐与延迟。
 - [x] 4.2 明确“可以切换到真实 `REFUSED` 拒绝”的性能门槛、观察信号与回归验证范围，并记录在设计或开发文档中。
 
 ## 5. 文档与规格同步

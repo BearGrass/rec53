@@ -54,8 +54,9 @@ type XDPConfig struct {
 
 // DebugConfig holds debug/profiling configuration
 type DebugConfig struct {
-	PprofEnabled bool   `yaml:"pprof_enabled"`
-	PprofListen  string `yaml:"pprof_listen"`
+	PprofEnabled                            bool   `yaml:"pprof_enabled"`
+	PprofListen                             string `yaml:"pprof_listen"`
+	ExpensiveRequestLimitObserveWouldRefuse bool   `yaml:"expensive_request_limit_observe_would_refuse"`
 }
 
 // DNSConfig represents DNS server configuration
@@ -375,8 +376,9 @@ func main() {
 		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
 	limitCfg := server.ExpensiveRequestLimitConfig{
-		Mode:  cfg.DNS.ExpensiveRequestLimitMode,
-		Limit: cfg.DNS.ExpensiveRequestLimit,
+		Mode:               cfg.DNS.ExpensiveRequestLimitMode,
+		Limit:              cfg.DNS.ExpensiveRequestLimit,
+		ObserveWouldRefuse: cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
 	}
 
 	if *traceDomain != "" {
@@ -498,8 +500,9 @@ func runTraceMode(out io.Writer, cfg *Config, domain string, qtype uint16, timeo
 
 	// Prime hosts/forwarding globals for the trace path using the configured resolver view.
 	server.NewServerWithFullConfig(cfg.DNS.Listen, 1, cfg.Warmup, cfg.Snapshot, cfg.Hosts, cfg.Forwarding, "", server.ExpensiveRequestLimitConfig{
-		Mode:  cfg.DNS.ExpensiveRequestLimitMode,
-		Limit: cfg.DNS.ExpensiveRequestLimit,
+		Mode:               cfg.DNS.ExpensiveRequestLimitMode,
+		Limit:              cfg.DNS.ExpensiveRequestLimit,
+		ObserveWouldRefuse: cfg.Debug.ExpensiveRequestLimitObserveWouldRefuse,
 	})
 	if cfg.Snapshot.File != "" {
 		if _, err := server.LoadSnapshot(cfg.Snapshot); err != nil {

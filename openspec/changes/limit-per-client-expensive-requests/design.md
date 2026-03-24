@@ -157,3 +157,35 @@ limiter 表示的是“这个客户端当前有多少个昂贵请求正在进行
 - `rec53_response_counter{code="REFUSED"}` 是否与 operator 预期一致
 - `rec53_upstream_failures_total`、`rec53_latency`、`rec53_cache_lookup_total` 是否出现伴随回退
 - warning 日志中的 `suppressed` 是否说明存在单一客户端长期施压
+
+## Existing Macro-Load Validation
+
+为了完成“使用现有 benchmark / 压测方法”的对比，又额外使用仓库现有 `dnsperf` 路径做了一轮宏观验证，命令入口为 `./tools/run-dnsperf.sh hit` 与 `./tools/run-dnsperf.sh miss`。
+
+本轮使用了单独 benchmark 端口 `127.0.0.1:15353`，避免本机已有 `5353` 占用对结果造成污染；`miss` 模式使用的是仓库现有 random-prefix 压力方法，因此它代表“cache miss / iterative 压力”的宏观近似，而不是纯 forwarding-only 专项负载。
+
+对比配置：
+
+- `disabled`: `expensive_request_limit_mode: disabled`
+- `observe_would_refuse`: `expensive_request_limit_mode: enabled` + `debug.expensive_request_limit_observe_would_refuse: true`
+- 两组都使用 `expensive_request_limit: 1024`，确保不会命中真实拒绝
+
+实测结果：
+
+### dnsperf hit
+
+- disabled: `QPS 70279.7`, `P50 717us`, `P95 2.3ms`, `P99 3.6ms`, `0 timeout`, `0 error`
+- observe_would_refuse: `QPS 70086.2`, `P50 727us`, `P95 2.3ms`, `P99 3.5ms`, `0 timeout`, `0 error`
+- QPS 变化：`-0.28%`
+
+### dnsperf miss
+
+- disabled: `QPS 135.9`, `P50 205.3ms`, `P95 332.7ms`, `P99 684.7ms`, `0 timeout`, `0 error`
+- observe_would_refuse: `QPS 136.6`, `P50 206.8ms`, `P95 310.0ms`, `P99 789.9ms`, `0 timeout`, `0 error`
+- QPS 变化：`+0.52%`
+
+结论：
+
+- 现有 `dnsperf hit` 方法下，开发期验证模式对 steady-state cache-hit 吞吐影响约 `-0.3%`，在可接受范围内
+- 现有 `dnsperf miss` 方法下，没有观察到 timeout/error 回归，整体吞吐也没有出现可见下降
+- 因此，按当前实现和当前环境数据，可以认为方案 2 的开发期验证成本已经满足“先观测、再切换真实拒绝”的前置要求

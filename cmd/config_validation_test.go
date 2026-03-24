@@ -89,6 +89,14 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: true,
 			errMsg:  "invalid debug.pprof_listen address",
 		},
+		{
+			name: "valid debug would-refuse observe flag",
+			cfg: &Config{
+				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"},
+				Debug: DebugConfig{ExpensiveRequestLimitObserveWouldRefuse: true},
+			},
+			wantErr: false,
+		},
 		// Hosts validation
 		{
 			name: "valid hosts entry A",
