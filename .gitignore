@@ -66,3 +66,8 @@ Thumbs.db
 # .claude/
 # .rec53/
 # skills/
+
+# Local agent-generated tooling
+.codex/
+.opencode/
+openspec/schemas/
