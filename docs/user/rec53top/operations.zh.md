@@ -47,9 +47,9 @@ mkdir -p dist && go build -o dist/rec53top ./cmd/rec53top
 3. 制造流量。
 
 ```bash
-for i in {1..20}; do dig @127.0.0.1 -p 5353 example.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 github.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; done
+for i in {1..20}; do dig @127.0.0.1 -p 5533 example.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 github.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 nosuchname1234.example. >/dev/null; done
 ```
 
 4. 检查流量、缓存、上游和状态机面板是否开始变化。

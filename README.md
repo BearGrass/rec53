@@ -70,8 +70,8 @@ Recommended workflow:
 ./rec53ctl run
 
 # 5. Verify DNS answers
-dig @127.0.0.1 -p 5353 example.com
-dig @127.0.0.1 -p 5353 example.com AAAA
+dig @127.0.0.1 -p 5533 example.com
+dig @127.0.0.1 -p 5533 example.com AAAA
 
 # 6. Optional: open the local ops TUI
 ./rec53ctl top
@@ -92,7 +92,7 @@ mkdir -p dist && go build -o dist/rec53 ./cmd
 
 ```yaml
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9999"
   log_level: "info"
 
@@ -144,7 +144,7 @@ Key CLI flags:
 | Flag | Default | Description |
 |---|---|---|
 | `--config` | required | YAML config file |
-| `-listen` | `127.0.0.1:5353` | DNS listen address |
+| `-listen` | `127.0.0.1:5533` | DNS listen address |
 | `-metric` | `:9999` | Metrics address |
 | `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
 | `-no-warmup` | `false` | Disable NS warmup |

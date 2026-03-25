@@ -284,7 +284,7 @@ This keeps the config in place and updates the binary. Validate after upgrade wi
 
 ```bash
 systemctl status rec53
-dig @127.0.0.1 -p 5353 example.com
+dig @127.0.0.1 -p 5533 example.com
 ```
 
 ## Install And Uninstall Safety

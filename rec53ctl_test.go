@@ -227,7 +227,7 @@ func setupRec53ctlWorkspace(t *testing.T) (string, string, string) {
 	if err := os.WriteFile(filepath.Join(workDir, "rec53ctl"), scriptData, 0o755); err != nil {
 		t.Fatalf("write rec53ctl: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "config.yaml"), []byte("dns:\n  listen: \"127.0.0.1:5353\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, "config.yaml"), []byte("dns:\n  listen: \"127.0.0.1:5533\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func writeManagedInstallFixture(t *testing.T, installDir, configDir, unitDir, lo
 	if err := os.WriteFile(filepath.Join(installDir, "rec53"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("write binary: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("dns:\n  listen: \"127.0.0.1:5353\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("dns:\n  listen: \"127.0.0.1:5533\"\n"), 0o644); err != nil {
 		t.Fatalf("write config fixture: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(configDir, ".managed-by-rec53ctl"), []byte("managed-by=rec53ctl\n"), 0o644); err != nil {

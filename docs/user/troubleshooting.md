@@ -17,7 +17,7 @@ Useful commands:
 
 ```bash
 ./rec53ctl run
-ss -lntup | grep 5353
+ss -lntup | grep 5533
 ss -lntp | grep 9999
 curl -s -i http://127.0.0.1:9999/healthz/ready
 ```
@@ -101,8 +101,8 @@ Check:
 Try:
 
 ```bash
-dig @127.0.0.1 -p 5353 example.com
-dig @127.0.0.1 -p 5353 example.com NS
+dig @127.0.0.1 -p 5533 example.com
+dig @127.0.0.1 -p 5533 example.com NS
 ```
 
 ## Queries Return `REFUSED`

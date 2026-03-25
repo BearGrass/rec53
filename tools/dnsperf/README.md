@@ -79,7 +79,7 @@ Cache-hit pressure test:
 
 ```bash
 ./tools/dnsperf/dnsperf \
-  -server 127.0.0.1:5353 \
+  -server 127.0.0.1:5533 \
   -f ./tools/dnsperf/queries-sample.txt \
   -c 50 \
   -n 100000
@@ -91,7 +91,7 @@ Cache-miss / iterative pressure test:
 
 ```bash
 ./tools/dnsperf/dnsperf \
-  -server 127.0.0.1:5353 \
+  -server 127.0.0.1:5533 \
   -random-prefix example.com \
   -c 10 \
   -d 30s
@@ -109,7 +109,7 @@ Rate-limited pressure test:
 
 ```bash
 ./tools/dnsperf/dnsperf \
-  -server 127.0.0.1:5353 \
+  -server 127.0.0.1:5533 \
   -f ./tools/dnsperf/queries-sample.txt \
   -c 20 \
   -qps 5000 \
@@ -120,7 +120,7 @@ TCP pressure test:
 
 ```bash
 ./tools/dnsperf/dnsperf \
-  -server 127.0.0.1:5353 \
+  -server 127.0.0.1:5533 \
   -proto tcp \
   -f ./tools/dnsperf/queries-sample.txt \
   -c 20 \
@@ -153,4 +153,4 @@ Example progress line:
 - `-random-prefix` currently sends `A` queries for the given base domain.
 - `Ctrl+C` stops dispatching new queries and waits for in-flight requests to finish.
 - For duration-based tests, prefer combining `-d` with `-qps` so the target load is explicit.
-- When testing `rec53`, make sure the `-server` address matches your configured listen address, for example `127.0.0.1:5353`.
+- When testing `rec53`, make sure the `-server` address matches your configured listen address, for example `127.0.0.1:5533`.

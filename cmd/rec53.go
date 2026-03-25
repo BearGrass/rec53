@@ -24,7 +24,7 @@ import (
 var (
 	configPath   = flag.String("config", "", "Path to YAML config file (required)")
 	noWarmup     = flag.Bool("no-warmup", false, "Disable NS warmup on startup")
-	listenAddr   = flag.String("listen", "127.0.0.1:5353", "DNS server listen address (host:port)")
+	listenAddr   = flag.String("listen", "127.0.0.1:5533", "DNS server listen address (host:port)")
 	metricAddr   = flag.String("metric", ":9999", "Prometheus metrics listen address (host:port)")
 	logLevel     = flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	showVersion  = flag.Bool("version", false, "Show version information")
@@ -351,7 +351,7 @@ func main() {
 
 	// Override config with command-line flags if provided.
 	// Command-line flags take precedence over config file values.
-	if listenAddr != nil && *listenAddr != "" && *listenAddr != "127.0.0.1:5353" {
+	if listenAddr != nil && *listenAddr != "" && *listenAddr != "127.0.0.1:5533" {
 		cfg.DNS.Listen = *listenAddr
 	}
 	if metricAddr != nil && *metricAddr != "" && *metricAddr != ":9999" {

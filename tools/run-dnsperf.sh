@@ -22,7 +22,7 @@ Modes:
   custom    Build dnsperf, then pass remaining flags through unchanged
 
 Environment overrides:
-  SERVER        Target DNS server                (default: 127.0.0.1:5353)
+  SERVER        Target DNS server                (default: 127.0.0.1:5533)
   CONCURRENCY   Worker count                     (mode-specific default)
   DURATION      Test duration                    (mode-specific default)
   COUNT         Query count                      (unset by default)
@@ -38,7 +38,7 @@ Examples:
   SERVER=127.0.0.1:53 CONCURRENCY=128 ./tools/run-dnsperf.sh hit
   ./tools/run-dnsperf.sh miss
   QPS=2000 ./tools/run-dnsperf.sh limited
-  ./tools/run-dnsperf.sh custom -- -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 64 -d 20s
+  ./tools/run-dnsperf.sh custom -- -server 127.0.0.1:5533 -f tools/dnsperf/queries-sample.txt -c 64 -d 20s
 EOF
 }
 
@@ -88,7 +88,7 @@ if [[ "$mode" == "build" ]]; then
     exit 0
 fi
 
-server="${SERVER:-127.0.0.1:5353}"
+server="${SERVER:-127.0.0.1:5533}"
 query_file="${QUERY_FILE:-$DEFAULT_QUERY_FILE}"
 random_base="${RANDOM_BASE:-example.com}"
 count="${COUNT:-}"

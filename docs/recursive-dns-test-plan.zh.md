@@ -104,7 +104,7 @@ go test ./server/... ./utils/...
 go test -race ./server/...
 go test -run '^$' -bench 'BenchmarkCacheGetHit|BenchmarkStateMachineCacheHit|BenchmarkRecordLatency' -benchmem ./server/...
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 64 -d 10s -proto udp
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 -f tools/dnsperf/queries-sample.txt -c 64 -d 10s -proto udp
 ```
 
 ### 性能 PR 门
@@ -113,10 +113,10 @@ tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt
 go test -race ./...
 go test -run '^$' -bench . -benchmem ./server/... ./monitor/... ./e2e/...
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
 # optional miss-stress
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 -random-prefix example.com -c 32 -d 20s -proto udp
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 -random-prefix example.com -c 32 -d 20s -proto udp
 ```
 
 ### Release 门

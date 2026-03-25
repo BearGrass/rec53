@@ -188,9 +188,9 @@ TUI 使用一组固定状态：
 3. 产生流量。
 
 ```bash
-for i in {1..20}; do dig @127.0.0.1 -p 5353 example.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 github.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; done
+for i in {1..20}; do dig @127.0.0.1 -p 5533 example.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 github.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 nosuchname1234.example. >/dev/null; done
 ```
 
 4. 检查首轮变化：

@@ -13,6 +13,6 @@ RUN go build -o rec53 ./cmd
 WORKDIR /dist
 RUN cp /build/rec53 .
 
-EXPOSE 5353 9999
+EXPOSE 5533 9999
 
 ENTRYPOINT ["/dist/rec53"]

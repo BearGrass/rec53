@@ -44,7 +44,7 @@ func Test_server_ServeDNS(t *testing.T) {
 
 // TestNewServer tests server creation
 func TestNewServer(t *testing.T) {
-	listen := "127.0.0.1:5353"
+	listen := "127.0.0.1:5533"
 	s := NewServer(listen)
 
 	if s == nil {

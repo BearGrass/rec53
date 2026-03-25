@@ -13,7 +13,7 @@
 #
 # Prerequisites:
 #   - Network access to root DNS servers (for cache warmup)
-#   - No other process on port 5353 or 6060
+#   - No other process on port 5533 or 6060
 #   - go toolchain available
 #
 # Usage:
@@ -38,7 +38,7 @@ RESULTS_DIR="/tmp/rec53-perf-validation"
 DNSPERF="$PROJECT_DIR/tools/dnsperf/dnsperf"
 REC53="$PROJECT_DIR/rec53"
 QUERIES="$PROJECT_DIR/tools/dnsperf/queries-sample.txt"
-SERVER="127.0.0.1:5353"
+SERVER="127.0.0.1:5533"
 PPROF_ADDR="127.0.0.1:6060"
 
 # Tunable: concurrency level (override via environment: PERF_CONCURRENCY=256)
@@ -85,7 +85,7 @@ info "Building dnsperf..."
 PERF_CONFIG="$RESULTS_DIR/perf-config.yaml"
 cat > "$PERF_CONFIG" <<'YAML'
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9099"
   log_level: "error"
   listeners: 0
@@ -121,7 +121,7 @@ info "rec53 started (PID $REC53_PID)"
 # Wait for server to be ready (warmup takes a few seconds)
 info "Waiting for warmup to complete (up to 30s)..."
 for i in $(seq 1 30); do
-    if dig +short +timeout=1 +tries=1 @127.0.0.1 -p 5353 www.baidu.com A >/dev/null 2>&1; then
+    if dig +short +timeout=1 +tries=1 @127.0.0.1 -p 5533 www.baidu.com A >/dev/null 2>&1; then
         info "Server is ready after ${i}s"
         break
     fi

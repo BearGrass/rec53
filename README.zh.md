@@ -70,8 +70,8 @@ go test ./...
 ./rec53ctl run
 
 # 5. 验证 DNS 应答
-dig @127.0.0.1 -p 5353 example.com
-dig @127.0.0.1 -p 5353 example.com AAAA
+dig @127.0.0.1 -p 5533 example.com
+dig @127.0.0.1 -p 5533 example.com AAAA
 
 # 6. 可选：打开本地运维 TUI
 ./rec53ctl top
@@ -92,7 +92,7 @@ mkdir -p dist && go build -o dist/rec53 ./cmd
 
 ```yaml
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9999"
   log_level: "info"
 
@@ -144,7 +144,7 @@ sudo ./rec53ctl uninstall --purge
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--config` | 必填 | YAML 配置文件 |
-| `-listen` | `127.0.0.1:5353` | DNS 监听地址 |
+| `-listen` | `127.0.0.1:5533` | DNS 监听地址 |
 | `-metric` | `:9999` | 指标地址 |
 | `-log-level` | `info` | `debug`、`info`、`warn`、`error` |
 | `-no-warmup` | `false` | 禁用 NS 预热 |

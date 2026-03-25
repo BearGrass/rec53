@@ -258,7 +258,7 @@ sudo ./rec53ctl upgrade
 
 ```bash
 systemctl status rec53
-dig @127.0.0.1 -p 5353 example.com
+dig @127.0.0.1 -p 5533 example.com
 ```
 
 ## 安装与卸载安全性

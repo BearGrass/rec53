@@ -40,9 +40,9 @@ mkdir -p dist && go build -o dist/rec53 ./cmd
 ## 4. Validate Basic Resolution
 
 ```bash
-dig @127.0.0.1 -p 5353 example.com
-dig @127.0.0.1 -p 5353 example.com AAAA
-dig @127.0.0.1 -p 5353 example.com NS
+dig @127.0.0.1 -p 5533 example.com
+dig @127.0.0.1 -p 5533 example.com AAAA
+dig @127.0.0.1 -p 5533 example.com NS
 ```
 
 What to check:

@@ -138,7 +138,7 @@ Record at least:
 
 - keep the query file fixed: `tools/dnsperf/queries-sample.txt`
 - keep the server config fixed across runs except for the factor under test
-- prefer a dedicated benchmark port such as `192.168.53.1:5353`
+- prefer a dedicated benchmark port such as `192.168.53.1:5533`
 - disable unrelated features unless they are part of the comparison:
   - `warmup.enabled: false`
   - `snapshot.enabled: false`
@@ -150,7 +150,7 @@ Record at least:
 
 ```yaml
 dns:
-  listen: "192.168.53.1:5353"
+  listen: "192.168.53.1:5533"
   metric: "127.0.0.1:9901"
   log_level: "error"
   listeners: 4
@@ -185,12 +185,12 @@ becoming the bottleneck:
 
 ```bash
 # client warmup
-./tools/dnsperf/dnsperf -server 192.168.53.1:5353 \
+./tools/dnsperf/dnsperf -server 192.168.53.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 8 -d 5s -proto udp
 
 # client benchmark: 4 workers, each c=50, total concurrency 200
 for i in 1 2 3 4; do
-  ./tools/dnsperf/dnsperf -server 192.168.53.1:5353 \
+  ./tools/dnsperf/dnsperf -server 192.168.53.1:5533 \
     -f tools/dnsperf/queries-sample.txt -c 50 -d 20s -proto udp \
     > /tmp/rec53-run-$i.out &
 done
@@ -227,11 +227,11 @@ Client-side example:
 ```bash
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
 
-./tools/dnsperf/dnsperf -server 192.168.53.1:5353 \
+./tools/dnsperf/dnsperf -server 192.168.53.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 8 -d 5s -proto udp
 
 for i in 1 2 3 4; do
-  ./tools/dnsperf/dnsperf -server 192.168.53.1:5353 \
+  ./tools/dnsperf/dnsperf -server 192.168.53.1:5533 \
     -f tools/dnsperf/queries-sample.txt -c 50 -d 20s -proto udp \
     > /tmp/rec53-run-$i.out &
 done
@@ -296,7 +296,7 @@ echo -e "concurrency\trun\tqueries\tduration_s\tqps\tp50\tp95\tp99\terrors\ttime
 for c in 64 128 192; do
   for i in 1 2 3; do
     f="/tmp/dnsperf-runs/c${c}-r${i}.txt"
-    tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+    tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
       -f tools/dnsperf/queries-sample.txt -c "$c" -d 20s -proto udp > "$f"
     q=$(awk '/^  Summary/{flag=1; next} flag && /^  Queries:/ {print $2; exit}' "$f")
     d=$(awk '/^  Summary/{flag=1; next} flag && /^  Duration:/ {print $2; exit}' "$f")

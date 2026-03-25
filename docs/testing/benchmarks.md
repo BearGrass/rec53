@@ -77,7 +77,7 @@ Profile capture method:
 
 ```bash
 # 1) Run load (example)
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
 
 # 2) CPU profile (denoised view)
@@ -251,7 +251,7 @@ This section defines the reproducible "limit test" baseline on Intel i7-1165G7
 
 Environment:
 
-- rec53 on `127.0.0.1:5353` with perf config (`warmup=false`, `snapshot=false`,
+- rec53 on `127.0.0.1:5533` with perf config (`warmup=false`, `snapshot=false`,
   `log_level=error`, `pprof=false`)
 - `tools/dnsperf` using `tools/dnsperf/queries-sample.txt` (13 pre-warmed domains)
 - Matrix: `c=64/128/192`, each run `20s`, repeated `3` times
@@ -313,7 +313,7 @@ changes required. Tracked in roadmap v0.4.1.
 ### Multi-Listener Benchmark (listeners=1 vs listeners=4, 2026-03-18)
 
 Same hardware and test setup as above (i7-1165G7, UDP, c=64, 10 s, cache-hit path,
-`tools/dnsperf` with 13-domain sample). rec53 running on `127.0.0.1:5353`.
+`tools/dnsperf` with 13-domain sample). rec53 running on `127.0.0.1:5533`.
 
 | Metric | listeners=1 | listeners=4 | Delta |
 |--------|------------|------------|-------|
@@ -357,14 +357,14 @@ mkdir -p dist && go build -o dist/rec53 ./cmd
 ./dist/rec53 --config ./config.yaml
 
 # Warmup cache
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 4 -n 100 -proto udp
 
 # Run reproducible limit matrix (20s x 3 per level)
 for c in 64 128 192; do
   for i in 1 2 3; do
     echo "=== c=$c run=$i ==="
-    tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+    tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
       -f tools/dnsperf/queries-sample.txt -c $c -d 20s -proto udp
   done
 done
@@ -387,7 +387,7 @@ Script notes:
 For quick daily smoke (non-baseline), a single run is still acceptable:
 
 ```bash
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 64 -d 10s -proto udp
 ```
 
@@ -399,7 +399,7 @@ echo -e "concurrency\trun\tqueries\tduration_s\tqps\tp50\tp95\tp99\terrors\ttime
 for c in 64 128 192; do
   for i in 1 2 3; do
     f="/tmp/dnsperf-runs/c${c}-r${i}.txt"
-    tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+    tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
       -f tools/dnsperf/queries-sample.txt -c "$c" -d 20s -proto udp > "$f"
     q=$(awk '/^  Summary/{flag=1; next} flag && /^  Queries:/ {print $2; exit}' "$f")
     d=$(awk '/^  Summary/{flag=1; next} flag && /^  Duration:/ {print $2; exit}' "$f")
@@ -438,7 +438,7 @@ Legacy one-shot scaling command (kept for reference):
 ```bash
 for c in 32 64 128 256; do
   echo "=== c=$c ==="
-  tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+  tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
     -f tools/dnsperf/queries-sample.txt -c $c -d 10s -proto udp
 done
 ```
@@ -463,7 +463,7 @@ go test -run '^$' -bench 'BenchmarkCacheGetHit|BenchmarkStateMachineCacheHit|Ben
 ### Macro load (`dnsperf`, UDP, c=64, 20s, median of 3 runs)
 
 ```bash
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 64 -d 20s -proto udp
 ```
 
@@ -519,7 +519,7 @@ Question allocation (~24 bytes) is small relative to the remaining Answer/Ns/Ext
 allocations. The alloc _count_ reduction (−1/op at CacheGetHit level) is the
 meaningful result.
 
-### Dual-machine load test (direct cable, port 5353, listeners=1, c=64, 20s × 6)
+### Dual-machine load test (direct cable, port 5533, listeners=1, c=64, 20s × 6)
 
 **Before baseline** (separate session, lower system load):
 
@@ -649,7 +649,7 @@ On a physical NIC with native/driver XDP (`ixgbe`, `mlx5`, `i40e`, etc.):
 
 ### Why the previous v0.6.0 benchmark data was invalid
 
-The v0.6.0 section (now removed) measured loopback with `listen: 127.0.0.1:5353`.
+The v0.6.0 section (now removed) measured loopback with `listen: 127.0.0.1:5533`.
 The BPF program filters `udph->dest == htons(53)`, but `dnsperf` was sending to
 port **5353** — so all packets fell through `XDP_PASS` with 0% cache hits. The
 reported 165K vs 161K QPS difference reflected Go-only overhead, not XDP benefit.

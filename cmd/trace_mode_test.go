@@ -15,7 +15,7 @@ func TestRunTraceModeWritesOrderedTrace(t *testing.T) {
 
 	cfg := &Config{
 		DNS: DNSConfig{
-			Listen:   "127.0.0.1:5353",
+			Listen:   "127.0.0.1:5533",
 			Metric:   ":9999",
 			LogLevel: "error",
 		},

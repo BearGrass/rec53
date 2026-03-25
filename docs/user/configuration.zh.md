@@ -8,7 +8,7 @@
 
 ```yaml
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9999"
   log_level: "info"
 
@@ -22,7 +22,7 @@ warmup:
 
 ```yaml
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9999"
   log_level: "info"
   upstream_timeout: 1500ms

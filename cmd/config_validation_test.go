@@ -18,7 +18,7 @@ func TestValidateConfig(t *testing.T) {
 	}{
 		{
 			name:    "valid config",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"}, Warmup: server.WarmupConfig{Enabled: true, Timeout: 5 * time.Second}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", LogLevel: "info"}, Warmup: server.WarmupConfig{Enabled: true, Timeout: 5 * time.Second}},
 			wantErr: false,
 		},
 		{
@@ -35,7 +35,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name:    "empty metric address",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ""}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ""}, Warmup: server.WarmupConfig{}},
 			wantErr: true,
 			errMsg:  "dns.metric address is required",
 		},
@@ -47,43 +47,43 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name:    "invalid metric port",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":99999"}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":99999"}, Warmup: server.WarmupConfig{}},
 			wantErr: true,
 			errMsg:  "port must be between 1 and 65535",
 		},
 		{
 			name:    "invalid warmup timeout",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"}, Warmup: server.WarmupConfig{Timeout: 50 * time.Millisecond}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"}, Warmup: server.WarmupConfig{Timeout: 50 * time.Millisecond}},
 			wantErr: true,
 			errMsg:  "warmup.timeout must be at least 100ms",
 		},
 		{
 			name:    "valid full address metric",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: "127.0.0.1:9999"}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: "127.0.0.1:9999"}, Warmup: server.WarmupConfig{}},
 			wantErr: false,
 		},
 		{
 			name:    "invalid log level",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "verbose"}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", LogLevel: "verbose"}, Warmup: server.WarmupConfig{}},
 			wantErr: true,
 			errMsg:  "dns.log_level must be one of",
 		},
 		{
 			name:    "invalid expensive request limit mode",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", ExpensiveRequestLimitMode: "shadow"}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", ExpensiveRequestLimitMode: "shadow"}, Warmup: server.WarmupConfig{}},
 			wantErr: true,
 			errMsg:  "dns.expensive_request_limit_mode must be one of",
 		},
 		{
 			name:    "negative expensive request limit",
-			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", ExpensiveRequestLimit: -1}, Warmup: server.WarmupConfig{}},
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", ExpensiveRequestLimit: -1}, Warmup: server.WarmupConfig{}},
 			wantErr: true,
 			errMsg:  "dns.expensive_request_limit must be >= 0",
 		},
 		{
 			name: "pprof enabled with invalid listen address",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", LogLevel: "info"},
 				Debug: DebugConfig{PprofEnabled: true, PprofListen: "bad-addr"},
 			},
 			wantErr: true,
@@ -92,7 +92,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid debug would-refuse observe flag",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999", LogLevel: "info"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", LogLevel: "info"},
 				Debug: DebugConfig{ExpensiveRequestLimitObserveWouldRefuse: true},
 			},
 			wantErr: false,
@@ -101,7 +101,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid hosts entry A",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: "10.0.0.1"}},
 			},
 			wantErr: false,
@@ -109,7 +109,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid hosts entry AAAA",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "AAAA", Value: "::1"}},
 			},
 			wantErr: false,
@@ -117,7 +117,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid hosts entry CNAME",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "alias.local", Type: "CNAME", Value: "real.local"}},
 			},
 			wantErr: false,
@@ -125,7 +125,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "hosts empty name",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "", Type: "A", Value: "10.0.0.1"}},
 			},
 			wantErr: true,
@@ -134,7 +134,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "hosts empty value",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: ""}},
 			},
 			wantErr: true,
@@ -143,7 +143,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "hosts invalid IPv4 for A record",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "A", Value: "not-an-ip"}},
 			},
 			wantErr: true,
@@ -152,7 +152,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "hosts invalid IPv6 for AAAA record",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "AAAA", Value: "not-an-ipv6"}},
 			},
 			wantErr: true,
@@ -161,7 +161,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "hosts unsupported record type",
 			cfg: &Config{
-				DNS:   DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Hosts: []server.HostEntry{{Name: "test.local", Type: "MX", Value: "mail.local"}},
 			},
 			wantErr: true,
@@ -171,7 +171,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid forwarding entry",
 			cfg: &Config{
-				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:        DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{"10.0.0.1:53"}}},
 			},
 			wantErr: false,
@@ -179,7 +179,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "forwarding empty zone",
 			cfg: &Config{
-				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:        DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Forwarding: []server.ForwardZone{{Zone: "", Upstreams: []string{"10.0.0.1:53"}}},
 			},
 			wantErr: true,
@@ -188,7 +188,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "forwarding empty upstreams",
 			cfg: &Config{
-				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:        DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{}}},
 			},
 			wantErr: true,
@@ -197,7 +197,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "forwarding invalid upstream address",
 			cfg: &Config{
-				DNS:        DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS:        DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				Forwarding: []server.ForwardZone{{Zone: "corp.internal", Upstreams: []string{"bad-address"}}},
 			},
 			wantErr: true,
@@ -207,7 +207,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "xdp disabled is valid",
 			cfg: &Config{
-				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				XDP: XDPConfig{Enabled: false},
 			},
 			wantErr: false,
@@ -215,7 +215,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "xdp enabled with interface is valid",
 			cfg: &Config{
-				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				XDP: XDPConfig{Enabled: true, Interface: "eth0"},
 			},
 			wantErr: false,
@@ -223,7 +223,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "xdp enabled without interface is invalid",
 			cfg: &Config{
-				DNS: DNSConfig{Listen: "127.0.0.1:5353", Metric: ":9999"},
+				DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999"},
 				XDP: XDPConfig{Enabled: true, Interface: ""},
 			},
 			wantErr: true,
@@ -262,7 +262,7 @@ func TestLoadConfig(t *testing.T) {
 		configPath := filepath.Join(dir, "config.yaml")
 		content := []byte(`
 dns:
-  listen: "127.0.0.1:5353"
+  listen: "127.0.0.1:5533"
   metric: ":9999"
   log_level: "info"
 warmup:

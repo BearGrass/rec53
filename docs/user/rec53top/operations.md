@@ -47,9 +47,9 @@ Custom target:
 3. Generate traffic.
 
 ```bash
-for i in {1..20}; do dig @127.0.0.1 -p 5353 example.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 github.com >/dev/null; done
-for i in {1..10}; do dig @127.0.0.1 -p 5353 nosuchname1234.example. >/dev/null; done
+for i in {1..20}; do dig @127.0.0.1 -p 5533 example.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 github.com >/dev/null; done
+for i in {1..10}; do dig @127.0.0.1 -p 5533 nosuchname1234.example. >/dev/null; done
 ```
 
 4. Check that traffic, cache, upstream, and state-machine panels start to move.

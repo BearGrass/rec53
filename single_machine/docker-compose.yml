@@ -21,8 +21,8 @@ services:
     volumes:
       - ./log/:/dist/log/
     ports:
-      - 5353:5353
-      - 5353:5353/udp
+      - 5533:5533
+      - 5533:5533/udp
       - 9999:9999/tcp  # for prometheus
     restart: always
     build: ../ # build from Dockerfile

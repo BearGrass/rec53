@@ -64,14 +64,14 @@ go test -run '^$' -bench . -benchmem ./e2e/...
 
 ```bash
 go build -o tools/dnsperf/dnsperf ./tools/dnsperf
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -f tools/dnsperf/queries-sample.txt -c 128 -d 20s -proto udp
 ```
 
 可选的 cache-miss 压测配置：
 
 ```bash
-tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
   -random-prefix example.com -c 32 -d 20s -proto udp
 ```
 
@@ -91,7 +91,7 @@ echo -e "concurrency\trun\tqueries\tduration_s\tqps\tp50\tp95\tp99\terrors\ttime
 for c in 64 128 192; do
   for i in 1 2 3; do
     f="/tmp/dnsperf-runs/c${c}-r${i}.txt"
-    tools/dnsperf/dnsperf -server 127.0.0.1:5353 \
+    tools/dnsperf/dnsperf -server 127.0.0.1:5533 \
       -f tools/dnsperf/queries-sample.txt -c "$c" -d 20s -proto udp > "$f"
     q=$(awk '/^  Summary/{flag=1; next} flag && /^  Queries:/ {print $2; exit}' "$f")
     d=$(awk '/^  Summary/{flag=1; next} flag && /^  Duration:/ {print $2; exit}' "$f")
