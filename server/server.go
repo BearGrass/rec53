@@ -29,8 +29,9 @@ type server struct {
 	tcpSrvs      []*dns.Server
 	wg           sync.WaitGroup
 	errChan      chan error
-	udpReady     chan struct{}      // closed when first UDP listener has started
-	tcpReady     chan struct{}      // closed when first TCP listener has started
+	udpReady     chan struct{} // closed when first UDP listener has started
+	tcpReady     chan struct{} // closed when first TCP listener has started
+	addrMu       sync.RWMutex
 	udpAddr      string             // set once UDP server is ready; safe to read after Run() returns
 	tcpAddr      string             // set once TCP server is ready; safe to read after Run() returns
 	warmupCancel context.CancelFunc // cancels the warmup goroutine; nil if warmup disabled
@@ -253,7 +254,9 @@ func (s *server) Run() <-chan error {
 		udp.NotifyStartedFunc = func() {
 			if udp.PacketConn != nil {
 				udpOnce.Do(func() {
+					s.addrMu.Lock()
 					s.udpAddr = udp.PacketConn.LocalAddr().String()
+					s.addrMu.Unlock()
 					close(s.udpReady)
 				})
 			}
@@ -263,7 +266,9 @@ func (s *server) Run() <-chan error {
 		tcp.NotifyStartedFunc = func() {
 			if tcp.Listener != nil {
 				tcpOnce.Do(func() {
+					s.addrMu.Lock()
 					s.tcpAddr = tcp.Listener.Addr().String()
+					s.addrMu.Unlock()
 					close(s.tcpReady)
 				})
 			}
@@ -470,6 +475,8 @@ func (s *server) Shutdown(ctx context.Context) error {
 // Returns empty string if server is not running.
 // Safe to call immediately after Run() returns.
 func (s *server) UDPAddr() string {
+	s.addrMu.RLock()
+	defer s.addrMu.RUnlock()
 	return s.udpAddr
 }
 
@@ -484,6 +491,8 @@ func (s *server) WaitUntilReady() {
 // Returns empty string if server is not running.
 // Safe to call immediately after Run() returns.
 func (s *server) TCPAddr() string {
+	s.addrMu.RLock()
+	defer s.addrMu.RUnlock()
 	return s.tcpAddr
 }
 

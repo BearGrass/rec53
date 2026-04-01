@@ -48,6 +48,7 @@ scrape_configs:
 - `rec53_snapshot_operations_total` 是否频繁出现 load/save 失败
 - `rec53_upstream_failures_total` 是否被 `timeout` 或 `bad_rcode` 主导
 - `rec53_expensive_request_limit_total{action="refused"}` 是否异常升高
+- `rec53_upstream_gate_events_total{action="saturated"}` 在正常负载下是否持续升高
 - 只有在开启 XDP 时，才解读 `rec53_xdp_status` 和 `rec53_xdp_*`
 
 推荐面板布局见 [Observability Dashboard](./user/observability-dashboard.md)，事故优先排查顺序见 [Operator Checklist](./user/operator-checklist.md)。
@@ -60,6 +61,7 @@ scrape_configs:
 - cache lookup 结果分布，解释延迟和 upstream 压力变化
 - snapshot load/save 结果，解释重启后首批查询质量变化
 - upstream failure 和 winner path，解释 timeout 与尾延迟变化
+- upstream gate 饱和与降级计数，解释 fanout 收缩或压力驱动的 `SERVFAIL`
 - state machine stage/failure 计数，判断变化发生在哪个解析阶段
 - 昂贵请求保护计数，判断 forwarding / iterative 是否被策略拒绝
 - XDP sync/cleanup 指标，解释 fast path 和 Go path 的差异
@@ -87,6 +89,9 @@ increase(rec53_snapshot_operations_total{result="failure"}[15m])
 # upstream timeout 速率
 rate(rec53_upstream_failures_total{reason="timeout"}[5m])
 
+# upstream gate 饱和速率
+rate(rec53_upstream_gate_events_total{action="saturated"}[5m])
+
 # 按昂贵路径区分的策略拒绝速率
 sum by (path) (rate(rec53_expensive_request_limit_total{action="refused"}[5m]))
 
@@ -108,6 +113,9 @@ sum by (rcode) (rate(rec53_upstream_failures_total{reason="bad_rcode"}[5m]))
 
 # Happy Eyeballs 胜出路径分布
 sum by (path) (rate(rec53_upstream_winner_total[5m]))
+
+# upstream gate 降级动作分布
+sum by (action, path) (rate(rec53_upstream_gate_events_total[5m]))
 
 # 最常进入的状态机阶段
 topk(10, increase(rec53_state_machine_stage_total[10m]))
@@ -152,6 +160,9 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 | `rec53_upstream_failures_total` | Counter | `reason`, `rcode` | 两者 | upstream 失败分类，如 `timeout`、`transport_error`、`context_canceled`、`bad_rcode` |
 | `rec53_upstream_fallback_total` | Counter | `result` | 两者 | 备用 upstream fallback 结果，如 `success`、`failure`、`unavailable` |
 | `rec53_upstream_winner_total` | Counter | `path` | 开发 | upstream 竞速的胜出路径，如 `single`、`primary`、`secondary` |
+| `rec53_upstream_gate_events_total` | Counter | `action`, `path` | 两者 | upstream 并发闸门的聚合事件。`action` 为有界值，如 `saturated`、`degraded_single`、`degraded_serial`；`path` 为 `forward`、`iterative`、`happy_eyeballs`、`ns_resolution`、`iterative_retry` 等有界类别。 |
+| `rec53_upstream_gate_inflight` | Gauge | — | 运维 | 当前正在占用的上游外发槽位数。 |
+| `rec53_upstream_gate_limit` | Gauge | — | 运维 | 上游并发闸门的静态配置阈值。 |
 | `rec53_ipv2_p50_latency_ms` | Gauge | `ip` | 两者 | 上游 RTT P50 |
 | `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | 开发 | 上游 RTT P95 |
 | `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | 开发 | 上游 RTT P99 |
@@ -225,4 +236,11 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 - warning 使用稳定的 `[HOT_ZONE]` 前缀
 - 日志在进程内限频，并带 `suppressed=` 计数
 - 会解释 observe mode 进入/退出、候选切换、保护进入/退出，以及昂贵路径拒绝事件
+- 原始域名可以出现在日志里做排障，但不会进入 Prometheus 标签
+
+上游并发闸门还增加了第三组有界 warning 日志：
+
+- warning 使用稳定的 `[UPSTREAM_GATE]` 前缀
+- 日志在进程内限频，并带 `suppressed=` 计数
+- 日志会带有界的 `action`、有界的 `path`、当前 `inflight`、配置的 `limit`，以及 sample `qname`
 - 原始域名可以出现在日志里做排障，但不会进入 Prometheus 标签

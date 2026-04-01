@@ -154,6 +154,25 @@ var (
 		},
 		[]string{"path"},
 	)
+	UpstreamGateEventsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rec53_upstream_gate_events_total",
+			Help: "Upstream concurrency gate events by bounded action and path",
+		},
+		[]string{"action", "path"},
+	)
+	UpstreamGateInFlight = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_upstream_gate_inflight",
+			Help: "Current in-flight upstream work held by the global upstream concurrency gate",
+		},
+	)
+	UpstreamGateLimit = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "rec53_upstream_gate_limit",
+			Help: "Configured limit for the global upstream concurrency gate",
+		},
+	)
 
 	XDPSyncErrorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

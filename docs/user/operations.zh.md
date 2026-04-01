@@ -81,6 +81,7 @@ snapshot restore 也仍在同一个模型内：
 - 端到端延迟
 - 按客户端昂贵路径拒绝
 - nameserver 质量
+- 上游闸门饱和与降级活动
 - 启用 XDP 时的相关计数器
 
 ## 单客户端昂贵请求并发保护
@@ -140,6 +141,25 @@ observe mode 与保护触发刻意保持保守：
 - 同一个候选必须连续命中 `3` 个 observe 窗口才会进入保护
 - 当全局昂贵占用回落到 pre-trigger baseline 的 `1.05x` 以内时退出保护
 
+## 上游并发闸门
+
+`v1.3.3` 新增了一层独立的总上游外发压力保护。
+
+配置方式：
+
+```yaml
+dns:
+  upstream_concurrency_limit: 0
+```
+
+运维上建议这样理解：
+
+- 一个共享的静态闸门同时覆盖 forwarding 外发、iterative 上游查询、Happy Eyeballs fanout，以及 iterative alternate-IP retry
+- `0` 表示使用内置默认阈值：`runtime.NumCPU()`
+- 饱和时优先缩 fanout：Happy Eyeballs 先降级成单路，多个 NS 并发解析先降级成单 worker
+- 如果第一层降级后仍拿不到 outbound 槽位，请求返回 `SERVFAIL`
+- 这层边界只解释“上游外发压力”，不是 `v1.3.4` 的全局请求保险丝
+
 ### Prometheus 抓取示例
 
 ```yaml
@@ -198,6 +218,7 @@ readinessProbe:
 - SERVFAIL 比例
 - p99 延迟
 - `rec53_expensive_request_limit_total` 的策略压力
+- `rec53_upstream_gate_events_total` 的饱和与降级趋势
 - `rec53_ipv2_p50_latency_ms` 中退化的上游 IP
 - 仅在明确启用 XDP 时关注 XDP 指标
 

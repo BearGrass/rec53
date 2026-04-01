@@ -81,6 +81,12 @@ func TestValidateConfig(t *testing.T) {
 			errMsg:  "dns.expensive_request_limit must be >= 0",
 		},
 		{
+			name:    "negative upstream concurrency limit",
+			cfg:     &Config{DNS: DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", UpstreamConcurrencyLimit: -1}, Warmup: server.WarmupConfig{}},
+			wantErr: true,
+			errMsg:  "dns.upstream_concurrency_limit must be >= 0",
+		},
+		{
 			name: "pprof enabled with invalid listen address",
 			cfg: &Config{
 				DNS:   DNSConfig{Listen: "127.0.0.1:5533", Metric: ":9999", LogLevel: "info"},

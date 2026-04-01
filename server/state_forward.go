@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"rec53/monitor"
@@ -91,8 +92,12 @@ func (s *forwardLookupState) handle(request *dns.Msg, response *dns.Msg) (int, e
 	for _, upstream := range matched.Upstreams {
 		monitor.Rec53Log.Debugf("[FORWARD_LOOKUP] trying upstream %s for %s", upstream, qname)
 
-		resp, _, err := client.ExchangeContext(s.ctx, fwdQuery, upstream)
+		resp, _, err := exchangeWithUpstreamGate(s.ctx, client, fwdQuery, upstream, upstreamGatePathForward)
 		if err != nil {
+			if errors.Is(err, errUpstreamConcurrencyGateSaturated) {
+				monitor.Rec53Log.Warnf("[FORWARD_LOOKUP] upstream gate saturated for %s (zone %s)", qname, matched.Zone)
+				return FORWARD_LOOKUP_SERVFAIL, nil
+			}
 			monitor.Rec53Log.Debugf("[FORWARD_LOOKUP] upstream %s failed: %v", upstream, err)
 			lastErr = err
 			continue

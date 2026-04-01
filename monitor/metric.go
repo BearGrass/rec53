@@ -69,6 +69,18 @@ func (m *Metric) UpstreamWinnerAdd(path string) {
 	UpstreamWinnerTotal.WithLabelValues(path).Inc()
 }
 
+func (m *Metric) UpstreamGateEventAdd(action, path string) {
+	UpstreamGateEventsTotal.WithLabelValues(action, path).Inc()
+}
+
+func (m *Metric) UpstreamGateInFlightSet(value int) {
+	UpstreamGateInFlight.Set(float64(value))
+}
+
+func (m *Metric) UpstreamGateLimitSet(value int) {
+	UpstreamGateLimit.Set(float64(value))
+}
+
 func (m *Metric) XDPSyncErrorAdd(reason string) {
 	XDPSyncErrorsTotal.WithLabelValues(reason).Inc()
 }
@@ -151,6 +163,9 @@ func (m *Metric) Register() {
 	m.reg.MustRegister(UpstreamFailuresTotal)
 	m.reg.MustRegister(UpstreamFallbackTotal)
 	m.reg.MustRegister(UpstreamWinnerTotal)
+	m.reg.MustRegister(UpstreamGateEventsTotal)
+	m.reg.MustRegister(UpstreamGateInFlight)
+	m.reg.MustRegister(UpstreamGateLimit)
 	m.reg.MustRegister(XDPSyncErrorsTotal)
 	m.reg.MustRegister(XDPCleanupDeletedTotal)
 	m.reg.MustRegister(XDPEntries)
@@ -222,7 +237,12 @@ func ShutdownMetric(ctx context.Context) error {
 // tests. It does not register any Prometheus collectors or bind an HTTP
 // listener, so it is safe to call from TestMain or individual test functions
 // without causing duplicate-registration panics.
+// This function is idempotent: if Rec53Metric is already initialized, it does
+// nothing. This allows calling it multiple times across different test functions
+// or test packages without resetting shared state.
 // Only use in tests.
 func InitMetricForTest() {
-	Rec53Metric = &Metric{}
+	if Rec53Metric == nil {
+		Rec53Metric = &Metric{}
+	}
 }

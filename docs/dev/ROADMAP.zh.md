@@ -20,6 +20,8 @@
 | dev | 2026-03 | Hosts 本地权威、Forwarding 转发规则、rec53ctl 运维脚本、/dev/stderr 日志 |
 | dev | 2026-03 | Graceful shutdown、综合测试套件、E2E 测试框架 |
 | dev | 2026-03 | IP 质量追踪 + 预取、Prometheus 指标、Docker Compose 部署 |
+| dev | 2026-03 | 单 IP / per-client 昂贵请求保护与公平性 |
+| dev | 2026-03 | 单热点 zone / 热点域名入口保护 |
 
 ## 当前版本：dev
 
@@ -33,6 +35,8 @@
 - EDNS0 支持（4096 字节缓冲区）
 - UDP 截断响应（TC 标志）
 - 优雅关闭（5 秒超时）
+- 单 IP / per-client 昂贵请求保护
+- 单热点 zone / 热点域名入口保护
 
 ### IP 质量与上游选择
 

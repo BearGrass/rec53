@@ -68,6 +68,23 @@ type happyEyeballsResult struct {
 	err      error
 }
 
+func exchangeWithUpstreamGate(ctx context.Context, client *dns.Client, query *dns.Msg, target string, path upstreamGatePath) (*dns.Msg, time.Duration, error) {
+	qname := ""
+	if query != nil && len(query.Question) > 0 {
+		qname = query.Question[0].Name
+	}
+	if !globalUpstreamGate.tryAcquire(path, qname) {
+		return nil, 0, errUpstreamConcurrencyGateSaturated
+	}
+	defer globalUpstreamGate.release()
+	return client.ExchangeContext(ctx, query, target)
+}
+
+func exchangeWithHeldUpstreamGate(ctx context.Context, client *dns.Client, query *dns.Msg, target string) (*dns.Msg, time.Duration, error) {
+	defer globalUpstreamGate.release()
+	return client.ExchangeContext(ctx, query, target)
+}
+
 func classifyUpstreamError(err error) string {
 	if err == nil {
 		return "none"
@@ -105,18 +122,25 @@ func newDNSClient() *dns.Client {
 // If secondAddr is empty, falls back to a single query to bestAddr.
 // On failure the losing IP's failure is recorded in the IP pool.
 func queryHappyEyeballs(ctx context.Context, query *dns.Msg, bestAddr, secondAddr, port string) (*happyEyeballsResult, error) {
+	qname := ""
+	if query != nil && len(query.Question) > 0 {
+		qname = query.Question[0].Name
+	}
+
 	// Single-path fast lane — no second address available.
 	if secondAddr == "" {
 		monitor.Rec53Log.Debugf("[ITER] Sending query to %s:%s (no second IP)", bestAddr, port)
-		resp, rtt, err := newDNSClient().ExchangeContext(ctx, query, bestAddr+":"+port)
+		resp, rtt, err := exchangeWithUpstreamGate(ctx, newDNSClient(), query, bestAddr+":"+port, upstreamGatePathIterative)
 		if err != nil {
 			monitor.Rec53Log.Debugf("[ITER] Query to %s failed: %v", bestAddr, err)
-			if monitor.Rec53Metric != nil {
+			if monitor.Rec53Metric != nil && !errors.Is(err, errUpstreamConcurrencyGateSaturated) {
 				monitor.Rec53Metric.UpstreamFailureAdd(classifyUpstreamError(err), "NONE")
 			}
-			iqv2 := globalIPPool.GetIPQualityV2(bestAddr)
-			if iqv2 != nil {
-				iqv2.RecordFailure()
+			if !errors.Is(err, errUpstreamConcurrencyGateSaturated) {
+				iqv2 := globalIPPool.GetIPQualityV2(bestAddr)
+				if iqv2 != nil {
+					iqv2.RecordFailure()
+				}
 			}
 			return nil, err
 		}
@@ -124,6 +148,18 @@ func queryHappyEyeballs(ctx context.Context, query *dns.Msg, bestAddr, secondAdd
 			monitor.Rec53Metric.UpstreamWinnerAdd("single")
 		}
 		return &happyEyeballsResult{addr: bestAddr, response: resp, rtt: rtt}, nil
+	}
+	if globalUpstreamGate.shouldDegradeFanout() {
+		globalUpstreamGate.recordDegraded(upstreamGatePathHappyEyeballs, "degraded_single", qname)
+		return queryHappyEyeballs(ctx, query, bestAddr, "", port)
+	}
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathIterative, qname) {
+		return nil, errUpstreamConcurrencyGateSaturated
+	}
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathHappyEyeballs, qname) {
+		globalUpstreamGate.release()
+		globalUpstreamGate.recordDegraded(upstreamGatePathHappyEyeballs, "degraded_single", qname)
+		return queryHappyEyeballs(ctx, query, bestAddr, "", port)
 	}
 
 	// Two-path Happy Eyeballs: race bestAddr vs secondAddr.
@@ -139,7 +175,7 @@ func queryHappyEyeballs(ctx context.Context, query *dns.Msg, bestAddr, secondAdd
 	// and its own copy of the query message (ExchangeContext mutates msg.Id).
 	launch := func(addr string, q *dns.Msg) {
 		monitor.Rec53Log.Debugf("[ITER] Happy Eyeballs: sending query to %s:%s", addr, port)
-		resp, rtt, err := newDNSClient().ExchangeContext(raceCtx, q, addr+":"+port)
+		resp, rtt, err := exchangeWithHeldUpstreamGate(raceCtx, newDNSClient(), q, addr+":"+port)
 		resultCh <- &happyEyeballsResult{addr: addr, response: resp, rtt: rtt, err: err}
 	}
 
@@ -290,7 +326,12 @@ func resolveNSIPsConcurrently(ctx context.Context, nsNames []string) []string {
 	// Limit concurrency with semaphore pattern
 	// NOTE: do NOT close(semaphore) here. The channel is GC'd when all goroutines
 	// have released it. Closing while goroutines may still be sending causes panic.
-	semaphore := make(chan struct{}, maxConcurrentNSQueries)
+	workerLimit := maxConcurrentNSQueries
+	if len(nsNames) > 1 && globalUpstreamGate.shouldDegradeFanout() {
+		workerLimit = 1
+		globalUpstreamGate.recordDegraded(upstreamGatePathNSResolution, "degraded_serial", nsNames[0])
+	}
+	semaphore := make(chan struct{}, workerLimit)
 
 	// Launch goroutines for each NS name
 	for _, nsName := range nsNames {
@@ -507,10 +548,11 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 			return QUERY_UPSTREAM_NO_ERROR, nil
 		case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeFormatError, dns.RcodeNotImplemented:
 			// B-013: Bad Rcodes (SERVFAIL, REFUSED, FORMERR, NOTIMPL) should trigger server switch
+			badRcode := dns.RcodeToString[newResponse.Rcode]
 			monitor.Rec53Log.Debugf("[ITER] Bad Rcode %s from %s, marking as failed and retrying with alternate IP",
-				dns.RcodeToString[newResponse.Rcode], theBestIP)
+				badRcode, theBestIP)
 			if monitor.Rec53Metric != nil {
-				monitor.Rec53Metric.UpstreamFailureAdd("bad_rcode", dns.RcodeToString[newResponse.Rcode])
+				monitor.Rec53Metric.UpstreamFailureAdd("bad_rcode", badRcode)
 			}
 
 			// Record failure in IP quality tracking
@@ -541,20 +583,22 @@ func (s *queryUpstreamState) handle(request *dns.Msg, response *dns.Msg) (int, e
 
 			// Retry query with alternate IP (single query — race is over)
 			var altRtt time.Duration
-			newResponse, altRtt, err = newDNSClient().ExchangeContext(s.ctx, newQuery, altAddr+":"+port)
+			newResponse, altRtt, err = exchangeWithUpstreamGate(s.ctx, newDNSClient(), newQuery, altAddr+":"+port, upstreamGatePathIterativeRetry)
 			if err != nil {
 				monitor.Rec53Log.Debugf("[ITER] Query to alternate IP %s failed: %v", altAddr, err)
-				if monitor.Rec53Metric != nil {
+				if monitor.Rec53Metric != nil && !errors.Is(err, errUpstreamConcurrencyGateSaturated) {
 					monitor.Rec53Metric.UpstreamFallbackAdd("failure")
 					monitor.Rec53Metric.UpstreamFailureAdd(classifyUpstreamError(err), "NONE")
 				}
 				// Record failure for alternate IP
-				iqv2 = globalIPPool.GetIPQualityV2(altAddr)
-				if iqv2 != nil {
-					iqv2.RecordFailure()
+				if !errors.Is(err, errUpstreamConcurrencyGateSaturated) {
+					iqv2 = globalIPPool.GetIPQualityV2(altAddr)
+					if iqv2 != nil {
+						iqv2.RecordFailure()
+					}
 				}
 				return QUERY_UPSTREAM_COMMON_ERROR, fmt.Errorf("bad response rcode: %s, alternate IP also failed: %v",
-					dns.RcodeToString[newResponse.Rcode], err)
+					badRcode, err)
 			}
 
 			// Alternate IP succeeded, update tracking

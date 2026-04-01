@@ -48,6 +48,7 @@ For first deployment and day-2 operations, start here:
 - `rec53_snapshot_operations_total` does not show repeated load or save failures
 - `rec53_upstream_failures_total` is not dominated by `timeout` or `bad_rcode`
 - `rec53_expensive_request_limit_total{action="refused"}` is not rising unexpectedly for one deployment slice
+- `rec53_upstream_gate_events_total{action="saturated"}` is not rising persistently during normal load
 - `rec53_xdp_status` and `rec53_xdp_*` are only interpreted when XDP is enabled
 
 Use [Observability Dashboard](./user/observability-dashboard.md) for the recommended panel layout and [Operator Checklist](./user/operator-checklist.md) for incident-first lookup order.
@@ -60,6 +61,7 @@ Use these views when a code change, performance result, or behavior regression n
 - cache lookup outcome mix to explain latency or upstream pressure changes
 - snapshot load and save outcomes to explain restart quality differences
 - upstream failure reasons and winner paths to explain timeout or tail-latency changes
+- upstream gate saturation and degradation counters to explain fanout shrink or pressure-driven `SERVFAIL`
 - state-machine stage and failure counters to see which resolution phase changed
 - expensive-request policy pressure counters to see whether forwarding or iterative work is being refused
 - XDP sync and cleanup metrics to explain Go path vs fast-path divergence
@@ -87,6 +89,9 @@ increase(rec53_snapshot_operations_total{result="failure"}[15m])
 # Upstream timeout rate
 rate(rec53_upstream_failures_total{reason="timeout"}[5m])
 
+# Upstream gate saturation rate
+rate(rec53_upstream_gate_events_total{action="saturated"}[5m])
+
 # Per-client expensive-request refusals by expensive path
 sum by (path) (rate(rec53_expensive_request_limit_total{action="refused"}[5m]))
 
@@ -108,6 +113,9 @@ sum by (rcode) (rate(rec53_upstream_failures_total{reason="bad_rcode"}[5m]))
 
 # Happy Eyeballs winner path distribution
 sum by (path) (rate(rec53_upstream_winner_total[5m]))
+
+# Upstream gate degradation actions by path
+sum by (action, path) (rate(rec53_upstream_gate_events_total[5m]))
 
 # State-machine stages most frequently entered
 topk(10, increase(rec53_state_machine_stage_total[10m]))
@@ -155,6 +163,9 @@ sum by (path) (increase(rec53_expensive_request_limit_total{action="would_refuse
 | `rec53_upstream_failures_total` | Counter | `reason`, `rcode` | Both | Upstream failures classified by bounded reason such as `timeout`, `transport_error`, `context_canceled`, or `bad_rcode` |
 | `rec53_upstream_fallback_total` | Counter | `result` | Both | Alternate-upstream fallback outcomes such as `success`, `failure`, or `unavailable` |
 | `rec53_upstream_winner_total` | Counter | `path` | Developer | Winning path in upstream selection such as `single`, `primary`, or `secondary` |
+| `rec53_upstream_gate_events_total` | Counter | `action`, `path` | Both | Upstream gate pressure events. `action` is bounded to values such as `saturated`, `degraded_single`, or `degraded_serial`; `path` is bounded to upstream work classes such as `forward`, `iterative`, `happy_eyeballs`, `ns_resolution`, or `iterative_retry`. |
+| `rec53_upstream_gate_inflight` | Gauge | — | Operator | Current number of outbound upstream slots in use. |
+| `rec53_upstream_gate_limit` | Gauge | — | Operator | Configured static limit for the upstream concurrency gate. |
 | `rec53_ipv2_p50_latency_ms` | Gauge | `ip` | Both | Median nameserver RTT |
 | `rec53_ipv2_p95_latency_ms` | Gauge | `ip` | Developer | 95th-percentile nameserver RTT |
 | `rec53_ipv2_p99_latency_ms` | Gauge | `ip` | Developer | 99th-percentile nameserver RTT |
@@ -244,6 +255,13 @@ Hot-zone protection adds a second bounded warning stream:
 - warnings use the stable `[HOT_ZONE]` prefix
 - logs are rate-limited in-process and include `suppressed=` counts
 - logs explain observe-mode entry/exit, candidate changes, protection entry/exit, and expensive-path refusals
+- raw domain names can appear in logs for diagnosis, but not as Prometheus labels
+
+Upstream concurrency protection adds a third bounded warning stream:
+
+- warnings use the stable `[UPSTREAM_GATE]` prefix
+- logs are rate-limited in-process and include `suppressed=` counts
+- logs include the bounded `action`, bounded `path`, current `inflight`, configured `limit`, and a sample `qname`
 - raw domain names can appear in logs for diagnosis, but not as Prometheus labels
 
 ## Label Stability And Compatibility Notes

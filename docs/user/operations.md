@@ -97,6 +97,7 @@ Use metrics to watch:
 - snapshot restore/save behavior
 - upstream failure reasons and fallback activity
 - nameserver quality
+- upstream gate saturation and degradation activity
 - XDP counters when XDP is enabled
 
 ## Per-Client Expensive Request Protection
@@ -155,6 +156,25 @@ Observe mode and protection are intentionally conservative:
 - observe mode requires `avg_expensive_concurrency >= 0.75 * NumCPU()` and host CPU `>= 70%`
 - the same candidate must persist for `3` consecutive observe windows before protection starts
 - protection exits after global expensive occupancy falls back to within `1.05x` of the pre-trigger baseline
+
+## Upstream Concurrency Gate
+
+`v1.3.3` adds a separate protection layer for total outbound upstream pressure.
+
+Configuration:
+
+```yaml
+dns:
+  upstream_concurrency_limit: 0
+```
+
+Operational meaning:
+
+- one shared static gate covers forwarding sends, iterative upstream sends, Happy Eyeballs fanout, and iterative alternate-IP retry
+- `0` uses the built-in default limit: `runtime.NumCPU()`
+- saturation first shrinks fanout where possible: Happy Eyeballs degrades to single-path and multi-NS resolution degrades to one worker
+- if no outbound slot is available even after the first degradation step, the request returns `SERVFAIL`
+- this boundary is intentionally about outbound upstream pressure only; it is not the `v1.3.4` global request fuse
 
 ### Prometheus Scrape Setup
 
@@ -223,6 +243,7 @@ For first deployments, focus on:
 - policy pressure from `rec53_expensive_request_limit_total`
 - snapshot load/save outcomes from `rec53_snapshot_operations_total`
 - upstream timeout and bad-rcode trends from `rec53_upstream_failures_total`
+- upstream gate saturation and degradation trends from `rec53_upstream_gate_events_total`
 - degraded upstream IPs from `rec53_ipv2_p50_latency_ms`
 - XDP counters only when XDP is explicitly enabled
 

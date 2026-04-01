@@ -65,6 +65,7 @@ type DNSConfig struct {
 	Metric                    string        `yaml:"metric"`
 	LogLevel                  string        `yaml:"log_level"`
 	UpstreamTimeout           time.Duration `yaml:"upstream_timeout"`
+	UpstreamConcurrencyLimit  int           `yaml:"upstream_concurrency_limit"`
 	ExpensiveRequestLimitMode string        `yaml:"expensive_request_limit_mode"`
 	ExpensiveRequestLimit     int           `yaml:"expensive_request_limit"`
 	HotZoneBaseSuffixes       []string      `yaml:"hot_zone_base_suffixes"`
@@ -197,6 +198,9 @@ func validateConfig(cfg *Config) error {
 	// Validate upstream timeout: if set, must be at least 100ms
 	if cfg.DNS.UpstreamTimeout > 0 && cfg.DNS.UpstreamTimeout < 100*time.Millisecond {
 		return fmt.Errorf("dns.upstream_timeout must be at least 100ms, got %v", cfg.DNS.UpstreamTimeout)
+	}
+	if cfg.DNS.UpstreamConcurrencyLimit < 0 {
+		return fmt.Errorf("dns.upstream_concurrency_limit must be >= 0, got %d", cfg.DNS.UpstreamConcurrencyLimit)
 	}
 
 	if cfg.DNS.ExpensiveRequestLimitMode != "" &&
@@ -376,6 +380,7 @@ func main() {
 	if cfg.DNS.UpstreamTimeout > 0 {
 		server.SetUpstreamTimeout(cfg.DNS.UpstreamTimeout)
 	}
+	server.SetUpstreamConcurrencyLimit(cfg.DNS.UpstreamConcurrencyLimit)
 	limitCfg := server.ExpensiveRequestLimitConfig{
 		Mode:                cfg.DNS.ExpensiveRequestLimitMode,
 		Limit:               cfg.DNS.ExpensiveRequestLimit,

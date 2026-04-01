@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"rec53/monitor"
+
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestForwardLookupState_NilInput(t *testing.T) {
@@ -284,6 +287,42 @@ func TestForwardLookupState_GetCurrentState(t *testing.T) {
 	state := newForwardLookupState(new(dns.Msg), new(dns.Msg), context.Background())
 	if state.getCurrentState() != FORWARD_LOOKUP {
 		t.Errorf("expected FORWARD_LOOKUP (%d), got %d", FORWARD_LOOKUP, state.getCurrentState())
+	}
+}
+
+func TestForwardLookupState_ServfailWhenUpstreamGateSaturated(t *testing.T) {
+	if monitor.Rec53Metric == nil {
+		monitor.InitMetricForTest()
+	}
+	resetUpstreamConcurrencyGateForTest(1)
+	t.Cleanup(func() { resetUpstreamConcurrencyGateForTest(0) })
+
+	saved := globalHostsForward.Load()
+	defer setSnapshotForTest(saved)
+
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathIterative, "busy.example.") {
+		t.Fatal("pre-acquire should succeed")
+	}
+	defer globalUpstreamGate.release()
+
+	zones := sortForwardZones([]ForwardZone{{Zone: "busy.example.", Upstreams: []string{"127.0.0.1:5300"}}})
+	setSnapshotForTest(&hostsForwardSnapshot{forwardZones: zones})
+
+	req := new(dns.Msg)
+	req.SetQuestion("a.busy.example.", dns.TypeA)
+	resp := new(dns.Msg)
+	resp.SetReply(req)
+
+	state := newForwardLookupState(req, resp, context.Background())
+	ret, err := state.handle(req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ret != FORWARD_LOOKUP_SERVFAIL {
+		t.Fatalf("ret = %d, want %d", ret, FORWARD_LOOKUP_SERVFAIL)
+	}
+	if got := testutil.ToFloat64(monitor.UpstreamGateEventsTotal.WithLabelValues("saturated", "forward")); got != 1 {
+		t.Fatalf("saturated forward events = %f, want 1", got)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"rec53/utils"
 
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
 )
 
@@ -19,6 +20,116 @@ import (
 func init() {
 	// Initialize no-op logger for tests
 	monitor.Rec53Log = zap.NewNop().Sugar()
+}
+
+func TestUpstreamConcurrencyGateTryAcquireRelease(t *testing.T) {
+	if monitor.Rec53Metric == nil {
+		monitor.InitMetricForTest()
+	}
+	resetUpstreamConcurrencyGateForTest(1)
+	t.Cleanup(func() { resetUpstreamConcurrencyGateForTest(0) })
+
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathForward, "example.com.") {
+		t.Fatal("first acquire should succeed")
+	}
+	if got := testutil.ToFloat64(monitor.UpstreamGateInFlight); got != 1 {
+		t.Fatalf("inflight = %f, want 1", got)
+	}
+	if globalUpstreamGate.tryAcquire(upstreamGatePathIterative, "example.com.") {
+		t.Fatal("second acquire should be refused while slot is held")
+	}
+	if got := testutil.ToFloat64(monitor.UpstreamGateEventsTotal.WithLabelValues("saturated", "iterative")); got != 1 {
+		t.Fatalf("saturated iterative events = %f, want 1", got)
+	}
+	globalUpstreamGate.release()
+	if got := testutil.ToFloat64(monitor.UpstreamGateInFlight); got != 0 {
+		t.Fatalf("inflight after release = %f, want 0", got)
+	}
+}
+
+func TestQueryHappyEyeballsDegradesToSingleWhenGateNearLimit(t *testing.T) {
+	if monitor.Rec53Metric == nil {
+		monitor.InitMetricForTest()
+	}
+	resetUpstreamConcurrencyGateForTest(2)
+	t.Cleanup(func() { resetUpstreamConcurrencyGateForTest(0) })
+
+	resp := new(dns.Msg)
+	resp.Rcode = dns.RcodeSuccess
+	resp.Answer = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("1.2.3.4"),
+		},
+	}
+	port := startSimpleMockDNS(t, resp)
+	SetIterPort(port)
+	defer ResetIterPort()
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathForward, "occupy-1") {
+		t.Fatal("first pre-acquire should succeed")
+	}
+	defer globalUpstreamGate.release()
+
+	result, err := queryHappyEyeballs(context.Background(), req, "127.0.0.1", "127.0.0.2", port)
+	if err != nil {
+		t.Fatalf("queryHappyEyeballs() error = %v", err)
+	}
+	if result == nil || result.addr != "127.0.0.1" {
+		t.Fatalf("winner = %#v, want primary single-path success", result)
+	}
+	if got := testutil.ToFloat64(monitor.UpstreamGateEventsTotal.WithLabelValues("degraded_single", "happy_eyeballs")); got != 1 {
+		t.Fatalf("degraded_single happy_eyeballs events = %f, want 1", got)
+	}
+}
+
+func TestResolveNSIPsConcurrentlyDegradesToSerialWorker(t *testing.T) {
+	if monitor.Rec53Metric == nil {
+		monitor.InitMetricForTest()
+	}
+	resetUpstreamConcurrencyGateForTest(2)
+	t.Cleanup(func() { resetUpstreamConcurrencyGateForTest(0) })
+
+	startWarmupTestMockDNS(t)
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathForward, "occupy-1") {
+		t.Fatal("pre-acquire should succeed")
+	}
+	defer globalUpstreamGate.release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = resolveNSIPsConcurrently(ctx, []string{"ns1.example.com.", "ns2.example.com."})
+
+	if got := testutil.ToFloat64(monitor.UpstreamGateEventsTotal.WithLabelValues("degraded_serial", "ns_resolution")); got != 1 {
+		t.Fatalf("degraded_serial ns_resolution events = %f, want 1", got)
+	}
+}
+
+func TestQueryHappyEyeballsReturnsGateSaturatedWhenNoSlotAvailable(t *testing.T) {
+	if monitor.Rec53Metric == nil {
+		monitor.InitMetricForTest()
+	}
+	resetUpstreamConcurrencyGateForTest(1)
+	t.Cleanup(func() { resetUpstreamConcurrencyGateForTest(0) })
+
+	if !globalUpstreamGate.tryAcquire(upstreamGatePathForward, "occupy-all") {
+		t.Fatal("pre-acquire should succeed")
+	}
+	defer globalUpstreamGate.release()
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+
+	_, err := queryHappyEyeballs(context.Background(), req, "127.0.0.1", "", "53")
+	if err == nil {
+		t.Fatal("expected saturated error")
+	}
+	if err != errUpstreamConcurrencyGateSaturated {
+		t.Fatalf("err = %v, want %v", err, errUpstreamConcurrencyGateSaturated)
+	}
 }
 
 // =============================================================================
@@ -63,7 +174,7 @@ type MockDNSServer struct {
 // NewMockDNSServer creates a new mock DNS server
 func NewMockDNSServer(protocol string, handler *MockDNSHandler) (*MockDNSServer, error) {
 	var server *dns.Server
-	var addr string
+	started := make(chan struct{})
 
 	if protocol == "tcp" {
 		server = &dns.Server{
@@ -78,17 +189,21 @@ func NewMockDNSServer(protocol string, handler *MockDNSHandler) (*MockDNSServer,
 	}
 
 	server.Handler = handler
+	server.NotifyStartedFunc = func() { close(started) }
 
 	// Start server in goroutine
 	go func() {
-		server.ListenAndServe()
+		_ = server.ListenAndServe()
 	}()
 
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
+	<-started
 
-	// Get actual address
-	addr = server.PacketConn.LocalAddr().String()
+	addr := ""
+	if server.PacketConn != nil {
+		addr = server.PacketConn.LocalAddr().String()
+	} else if server.Listener != nil {
+		addr = server.Listener.Addr().String()
+	}
 
 	return &MockDNSServer{
 		Server:   server,

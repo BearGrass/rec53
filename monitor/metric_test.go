@@ -35,6 +35,9 @@ func unregisterMetrics() {
 	prometheus.Unregister(UpstreamFailuresTotal)
 	prometheus.Unregister(UpstreamFallbackTotal)
 	prometheus.Unregister(UpstreamWinnerTotal)
+	prometheus.Unregister(UpstreamGateEventsTotal)
+	prometheus.Unregister(UpstreamGateInFlight)
+	prometheus.Unregister(UpstreamGateLimit)
 	prometheus.Unregister(XDPSyncErrorsTotal)
 	prometheus.Unregister(XDPCleanupDeletedTotal)
 	prometheus.Unregister(XDPEntries)
@@ -201,6 +204,9 @@ func TestMetric_RuntimeObservabilityHelpers(t *testing.T) {
 	m.UpstreamFailureAdd("timeout", "NONE")
 	m.UpstreamFallbackAdd("success")
 	m.UpstreamWinnerAdd("primary")
+	m.UpstreamGateEventAdd("degraded_single", "happy_eyeballs")
+	m.UpstreamGateInFlightSet(2)
+	m.UpstreamGateLimitSet(8)
 	m.XDPSyncErrorAdd("update")
 	m.XDPCleanupDeletedAdd(4)
 	m.XDPEntriesSet(11)
@@ -231,6 +237,15 @@ func TestMetric_RuntimeObservabilityHelpers(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(UpstreamWinnerTotal.WithLabelValues("primary")); got != 1 {
 		t.Fatalf("UpstreamWinnerTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(UpstreamGateEventsTotal.WithLabelValues("degraded_single", "happy_eyeballs")); got != 1 {
+		t.Fatalf("UpstreamGateEventsTotal = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(UpstreamGateInFlight); got != 2 {
+		t.Fatalf("UpstreamGateInFlight = %f, want 2", got)
+	}
+	if got := testutil.ToFloat64(UpstreamGateLimit); got != 8 {
+		t.Fatalf("UpstreamGateLimit = %f, want 8", got)
 	}
 	if got := testutil.ToFloat64(XDPSyncErrorsTotal.WithLabelValues("update")); got != 1 {
 		t.Fatalf("XDPSyncErrorsTotal = %f, want 1", got)
